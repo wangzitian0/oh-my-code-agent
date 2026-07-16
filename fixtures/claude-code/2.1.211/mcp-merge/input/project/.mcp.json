@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "shared-tools": {
+      "command": "./scripts/run-shared-tools.sh",
+      "args": ["--project-mode"]
+    },
+    "project-only-server": {
+      "command": "npx",
+      "args": ["-y", "@example/project-only-server"]
+    }
+  }
+}

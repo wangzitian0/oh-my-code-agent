@@ -1,0 +1,27 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "FixtureExpectedEffective",
+  "host": {"id": "claude-code", "version": "2.1.211"},
+  "concept": "skill",
+  "entries": [
+    {
+      "logicalId": "deploy",
+      "sources": [
+        {"scope": "user", "path": "claude-config/skills/deploy/SKILL.md", "disposition": "AVAILABLE"},
+        {"scope": "workspace", "path": "project/.claude/skills/deploy/SKILL.md", "disposition": "AVAILABLE"}
+      ],
+      "mergeOperator": "REPLACE",
+      "selectedSource": "UNKNOWN",
+      "ignoredSources": [],
+      "guarantee": "OBSERVED",
+      "evidenceLevel": "E1",
+      "confirmed": false,
+      "documentedClaim": {
+        "statement": "Same-name: enterprise > personal > project > bundled. Plugin skills are namespaced. Nested variants remain directory-qualified.",
+        "citation": "docs/ontology/README.md §6.1 (Claude Code Skills row), citing https://code.claude.com/docs/en/skills",
+        "evidenceLevel": "E1"
+      },
+      "reason": "docs/ontology/README.md §6.1 documents a specific, ordered precedence chain for this exact collision -- personal (user) over project -- citing official docs. That IS existing, sourced evidence (tier 2 in docs/knowledge/README.md §6's evidence priority), but it is a claim this PR-06 qualification pass did not itself behaviorally confirm: no safe non-interactive path exists to dump Claude Code's resolved skill catalog without a real session (claude -p executes a real model turn and is excluded by the safety boundary; --safe-mode disables customizations rather than reporting on them). Per issue #10's explicit instruction not to let 'cover these three cases' pressure produce a guessed winner, selectedSource is recorded UNKNOWN and the documented claim is kept in the separate documentedClaim field rather than promoted to selectedSource. mergeOperator REPLACE is this fixture's best-fit mapping of the documented 'X > Y > Z > W' precedence chain onto docs/ontology/README.md §3.1's closed operator vocabulary (a strict override chain, not a namespace-preserving coexistence like Codex's documented Skill behavior) -- that mapping is itself unconfirmed, not an additional fact."
+    }
+  ]
+}

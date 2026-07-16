@@ -1,0 +1,27 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "FixtureExpectedEffective",
+  "host": {"id": "claude-code", "version": "2.1.211"},
+  "concept": "instruction",
+  "entries": [
+    {
+      "logicalId": "claude-code.instructions.user-vs-project",
+      "sources": [
+        {"scope": "user", "path": "claude-config/CLAUDE.md", "disposition": "ACTIVE"},
+        {"scope": "workspace", "path": "project/CLAUDE.md", "disposition": "ACTIVE"}
+      ],
+      "mergeOperator": "CONCAT_ORDERED",
+      "selectedSource": "UNKNOWN",
+      "ignoredSources": [],
+      "guarantee": "ADVISORY",
+      "evidenceLevel": "E1",
+      "confirmed": false,
+      "documentedClaim": {
+        "statement": "Ordered context. User rules load before project rules; conflicts are model guidance, not enforcement. Claude does not natively read AGENTS.md; import it from CLAUDE.md.",
+        "citation": "docs/ontology/README.md §6.1 (Claude Code Instructions row), citing https://code.claude.com/docs/en/memory",
+        "evidenceLevel": "E1"
+      },
+      "reason": "Both sources are structurally ACTIVE under CONCAT_ORDERED (append, not replace), so neither is EXCLUDED or SHADOWED by definition of that merge operator. What this pass has NOT behaviorally confirmed is (a) that 'user loads before project' is really what claude-code 2.1.211 does, and (b) the exact resulting merged text. The ontology doc's own wording -- 'conflicts are model guidance, not enforcement' -- is itself the reason guarantee=ADVISORY rather than any enforced level: even if the order were confirmed, that would establish reading sequence, not which instruction the model actually follows when they conflict. No safe non-interactive path exists to dump this without a real session (claude -p executes a real model turn and is excluded by the safety boundary), so selectedSource stays UNKNOWN. Content conflicts on substance (long-explanation-and-ask-first vs. concise-and-no-need-to-ask)."
+    }
+  ]
+}

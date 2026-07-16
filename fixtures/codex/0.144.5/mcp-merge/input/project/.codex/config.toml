@@ -1,0 +1,10 @@
+# Project-level Codex config (synthetic fixture, not a real project).
+# <project-root>/.codex/config.toml
+
+[mcp_servers.shared-tools]
+command = "./scripts/run-shared-tools.sh"
+args = ["--project-mode"]
+
+[mcp_servers.project-only-server]
+command = "npx"
+args = ["-y", "@example/project-only-server"]

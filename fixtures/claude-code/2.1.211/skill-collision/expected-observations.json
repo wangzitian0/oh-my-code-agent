@@ -1,0 +1,40 @@
+[
+  {
+    "apiVersion": "omca.dev/v1alpha1",
+    "kind": "Observation",
+    "metadata": {"id": "claude-code:skill:claude-config/skills/deploy/SKILL.md"},
+    "spec": {
+      "host": {"id": "claude-code", "version": "2.1.211"},
+      "surface": "cli",
+      "concept": "skill",
+      "source": {
+        "kind": "file",
+        "path": "claude-config/skills/deploy/SKILL.md",
+        "digest": "sha256:54c56687f5c446505fa0b2f7b7b87f63b97dd88bb1aad076caa033e39d9c438e"
+      },
+      "scope": {"kind": "user", "root": "claude-config"},
+      "disposition": "DISCOVERED",
+      "evidenceLevel": "E1",
+      "rawDigest": "sha256:54c56687f5c446505fa0b2f7b7b87f63b97dd88bb1aad076caa033e39d9c438e"
+    }
+  },
+  {
+    "apiVersion": "omca.dev/v1alpha1",
+    "kind": "Observation",
+    "metadata": {"id": "claude-code:skill:project/.claude/skills/deploy/SKILL.md"},
+    "spec": {
+      "host": {"id": "claude-code", "version": "2.1.211"},
+      "surface": "cli",
+      "concept": "skill",
+      "source": {
+        "kind": "file",
+        "path": "project/.claude/skills/deploy/SKILL.md",
+        "digest": "sha256:4e158f5efbb44838a6efc915da651dd39ec7cf31f179d5d0f75b88dc5b14463a"
+      },
+      "scope": {"kind": "workspace", "root": "project"},
+      "disposition": "DISCOVERED",
+      "evidenceLevel": "E1",
+      "rawDigest": "sha256:4e158f5efbb44838a6efc915da651dd39ec7cf31f179d5d0f75b88dc5b14463a"
+    }
+  }
+]

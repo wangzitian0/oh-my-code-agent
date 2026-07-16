@@ -1,0 +1,45 @@
+# PR-06 fixture: Claude Code 2.1.211, user-level (~/.claude.json) +
+# project-level (.mcp.json) MCP registry merge, including one same-ID
+# ("shared-tools") collision alongside two non-colliding entries
+# (docs/knowledge/README.md §10 item 2).
+apiVersion: omca.dev/v1alpha1
+kind: FixtureInvocation
+host: claude-code
+surface: cli
+version: 2.1.211
+platform: darwin-arm64
+cwd: project
+env: {}
+
+invoke:
+  attempted: false
+  reason: >-
+    No safe non-interactive flag dumps Claude Code's resolved/merged MCP
+    server registry. `claude mcp` (list/get) was considered but not run for
+    real against this synthetic input: its documented purpose is managing
+    the user's actual MCP configuration, and this pass could not fully
+    confirm from --help output alone that a list/get subcommand is
+    guaranteed read-only and side-effect-free across all code paths for this
+    installed version, so out of caution it was treated as outside the safe
+    allowlist (`--version`/`--help` only) rather than assumed safe. Recorded
+    UNKNOWN rather than guessed or speculatively probed.
+
+binary:
+  acquisitionMethod: >-
+    Installed via Claude Code's own native updater/installer
+    (~/.local/share/claude/versions/<version>, symlinked at
+    ~/.local/bin/claude).
+  resolvedPath: /Users/SP14016/.local/share/claude/versions/2.1.211
+  sha256: 5a728a76198b6eca7f3c7cdbff43bab44b77b48c2108f7a3107d889773382629
+  versionSource: >-
+    `claude --version` -> "2.1.211 (Claude Code)"; see fixtures/README.md.
+
+observationRules:
+  - root: claude-config
+    concept: mcp_server
+    scope: user
+    surface: cli
+  - root: project
+    concept: mcp_server
+    scope: workspace
+    surface: cli

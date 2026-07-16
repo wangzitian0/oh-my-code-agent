@@ -1,0 +1,63 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "FixtureExpectedEffective",
+  "host": {"id": "claude-code", "version": "2.1.211"},
+  "concept": "mcp_server",
+  "entries": [
+    {
+      "logicalId": "shared-tools",
+      "sources": [
+        {"scope": "user", "path": "claude-config/.claude.json#mcpServers.shared-tools", "disposition": "DISCOVERED"},
+        {"scope": "workspace", "path": "project/.mcp.json#mcpServers.shared-tools", "disposition": "DISCOVERED"}
+      ],
+      "mergeOperator": "UNION_BY_ID",
+      "selectedSource": "UNKNOWN",
+      "ignoredSources": [],
+      "guarantee": "OBSERVED",
+      "evidenceLevel": "E1",
+      "confirmed": false,
+      "documentedClaim": {
+        "statement": "Policy allow/deny constrains every source; deny takes precedence. Keep connectors distinct from local MCP definitions.",
+        "citation": "docs/ontology/README.md §6.1 (Claude Code MCP row)",
+        "evidenceLevel": "E1"
+      },
+      "reason": "Both the user-level (~/.claude.json) and project-level (.mcp.json) sources define an mcpServers entry with the same ID 'shared-tools' but different command/args -- a genuine collision. The documented claim only establishes that policy allow/deny constrains the result (an enforcement mechanism, HARD/MANAGED_GUARDRAIL in spirit), not which of two competing non-denied definitions with the same ID wins absent any deny policy -- this fixture plants no managed policy, so that specific documented mechanism does not resolve this collision either way. No safe non-interactive path exists to observe Claude Code's actual resolved definition for this ID without a real session, so selectedSource is UNKNOWN rather than a guessed winner."
+    },
+    {
+      "logicalId": "user-only-server",
+      "sources": [
+        {"scope": "user", "path": "claude-config/.claude.json#mcpServers.user-only-server", "disposition": "ACTIVE"}
+      ],
+      "mergeOperator": "UNION_BY_ID",
+      "selectedSource": "claude-config/.claude.json#mcpServers.user-only-server",
+      "ignoredSources": [],
+      "guarantee": "OBSERVED",
+      "evidenceLevel": "E1",
+      "confirmed": false,
+      "documentedClaim": {
+        "statement": "Keep connectors distinct from local MCP definitions.",
+        "citation": "docs/ontology/README.md §6.1 (Claude Code MCP row)",
+        "evidenceLevel": "E1"
+      },
+      "reason": "Only one source defines this ID; if the documented per-ID registry claim holds, this entry simply survives untouched. Whether Claude Code 2.1.211 really unions the two registries by ID (as opposed to, hypothetically, one file's mcpServers replacing the other's wholesale) remains unconfirmed by this pass, so confirmed stays false even though selectedSource names a concrete path."
+    },
+    {
+      "logicalId": "project-only-server",
+      "sources": [
+        {"scope": "workspace", "path": "project/.mcp.json#mcpServers.project-only-server", "disposition": "ACTIVE"}
+      ],
+      "mergeOperator": "UNION_BY_ID",
+      "selectedSource": "project/.mcp.json#mcpServers.project-only-server",
+      "ignoredSources": [],
+      "guarantee": "OBSERVED",
+      "evidenceLevel": "E1",
+      "confirmed": false,
+      "documentedClaim": {
+        "statement": "Keep connectors distinct from local MCP definitions.",
+        "citation": "docs/ontology/README.md §6.1 (Claude Code MCP row)",
+        "evidenceLevel": "E1"
+      },
+      "reason": "Symmetric with user-only-server: only one source defines this ID. Same caveat about the underlying merge-vs-replace question being unconfirmed applies."
+    }
+  ]
+}

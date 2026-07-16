@@ -1,0 +1,62 @@
+# PR-06 fixture: Claude Code 2.1.211, user-level vs project-level
+# Instructions (CLAUDE.md) collision (docs/knowledge/README.md §10 item 2).
+apiVersion: omca.dev/v1alpha1
+kind: FixtureInvocation
+host: claude-code
+surface: cli
+version: 2.1.211
+platform: darwin-arm64
+cwd: project
+env: {}
+
+invoke:
+  attempted: false
+  reason: >-
+    No safe non-interactive introspection path exists to dump Claude Code's
+    merged/effective CLAUDE.md context. `claude --help` was checked in full:
+    `-p`/`--print` runs a real, model-invoking turn (explicitly excluded by
+    the PR-06 safety boundary); `--safe-mode`, `--bare`, and
+    `--setting-sources` change *which* sources load but do not print the
+    resolved instruction text; `claude doctor` "[r]eads settings files in the
+    current directory without a trust prompt" per its own --help description,
+    which is closer to safe, but its scope (settings.json validation) is not
+    the same as dumping merged CLAUDE.md content, and it was not run for real
+    against this synthetic input out of caution (its exact read/write surface
+    beyond settings.json was not independently confirmed against this specific
+    installed version). No flag was found that safely prints merged
+    instruction text without a session. Recorded UNKNOWN rather than guessed.
+    A separate, one-time manual verification (documented in fixtures/README.md)
+    confirmed `claude --version`, run with HOME and CLAUDE_CONFIG_DIR both
+    redirected into an isolated empty temp directory, prints the expected
+    version and writes zero files into that sandbox, and — checked against
+    the real ~/.claude directory before/after — the real directory's byte
+    content was not touched by that invocation (a large, real, concurrently
+    active ~/.claude tree on the authoring machine did show unrelated
+    ambient changes from ordinary concurrent Claude Code use during the
+    verification window; see fixtures/README.md for the full, honest
+    account of that finding). That check is not repeated per-case here.
+
+binary:
+  acquisitionMethod: >-
+    Installed via Claude Code's own native updater/installer, which manages
+    versioned installs under `~/.local/share/claude/versions/<version>` and
+    symlinks the active version at `~/.local/bin/claude`.
+  resolvedPath: /Users/SP14016/.local/share/claude/versions/2.1.211
+  sha256: 5a728a76198b6eca7f3c7cdbff43bab44b77b48c2108f7a3107d889773382629
+  versionSource: >-
+    `claude --version` printed "2.1.211 (Claude Code)"; the versioned install
+    directory name itself corroborates. sha256 above is a local install
+    fingerprint of the exact installed binary bytes on the machine that
+    generated this fixture (see fixtures/README.md) — not a claim of
+    verification against an official vendor-published checksum, which was
+    not fetched in this pass.
+
+observationRules:
+  - root: claude-config
+    concept: instruction
+    scope: user
+    surface: cli
+  - root: project
+    concept: instruction
+    scope: workspace
+    surface: cli

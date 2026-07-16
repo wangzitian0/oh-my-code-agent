@@ -1,0 +1,40 @@
+[
+  {
+    "apiVersion": "omca.dev/v1alpha1",
+    "kind": "Observation",
+    "metadata": {"id": "claude-code:mcp_server:claude-config/.claude.json"},
+    "spec": {
+      "host": {"id": "claude-code", "version": "2.1.211"},
+      "surface": "cli",
+      "concept": "mcp_server",
+      "source": {
+        "kind": "file",
+        "path": "claude-config/.claude.json",
+        "digest": "sha256:c2a75902850fc1636eaf450a4f48aed9c1d4adc36bd3dfdf7ed364987670495e"
+      },
+      "scope": {"kind": "user", "root": "claude-config"},
+      "disposition": "DISCOVERED",
+      "evidenceLevel": "E1",
+      "rawDigest": "sha256:c2a75902850fc1636eaf450a4f48aed9c1d4adc36bd3dfdf7ed364987670495e"
+    }
+  },
+  {
+    "apiVersion": "omca.dev/v1alpha1",
+    "kind": "Observation",
+    "metadata": {"id": "claude-code:mcp_server:project/.mcp.json"},
+    "spec": {
+      "host": {"id": "claude-code", "version": "2.1.211"},
+      "surface": "cli",
+      "concept": "mcp_server",
+      "source": {
+        "kind": "file",
+        "path": "project/.mcp.json",
+        "digest": "sha256:6966d4fa551ddb05062087af63f4ea3855e89adf45ee4e844254dd047c4339d4"
+      },
+      "scope": {"kind": "workspace", "root": "project"},
+      "disposition": "DISCOVERED",
+      "evidenceLevel": "E1",
+      "rawDigest": "sha256:6966d4fa551ddb05062087af63f4ea3855e89adf45ee4e844254dd047c4339d4"
+    }
+  }
+]

@@ -1,0 +1,41 @@
+# PR-06 fixture: Codex CLI 0.144.5, user-level + project-level MCP registry
+# merge, including one same-ID ("shared-tools") collision alongside two
+# non-colliding entries (docs/knowledge/README.md §10 item 2).
+apiVersion: omca.dev/v1alpha1
+kind: FixtureInvocation
+host: codex
+surface: cli
+version: 0.144.5
+platform: darwin-arm64
+cwd: project
+env: {}
+
+invoke:
+  attempted: false
+  reason: >-
+    Same reasoning as the other codex/0.144.5 cases: no safe non-interactive
+    flag dumps Codex's resolved MCP server registry (`codex mcp` manages
+    external MCP server config but was not probed live here because doing so
+    against a non-empty synthetic config risks mutating state semantics this
+    pass has not qualified; `codex --help` names no dedicated
+    dump-effective-config flag either). Recorded UNKNOWN rather than guessed.
+
+binary:
+  acquisitionMethod: >-
+    Installed as an asdf-managed nodejs (20.19.0) npm global package:
+    `npm install -g @openai/codex`.
+  resolvedPath: >-
+    /Users/SP14016/.asdf/installs/nodejs/20.19.0/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex
+  sha256: 5e29ab10ca1171be158f7335dd6bd8ce1aaf9af1556939db36a5ee338be6f5f2
+  versionSource: >-
+    `codex --version` -> "codex-cli 0.144.5"; see fixtures/README.md.
+
+observationRules:
+  - root: codex-home
+    concept: mcp_server
+    scope: user
+    surface: cli
+  - root: project
+    concept: mcp_server
+    scope: workspace
+    surface: cli

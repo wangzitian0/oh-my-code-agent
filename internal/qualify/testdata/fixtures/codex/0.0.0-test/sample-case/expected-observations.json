@@ -1,0 +1,32 @@
+[
+  {
+    "apiVersion": "omca.dev/v1alpha1",
+    "kind": "Observation",
+    "metadata": {"id": "codex:instruction:home/AGENTS.md"},
+    "spec": {
+      "host": {"id": "codex", "version": "0.0.0-test"},
+      "surface": "cli",
+      "concept": "instruction",
+      "source": {"kind": "file", "path": "home/AGENTS.md", "digest": "sha256:c93535c2237c6a35df3c944521de310af44dccd061d466aa841bc194d198fb9b"},
+      "scope": {"kind": "user", "root": "home"},
+      "disposition": "DISCOVERED",
+      "evidenceLevel": "E1",
+      "rawDigest": "sha256:c93535c2237c6a35df3c944521de310af44dccd061d466aa841bc194d198fb9b"
+    }
+  },
+  {
+    "apiVersion": "omca.dev/v1alpha1",
+    "kind": "Observation",
+    "metadata": {"id": "codex:instruction:project/AGENTS.md"},
+    "spec": {
+      "host": {"id": "codex", "version": "0.0.0-test"},
+      "surface": "cli",
+      "concept": "instruction",
+      "source": {"kind": "file", "path": "project/AGENTS.md", "digest": "sha256:f1f2f922193b333ffb4593dab44b6f3679a2b49b2f9dc98464255d21af8de59a"},
+      "scope": {"kind": "workspace", "root": "project"},
+      "disposition": "DISCOVERED",
+      "evidenceLevel": "E1",
+      "rawDigest": "sha256:f1f2f922193b333ffb4593dab44b6f3679a2b49b2f9dc98464255d21af8de59a"
+    }
+  }
+]

@@ -1,0 +1,27 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "FixtureExpectedEffective",
+  "host": {"id": "codex", "version": "0.144.5"},
+  "concept": "instruction",
+  "entries": [
+    {
+      "logicalId": "codex.instructions.user-vs-project",
+      "sources": [
+        {"scope": "user", "path": "codex-home/AGENTS.md", "disposition": "ACTIVE"},
+        {"scope": "workspace", "path": "project/AGENTS.md", "disposition": "ACTIVE"}
+      ],
+      "mergeOperator": "CONCAT_ORDERED",
+      "selectedSource": "UNKNOWN",
+      "ignoredSources": [],
+      "guarantee": "ADVISORY",
+      "evidenceLevel": "E1",
+      "confirmed": false,
+      "documentedClaim": {
+        "statement": "Global then root-to-cwd CONCAT_ORDERED; closer instructions appear later. Files above project root are not project instructions.",
+        "citation": "docs/ontology/README.md §6.2 (Codex Instructions row), citing https://learn.chatgpt.com/docs/agent-configuration/agents-md",
+        "evidenceLevel": "E1"
+      },
+      "reason": "Both sources are structurally ACTIVE under CONCAT_ORDERED by definition of that merge operator (append, never replace), so neither is EXCLUDED or SHADOWED. What this qualification pass has NOT behaviorally confirmed is (a) that CONCAT_ORDERED with 'closer appears later' is actually what codex-cli 0.144.5 does, and (b) the exact resulting text a model would see. No safe non-interactive introspection path exists to dump Codex's merged instruction context without starting a real (model-invoking) session, so selectedSource is recorded UNKNOWN rather than asserting the documented order as fact. Content additionally conflicts on substance (formal-vs-terse tone, ask-first-vs-no-need-to-ask for file writes) — per the instruction concept's non-equivalence rule ('instructions guide the model; they do not enforce security'), even a confirmed order would not mean either instruction is enforced over the other."
+    }
+  ]
+}
