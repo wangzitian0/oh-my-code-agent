@@ -45,6 +45,8 @@ The user must be able to answer:
 8. What is different between native, current, pending, and desired state?
 9. Can the difference be repaired safely, and will a restart be required?
 10. How can the previous runtime be restored?
+11. Which hosts can run in parallel in this worktree, and how do their
+    loadouts deliberately differ?
 
 ## 4. Desired-state Model
 
@@ -66,9 +68,15 @@ spec:
     skills:
       - id: code-review
         intent: AVAILABLE
+      - id: deep-refactor
+        intent: DEFAULT
+        hosts: [claude-code]
     mcpServers:
       - id: internal-docs
         intent: AVAILABLE
+      - id: codegraph
+        intent: DEFAULT
+        hosts: [codex]
     instructions:
       - id: engineering-baseline
         intent: DEFAULT
@@ -78,6 +86,12 @@ spec:
         intent: DEFAULT
         value: workspace-write
 ```
+
+An asset entry may carry a `hosts` selector listing canonical host IDs. Without
+a selector, the intent applies to every host launched in the matching context.
+A host-scoped entry refines host-neutral entries for the listed hosts; it can
+never weaken a `DENIED` intent from any scope. This is how one worktree gives
+parallel hosts deliberately different loadouts.
 
 ### 4.2 Bindings
 
@@ -119,7 +133,18 @@ spec:
     mcpServers: [codegraph]
   disable:
     skills: [release-production]
+  hosts:
+    claude-code:
+      enable:
+        skills: [ui-review]
+    codex:
+      disable:
+        mcpServers: [internal-docs]
 ```
+
+Host-scoped Activation entries follow the same rules as host-scoped Profile
+intent: they refine the host-neutral selection for one host and cannot
+re-enable a `DENIED` asset.
 
 The compiler evaluates `REQUIRED`, `DEFAULT`, `AVAILABLE`, and `DENIED` before
 host-specific rendering. Ambiguous conflicts remain visible and block unsafe
@@ -236,6 +261,20 @@ Host documentation, schema, source, or executable changes create a Knowledge
 Candidate. Only a maintainer-reviewed pull request can publish a new immutable
 Knowledge Pack.
 
+### FR-13: Host-scoped desired state
+
+Profiles and Activation must support host selectors so that one worktree can
+give different hosts deliberately different loadouts. The compiler must resolve
+host-neutral and host-scoped intent deterministically and report the resulting
+per-host outcome.
+
+### FR-14: Plugin-packaged host support
+
+Each host integration is a versioned adapter plugin behind one frozen adapter
+contract, shipping with its own Knowledge Packs, fixtures, and qualification
+state. The core must load first-party plugins and, once the out-of-process
+transport is qualified, external plugins through the same contract.
+
 ## 7. Risk-based Confirmation
 
 | Change | Default confirmation |
@@ -277,6 +316,9 @@ ownership, source digests, and risk confirmation before writing anything.
   references or redacted values only.
 - **Low-context:** the control MCP exposes a deliberately small tool surface and
   loads detailed artifacts only on demand.
+- **Lean launch:** a managed launch includes only selected assets — zero
+  unselected MCP servers or Skills enter the runtime — and the measured launch
+  overhead and context cost appear in the report against a native baseline.
 - **Cross-platform path:** macOS with zsh and direnv is the first qualified
   environment; abstractions must not preclude Linux, bash, or fish.
 - **Fast common path:** entering an unchanged worktree and selecting its current
@@ -292,3 +334,5 @@ the corresponding milestone:
 3. Whether repository Instructions are always active or can become `AVAILABLE` through an isolated overlay workspace.
 4. The exact context-cost metric exposed to users when a host does not publish prompt assembly details.
 5. Whether the TUI can restart a host process directly or only stage and instruct the user to restart.
+6. Whether Claude Code's configuration-directory override yields complete
+   user-global isolation, or a virtual process home is required as for Codex.

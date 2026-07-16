@@ -95,8 +95,8 @@ Inside the direnv environment:
 
 ```bash
 codex       # managed current generation
-claude      # managed current generation when qualified
-opencode    # managed current generation when qualified
+claude      # managed current generation
+opencode    # unmanaged until an adapter plugin qualifies it
 omca        # management TUI
 ```
 
@@ -168,6 +168,20 @@ validate pending
 
 If verification fails, OMCA can restore the parent generation and relaunch.
 
+### 5.5 Parallel hosts in one worktree
+
+A generation contains one artifact tree per host and surface
+(`hosts/<host>/<surface>/`). Hosts launch independently from the same
+generation and may run in parallel in one worktree, each with its own
+host-scoped loadout.
+
+Activation advances the worktree's `current` pointer, but a running session
+keeps the generation it was launched with: generation directories are immutable
+and retained while any session references them. After activation, `omca status`
+and `omca doctor` report sessions still running on a superseded generation and
+which hosts require a restart. `restart_required` is therefore per host, not
+per worktree.
+
 ## 6. MCP-first Reconciliation
 
 The OMCA MCP server is present in every managed runtime unless an explicit
@@ -199,10 +213,14 @@ MCP may stage runtime-only changes. Activating executable MCP servers, Hooks,
 Plugins, Extensions, expanded permissions, or shared-source modifications still
 requires explicit human confirmation.
 
-## 7. Codex Isolation Strategy
+## 7. First-party Host Isolation Strategies
 
-Codex is the first qualification target because it demonstrates both the value
-and the difficulty of runtime isolation.
+Claude Code and Codex are the first-party adapter plugins. Codex leads
+qualification because it demonstrates both the value and the difficulty of
+runtime isolation with the cleanest documented boundary; Claude Code follows
+inside the same milestones through its own mechanisms.
+
+### 7.1 Codex
 
 Codex uses `CODEX_HOME` for config and state, while user Skills can also be
 discovered from `$HOME/.agents/skills`. The first adapter therefore needs an
@@ -235,6 +253,49 @@ CLI and profile invocation
 Project config and Instructions follow Codex trust behavior. System sources may
 remain effective even when the user home is isolated and must be reported
 separately.
+
+### 7.2 Claude Code
+
+Claude Code separates the concerns differently: user-global assets (settings,
+Skills, agents, memory, MCP registrations) live under a configuration
+directory, while account and OAuth state, project trust decisions, and parts of
+the MCP registry share one mutable user state file. The candidate isolation
+mechanisms are:
+
+```text
+a relocated configuration directory per generation
+session flags that restrict which settings and MCP configs load
+a strict MCP mode that ignores non-specified registrations
+a virtual process home, as for Codex, if the above are incomplete
+```
+
+Which combination yields complete user-global exclusion is an open
+qualification question (see the product requirements); the adapter must prove
+its mechanism with versioned fixtures before Claude Code launches become
+managed rather than observed.
+
+Two constraints are fixed regardless of mechanism:
+
+- Account and OAuth state is identity-shared credential state. It is never
+  copied into a generation, and isolation must not force a fresh login for
+  every generation; if the native state file cannot be shared safely, the
+  identity gets an explicit login flow.
+- Claude Code reads repository assets (project instructions, project skills,
+  project MCP registrations) directly from the worktree. If an unselected
+  repository asset cannot be excluded through a proven native mechanism, the
+  report states the residual load instead of claiming a clean runtime.
+
+The adapter must inventory at least:
+
+```text
+real user-global configuration directory
+real user state file (redacted to non-secret facts)
+managed policy locations
+repository instruction chain
+repository .claude assets and .mcp.json chain
+plugin and marketplace state
+CLI and session flags
+```
 
 ## 8. Authentication and Secrets
 
