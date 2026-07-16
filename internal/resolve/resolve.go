@@ -396,7 +396,11 @@ func applyLayer(kind AssetKind, id, layerName string, enableSel, disableSel doma
 			}
 			// else: blocked, DENIED holds — cannot be re-enabled by any
 			// lower scope or host-scoped entry (init.md).
-		} else {
+		} else if !active {
+			// Only attribute the decision to this layer's enable when it
+			// actually changes the outcome; an enable on an asset already
+			// active from an earlier layer is a no-op and must not hide the
+			// real reason it is active (e.g. a Profile REQUIRED/DEFAULT).
 			active = true
 			reason = layerName + " enable"
 		}
@@ -409,7 +413,10 @@ func applyLayer(kind AssetKind, id, layerName string, enableSel, disableSel doma
 			}
 			// else: blocked, REQUIRED holds — cannot be disabled without
 			// an explicit exception the defining policy allows.
-		} else {
+		} else if active {
+			// Symmetric with the enable case above: a disable on an asset
+			// already inactive (e.g. DENIED or never selected) is a no-op
+			// and must not overwrite the real reason it is inactive.
 			active = false
 			reason = layerName + " disable"
 		}
