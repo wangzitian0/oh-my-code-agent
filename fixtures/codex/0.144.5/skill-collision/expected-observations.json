@@ -1,0 +1,59 @@
+[
+  {
+    "apiVersion": "omca.dev/v1alpha1",
+    "kind": "Observation",
+    "metadata": {"id": "codex:skill:home/.agents/skills/deploy/SKILL.md"},
+    "spec": {
+      "host": {"id": "codex", "version": "0.144.5"},
+      "surface": "cli",
+      "concept": "skill",
+      "source": {
+        "kind": "file",
+        "path": "home/.agents/skills/deploy/SKILL.md",
+        "digest": "sha256:443f5c0d3c23ee171c8db33c5ca0a789b564a53993a10eadb97d9b37bf8e7569"
+      },
+      "scope": {"kind": "user", "root": "home"},
+      "disposition": "DISCOVERED",
+      "evidenceLevel": "E1",
+      "rawDigest": "sha256:443f5c0d3c23ee171c8db33c5ca0a789b564a53993a10eadb97d9b37bf8e7569"
+    }
+  },
+  {
+    "apiVersion": "omca.dev/v1alpha1",
+    "kind": "Observation",
+    "metadata": {"id": "codex:skill:project/.agents/skills/deploy/SKILL.md"},
+    "spec": {
+      "host": {"id": "codex", "version": "0.144.5"},
+      "surface": "cli",
+      "concept": "skill",
+      "source": {
+        "kind": "file",
+        "path": "project/.agents/skills/deploy/SKILL.md",
+        "digest": "sha256:9821e045774b5fc8706f307903f5b12094f1f4dff9a974e168df3a42e21883e7"
+      },
+      "scope": {"kind": "workspace", "root": "project"},
+      "disposition": "DISCOVERED",
+      "evidenceLevel": "E1",
+      "rawDigest": "sha256:9821e045774b5fc8706f307903f5b12094f1f4dff9a974e168df3a42e21883e7"
+    }
+  },
+  {
+    "apiVersion": "omca.dev/v1alpha1",
+    "kind": "Observation",
+    "metadata": {"id": "codex:skill:codex-home/skills/deploy/SKILL.md"},
+    "spec": {
+      "host": {"id": "codex", "version": "0.144.5"},
+      "surface": "cli",
+      "concept": "skill",
+      "source": {
+        "kind": "file",
+        "path": "codex-home/skills/deploy/SKILL.md",
+        "digest": "sha256:351a7fc4e8e15e2d7dd0949dff992c3075076817b77ae1329ad23be39f3a75ea"
+      },
+      "scope": {"kind": "user", "root": "codex-home"},
+      "disposition": "DISCOVERED",
+      "evidenceLevel": "E1",
+      "rawDigest": "sha256:351a7fc4e8e15e2d7dd0949dff992c3075076817b77ae1329ad23be39f3a75ea"
+    }
+  }
+]

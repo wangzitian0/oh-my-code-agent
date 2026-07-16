@@ -1,0 +1,28 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "FixtureExpectedEffective",
+  "host": {"id": "codex", "version": "0.144.5"},
+  "concept": "skill",
+  "entries": [
+    {
+      "logicalId": "deploy",
+      "sources": [
+        {"scope": "user", "path": "home/.agents/skills/deploy/SKILL.md", "disposition": "AVAILABLE"},
+        {"scope": "workspace", "path": "project/.agents/skills/deploy/SKILL.md", "disposition": "AVAILABLE"},
+        {"scope": "user", "path": "codex-home/skills/deploy/SKILL.md", "disposition": "AVAILABLE"}
+      ],
+      "mergeOperator": "NAMESPACE",
+      "selectedSource": "UNKNOWN",
+      "ignoredSources": [],
+      "guarantee": "OBSERVED",
+      "evidenceLevel": "E1",
+      "confirmed": false,
+      "documentedClaim": {
+        "statement": "Duplicate names are not assumed to override or merge; preserve both discovered sources unless the versioned adapter proves otherwise.",
+        "citation": "docs/ontology/README.md §6.2 (Codex Skills row), citing https://learn.chatgpt.com/docs/build-skills. See also docs/knowledge/README.md §4's illustrative Knowledge Pack example, which names a 'codex.skills.discovery' precedence program with operator 'KEEP_BOTH' for this exact concept -- NOTE: 'KEEP_BOTH' is not itself one of the nine closed merge operators docs/ontology/README.md §3.1 / internal/ontology/mergeoperator.go define, so this fixture maps the documented claim onto the closest defined operator, NAMESPACE ('duplicate names remain distinct through a package or directory prefix'), rather than reusing the undefined 'KEEP_BOTH' term; that mapping itself is this fixture's own judgment call, not an additional confirmed fact.",
+        "evidenceLevel": "E1"
+      },
+      "reason": "Three sources define a skill named 'deploy': $HOME/.agents/skills (documented), the project's .agents/skills (documented), and $CODEX_HOME/skills -- a discovery root NOT listed in docs/ontology/README.md §6.2's physical-mapping table for Codex Skills, but found by static inspection (strings) of the installed codex-cli 0.144.5 native binary referencing '$CODEX_HOME/skills' as a skill install/discovery location (see fixtures/README.md). This is a genuine discrepancy between the documented ontology claim and this pass's own static evidence, itself worth flagging rather than silently reconciling. Whether the real host actually loads/offers all three simultaneously, silently drops any of them, or disambiguates by some order this pass has not observed is UNKNOWN: no safe non-interactive introspection path exists to dump Codex's resolved skill catalog."
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+[
+  {
+    "apiVersion": "omca.dev/v1alpha1",
+    "kind": "Observation",
+    "metadata": {"id": "codex:mcp_server:codex-home/config.toml"},
+    "spec": {
+      "host": {"id": "codex", "version": "0.144.5"},
+      "surface": "cli",
+      "concept": "mcp_server",
+      "source": {
+        "kind": "file",
+        "path": "codex-home/config.toml",
+        "digest": "sha256:fffaa207b99b20449e84ca624d6dfc751ca329962eb44b9dafa5975b5aba7a4c"
+      },
+      "scope": {"kind": "user", "root": "codex-home"},
+      "disposition": "DISCOVERED",
+      "evidenceLevel": "E1",
+      "rawDigest": "sha256:fffaa207b99b20449e84ca624d6dfc751ca329962eb44b9dafa5975b5aba7a4c"
+    }
+  },
+  {
+    "apiVersion": "omca.dev/v1alpha1",
+    "kind": "Observation",
+    "metadata": {"id": "codex:mcp_server:project/.codex/config.toml"},
+    "spec": {
+      "host": {"id": "codex", "version": "0.144.5"},
+      "surface": "cli",
+      "concept": "mcp_server",
+      "source": {
+        "kind": "file",
+        "path": "project/.codex/config.toml",
+        "digest": "sha256:6266b9c4615276e60d1599f565096dae950750b04c239c972d1490f2f348f101"
+      },
+      "scope": {"kind": "workspace", "root": "project"},
+      "disposition": "DISCOVERED",
+      "evidenceLevel": "E1",
+      "rawDigest": "sha256:6266b9c4615276e60d1599f565096dae950750b04c239c972d1490f2f348f101"
+    }
+  }
+]

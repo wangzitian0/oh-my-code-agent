@@ -1,0 +1,63 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "FixtureExpectedEffective",
+  "host": {"id": "codex", "version": "0.144.5"},
+  "concept": "mcp_server",
+  "entries": [
+    {
+      "logicalId": "shared-tools",
+      "sources": [
+        {"scope": "user", "path": "codex-home/config.toml#mcp_servers.shared-tools", "disposition": "DISCOVERED"},
+        {"scope": "workspace", "path": "project/.codex/config.toml#mcp_servers.shared-tools", "disposition": "DISCOVERED"}
+      ],
+      "mergeOperator": "UNION_BY_ID",
+      "selectedSource": "UNKNOWN",
+      "ignoredSources": [],
+      "guarantee": "OBSERVED",
+      "evidenceLevel": "E1",
+      "confirmed": false,
+      "documentedClaim": {
+        "statement": "Merge by server ID following config precedence, then apply managed allowlists and trust.",
+        "citation": "docs/ontology/README.md §6.2 (Codex MCP row), citing https://learn.chatgpt.com/docs/config-file/config-basic",
+        "evidenceLevel": "E1"
+      },
+      "reason": "Both the user-level ($CODEX_HOME/config.toml) and project-level (.codex/config.toml) sources define an mcp_servers table entry with the same ID 'shared-tools' but different command/args, a genuine collision. 'Merge by server ID' does not by itself say whether the two definitions deep-merge field by field, or the higher-precedence one fully replaces the other, or the collision is rejected outright with --strict-config-like behavior. No safe non-interactive way exists to observe Codex's actual resolved server definition for this ID without a real session, so selectedSource is UNKNOWN rather than a guessed winner (config precedence order itself -- CLI > nearest project > ancestor project > profile > user > system > default, per the same ontology row's Settings entry -- is a documented claim about config *values* generally, not confirmed here as applying identically to whole embedded mcp_servers tables)."
+    },
+    {
+      "logicalId": "user-only-server",
+      "sources": [
+        {"scope": "user", "path": "codex-home/config.toml#mcp_servers.user-only-server", "disposition": "ACTIVE"}
+      ],
+      "mergeOperator": "UNION_BY_ID",
+      "selectedSource": "codex-home/config.toml#mcp_servers.user-only-server",
+      "ignoredSources": [],
+      "guarantee": "OBSERVED",
+      "evidenceLevel": "E1",
+      "confirmed": false,
+      "documentedClaim": {
+        "statement": "Merge by server ID following config precedence, then apply managed allowlists and trust.",
+        "citation": "docs/ontology/README.md §6.2 (Codex MCP row)",
+        "evidenceLevel": "E1"
+      },
+      "reason": "Only one source defines this ID, so there is no winner to guess between competing definitions -- if the documented 'merge by ID' claim holds, this entry simply survives untouched. What remains unconfirmed by this pass is the more basic question of whether Codex 0.144.5 really performs a per-ID merge at all, as opposed to (hypothetically) one config file's mcp_servers table wholesale replacing the other's; this pass has not behaviorally distinguished those two possibilities, so confirmed stays false even though selectedSource names a concrete path rather than UNKNOWN."
+    },
+    {
+      "logicalId": "project-only-server",
+      "sources": [
+        {"scope": "workspace", "path": "project/.codex/config.toml#mcp_servers.project-only-server", "disposition": "ACTIVE"}
+      ],
+      "mergeOperator": "UNION_BY_ID",
+      "selectedSource": "project/.codex/config.toml#mcp_servers.project-only-server",
+      "ignoredSources": [],
+      "guarantee": "OBSERVED",
+      "evidenceLevel": "E1",
+      "confirmed": false,
+      "documentedClaim": {
+        "statement": "Merge by server ID following config precedence, then apply managed allowlists and trust.",
+        "citation": "docs/ontology/README.md §6.2 (Codex MCP row)",
+        "evidenceLevel": "E1"
+      },
+      "reason": "Symmetric with user-only-server: only one source defines this ID. Same caveat about the underlying merge-vs-replace question being unconfirmed applies."
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+# Test-only manifest for internal/qualify's own package tests
+# (case_test.go, harness_test.go). Not part of the real fixtures/
+# qualification corpus — version 0.0.0-test deliberately does not collide
+# with a real pinned host version.
+apiVersion: omca.dev/v1alpha1
+kind: FixtureInvocation
+host: codex
+surface: cli
+version: 0.0.0-test
+platform: darwin-arm64
+cwd: project
+invoke:
+  attempted: false
+  reason: "package self-test; RunInvocation itself is exercised separately in invoke_test.go against a hermetic fake binary, never against this testdata case"
+binary:
+  acquisitionMethod: "n/a (test fixture)"
+  resolvedPath: "n/a"
+  sha256: "n/a"
+  versionSource: "n/a"
+observationRules:
+  - root: home
+    concept: instruction
+    scope: user
+    surface: cli
+  - root: project
+    concept: instruction
+    scope: workspace
+    surface: cli

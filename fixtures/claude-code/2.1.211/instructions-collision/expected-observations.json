@@ -1,0 +1,40 @@
+[
+  {
+    "apiVersion": "omca.dev/v1alpha1",
+    "kind": "Observation",
+    "metadata": {"id": "claude-code:instruction:claude-config/CLAUDE.md"},
+    "spec": {
+      "host": {"id": "claude-code", "version": "2.1.211"},
+      "surface": "cli",
+      "concept": "instruction",
+      "source": {
+        "kind": "file",
+        "path": "claude-config/CLAUDE.md",
+        "digest": "sha256:3dcd4d20dccbddd1fbcffc9587115c62ed1bf3271bd82bbde1f863b5a0454138"
+      },
+      "scope": {"kind": "user", "root": "claude-config"},
+      "disposition": "DISCOVERED",
+      "evidenceLevel": "E1",
+      "rawDigest": "sha256:3dcd4d20dccbddd1fbcffc9587115c62ed1bf3271bd82bbde1f863b5a0454138"
+    }
+  },
+  {
+    "apiVersion": "omca.dev/v1alpha1",
+    "kind": "Observation",
+    "metadata": {"id": "claude-code:instruction:project/CLAUDE.md"},
+    "spec": {
+      "host": {"id": "claude-code", "version": "2.1.211"},
+      "surface": "cli",
+      "concept": "instruction",
+      "source": {
+        "kind": "file",
+        "path": "project/CLAUDE.md",
+        "digest": "sha256:b38172b38718adc036af1d4c44ce640b92bf60d32c2fd9ac5617109fd661e7d1"
+      },
+      "scope": {"kind": "workspace", "root": "project"},
+      "disposition": "DISCOVERED",
+      "evidenceLevel": "E1",
+      "rawDigest": "sha256:b38172b38718adc036af1d4c44ce640b92bf60d32c2fd9ac5617109fd661e7d1"
+    }
+  }
+]

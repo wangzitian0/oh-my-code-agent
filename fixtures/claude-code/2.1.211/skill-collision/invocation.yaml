@@ -1,0 +1,43 @@
+# PR-06 fixture: Claude Code 2.1.211, same-name ("deploy") Skill collision
+# between personal (user) and project scopes (docs/knowledge/README.md §10
+# item 2).
+apiVersion: omca.dev/v1alpha1
+kind: FixtureInvocation
+host: claude-code
+surface: cli
+version: 2.1.211
+platform: darwin-arm64
+cwd: project
+env: {}
+
+invoke:
+  attempted: false
+  reason: >-
+    Same reasoning as instructions-collision/invocation.yaml: no safe
+    non-interactive flag dumps Claude Code's resolved skill catalog (which
+    same-named skill actually loads/wins) without a real session. Recorded
+    UNKNOWN rather than guessed, even though docs/ontology/README.md §6.1
+    states a specific precedence chain for this exact concept (see
+    documentedClaim in expected-effective.json) -- a documented claim from
+    official docs is not the same as this pass having behaviorally
+    confirmed it.
+
+binary:
+  acquisitionMethod: >-
+    Installed via Claude Code's own native updater/installer
+    (~/.local/share/claude/versions/<version>, symlinked at
+    ~/.local/bin/claude).
+  resolvedPath: /Users/SP14016/.local/share/claude/versions/2.1.211
+  sha256: 5a728a76198b6eca7f3c7cdbff43bab44b77b48c2108f7a3107d889773382629
+  versionSource: >-
+    `claude --version` -> "2.1.211 (Claude Code)"; see fixtures/README.md.
+
+observationRules:
+  - root: claude-config
+    concept: skill
+    scope: user
+    surface: cli
+  - root: project
+    concept: skill
+    scope: workspace
+    surface: cli

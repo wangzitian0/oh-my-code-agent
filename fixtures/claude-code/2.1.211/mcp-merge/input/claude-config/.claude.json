@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "shared-tools": {
+      "command": "npx",
+      "args": ["-y", "@example/shared-tools-server"],
+      "env": {"EXAMPLE_TOKEN": "user-level-placeholder-not-a-real-secret"}
+    },
+    "user-only-server": {
+      "command": "npx",
+      "args": ["-y", "@example/user-only-server"]
+    }
+  }
+}

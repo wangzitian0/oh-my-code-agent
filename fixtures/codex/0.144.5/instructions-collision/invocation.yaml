@@ -1,0 +1,59 @@
+# PR-06 fixture: Codex CLI 0.144.5, user-level vs project-level Instructions
+# collision (docs/knowledge/README.md §10 item 2; issue #10 acceptance
+# criteria).
+apiVersion: omca.dev/v1alpha1
+kind: FixtureInvocation
+host: codex
+surface: cli
+version: 0.144.5
+platform: darwin-arm64
+cwd: project
+env: {}
+
+invoke:
+  attempted: false
+  reason: >-
+    No safe non-interactive introspection path exists to dump Codex's
+    merged/effective instruction context without starting a real session
+    (`codex` with no subcommand launches the interactive TUI; `codex exec`
+    runs a real, model-invoking turn and is explicitly excluded by the PR-06
+    safety boundary). `codex --help` was checked in full and reveals no flag
+    that prints effective, merged AGENTS.md content non-interactively without
+    a model call. This case's actual precedence outcome is therefore
+    recorded UNKNOWN in expected-effective.json rather than probed live. A
+    separate, one-time manual verification (documented in fixtures/README.md)
+    confirmed that `codex --version`, run with HOME and CODEX_HOME both
+    redirected into an isolated temp directory, prints the expected version
+    and writes nothing to the real ~/.codex or ~/.claude; that check is not
+    repeated per-case here to avoid a fragile, machine-specific dependency
+    (the installed `codex` binary resolves through an asdf shim requiring
+    `asdf` itself on PATH) inside the committed, portable fixture corpus.
+
+binary:
+  acquisitionMethod: >-
+    Installed as an asdf-managed nodejs (20.19.0) npm global package:
+    `npm install -g @openai/codex`. The `codex` command on PATH is an asdf
+    shim that execs into the real entrypoint, which spawns the
+    platform-specific optional dependency `@openai/codex-darwin-arm64`'s
+    vendored native binary.
+  resolvedPath: >-
+    /Users/SP14016/.asdf/installs/nodejs/20.19.0/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex
+  sha256: 5e29ab10ca1171be158f7335dd6bd8ce1aaf9af1556939db36a5ee338be6f5f2
+  versionSource: >-
+    `codex --version` printed "codex-cli 0.144.5"; cross-checked against
+    `@openai/codex@0.144.5`'s own package.json "version" field and
+    `npm ls -g --depth=0` showing `@openai/codex@0.144.5`. sha256 above is a
+    local install fingerprint of the exact installed binary bytes on the
+    machine that generated this fixture (see fixtures/README.md) — not a
+    claim of verification against an official vendor-published checksum,
+    which was not fetched in this pass.
+
+observationRules:
+  - root: codex-home
+    concept: instruction
+    scope: user
+    surface: cli
+  - root: project
+    concept: instruction
+    scope: workspace
+    surface: cli
