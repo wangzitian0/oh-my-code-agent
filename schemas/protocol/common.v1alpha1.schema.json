@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omca.dev/schemas/protocol/common.v1alpha1.schema.json",
+  "title": "Common protocol v1alpha1 definitions",
+  "description": "Shared enum and reference definitions for the cross-host/cross-repository protocol documents (Observation, HostKnowledge, Report, Generation, Evidence, RepairProposal) described in docs/architecture/README.md §6 (schemas/protocol vs schemas/domain split). These $defs are documentation of the wire contract; like schemas/domain, nothing in this repository executes a generic JSON Schema validator against them yet (no third-party dependency is available offline) — internal/domain hand-writes the equivalent Go validators and fixture tests.",
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "A stable content digest, always the algorithm-prefixed hex form produced by domain.CanonicalDigest (docs/architecture/README.md §5.4, §9)."
+    },
+    "evidenceLevel": {
+      "type": "string",
+      "enum": ["E0", "E1", "E2", "E3", "E4", "E5"],
+      "description": "docs/architecture/reporting.md §4, Evidence Levels: E0 DISCOVERED, E1 PARSED, E2 RESOLVED, E3 HOST_REPORTED, E4 BEHAVIOR_PROBED, E5 EXTERNALLY_PROVEN. Evidence is monotonic only when the higher level proves the same claim."
+    },
+    "guaranteeLevel": {
+      "type": "string",
+      "enum": ["HARD", "RECONCILED", "ADVISORY", "OBSERVED"],
+      "description": "docs/architecture/reporting.md §5, Guarantee Levels. Independent of evidenceLevel: evidence answers why we believe a result, guarantee answers what prevents it from changing."
+    },
+    "capabilityLevel": {
+      "type": "string",
+      "enum": ["EXACT", "COMPATIBLE", "PARTIAL", "OPAQUE", "UNKNOWN", "UNSUPPORTED"],
+      "description": "docs/knowledge/README.md §5, Capability Vocabulary, for one host x surface x version x concept x operation cell. Distinct from the ontology's cross-host classification vocabulary in docs/ontology/README.md §1.2 (EXACT/PARTIAL/VENDOR_ONLY/ABSENT/UNKNOWN), which is a different, smaller enum for a different question."
+    },
+    "reconcileMode": {
+      "type": "string",
+      "enum": ["MANAGED", "PATCHED", "OBSERVED", "OPAQUE", "BLOCKED"],
+      "description": "docs/knowledge/README.md §5: the reconcile mode a capability resolves to is independent of the capabilityLevel relation itself. There is no host-wide supported flag."
+    },
+    "knowledgeStatus": {
+      "type": "string",
+      "enum": ["FRESH", "DUE", "STALE", "CONFLICTED", "SUPERSEDED", "RETIRED"],
+      "description": "docs/knowledge/README.md §7, Lifecycle States, for one Knowledge Pack."
+    },
+    "sourceDisposition": {
+      "type": "string",
+      "enum": [
+        "DISCOVERED", "IMPORTED", "ACTIVE", "AVAILABLE", "EXCLUDED",
+        "DENIED", "SHADOWED", "ORPHANED", "OPAQUE", "UNKNOWN"
+      ],
+      "description": "docs/architecture/reporting.md §3, Source Disposition: why a discovered source does or does not take effect."
+    },
+    "ownership": {
+      "type": "string",
+      "enum": ["managed", "patched", "observed", "passthrough", "external"],
+      "description": "docs/architecture/README.md §10, Ownership. Lowercase, matching the doc verbatim (unlike the other enums on this page)."
+    },
+    "driftCategory": {
+      "type": "string",
+      "enum": [
+        "CONFIG_DRIFT", "EFFECTIVE_DRIFT", "SOURCE_DRIFT", "CAPABILITY_GAP",
+        "KNOWLEDGE_DRIFT", "CONTEXT_DRIFT", "EXCEPTION", "UNKNOWN"
+      ],
+      "description": "docs/architecture/reporting.md §6, Drift Model canonical categories."
+    },
+    "hostId": {
+      "$comment": "Re-declared rather than $ref'd across directories: this repository does not execute a generic JSON Schema resolver, so a cross-file $ref would be documentation-only either way. Kept identical to schemas/domain/common.v1alpha1.schema.json#/$defs/hostId (docs/ontology/README.md §4, Host Registry) and to internal/domain.KnownHostIDs; a golden test in internal/domain cross-checks the two lists do not drift apart.",
+      "type": "string",
+      "enum": [
+        "claude-code",
+        "codex",
+        "opencode",
+        "cursor",
+        "github-copilot",
+        "antigravity-cli",
+        "pi",
+        "openclaw",
+        "hermes-agent"
+      ]
+    },
+    "apiVersion": {
+      "type": "string",
+      "const": "omca.dev/v1alpha1"
+    }
+  }
+}

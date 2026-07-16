@@ -1,0 +1,13 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "Report",
+  "metadata": {
+    "id": "report:worktree:sha256:abc",
+    "worktree": "worktree:sha256:abc",
+    "generatedAt": "2026-07-16T00:00:00Z"
+  },
+  "spec": {
+    "fingerprint": "not-a-digest",
+    "drift": []
+  }
+}

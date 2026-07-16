@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omca.dev/schemas/protocol/evidence.v1alpha1.schema.json",
+  "title": "Evidence v1alpha1",
+  "description": "A single evidence record backing one claim about one entity/field: how strongly it was established (docs/architecture/reporting.md §4, Evidence Levels) and what prevents it from changing (§5, Guarantee Levels). Every effective conclusion in a Report must be evidence-backed (§1 Trust Definition). Evidence is monotonic only when a higher level proves the exact same claim; an E4 behavior probe does not prove an E3 prompt-assembly trace, and neither turns an advisory Instruction into hard enforcement.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": { "$ref": "common.v1alpha1.schema.json#/$defs/apiVersion" },
+    "kind": { "const": "Evidence" },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subject", "level", "observedAt"],
+      "properties": {
+        "subject": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["concept", "logicalId"],
+          "properties": {
+            "concept": { "type": "string", "minLength": 1 },
+            "logicalId": { "type": "string", "minLength": 1 },
+            "field": { "type": "string" }
+          }
+        },
+        "level": { "$ref": "common.v1alpha1.schema.json#/$defs/evidenceLevel" },
+        "guarantee": { "$ref": "common.v1alpha1.schema.json#/$defs/guaranteeLevel" },
+        "method": {
+          "type": "string",
+          "description": "e.g. official-doc, executable-fixture, static-resolver, host-list, canary-probe (docs/knowledge/README.md §6, §13 Canary Probes)."
+        },
+        "observedAt": { "type": "string" },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "type": "string" },
+            "url": { "type": "string" },
+            "path": { "type": "string" },
+            "digest": { "$ref": "common.v1alpha1.schema.json#/$defs/digest" }
+          }
+        },
+        "knowledgeRef": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": { "type": "string" },
+            "digest": { "$ref": "common.v1alpha1.schema.json#/$defs/digest" }
+          }
+        }
+      }
+    }
+  }
+}

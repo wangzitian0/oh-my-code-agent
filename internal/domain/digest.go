@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 )
 
 // CanonicalDigest returns a stable "sha256:<hex>" digest for v. Object keys
@@ -32,4 +33,18 @@ func CanonicalDigest(v any) (string, error) {
 	}
 	sum := sha256.Sum256(canon)
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
+}
+
+// canonicalDigestPattern matches exactly the shape CanonicalDigest produces:
+// the algorithm prefix and 64 lowercase hex characters, no more, no less.
+var canonicalDigestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
+// IsCanonicalDigest reports whether s has the "sha256:<64 lowercase hex>"
+// shape CanonicalDigest produces. Protocol documents that tie one document
+// to another by digest (Report.spec.fingerprint, RepairProposal.spec
+// .reportFingerprint, Generation.spec.desiredGraphDigest, and the various
+// evidence/knowledge digests in schemas/protocol) should fail closed on a
+// malformed reference rather than silently comparing garbage strings.
+func IsCanonicalDigest(s string) bool {
+	return canonicalDigestPattern.MatchString(s)
 }

@@ -1,0 +1,7 @@
+{
+  "conceptId": "bad-operator",
+  "properties": {},
+  "x-nonEquivalenceRule": "n/a",
+  "x-logicalIdentity": { "fields": ["id"], "rule": "n/a" },
+  "x-mergeOperators": ["KEEP_BOTH"]
+}

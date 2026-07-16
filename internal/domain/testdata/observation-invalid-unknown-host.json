@@ -1,0 +1,16 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "Observation",
+  "metadata": {
+    "id": "obs:gpt5:cli:instruction:/repo/AGENTS.md"
+  },
+  "spec": {
+    "host": { "id": "gpt-5", "version": "1.0.0" },
+    "surface": "cli",
+    "concept": "instruction",
+    "source": { "kind": "file", "path": "/repo/AGENTS.md" },
+    "scope": { "kind": "workspace", "root": "/repo" },
+    "disposition": "ACTIVE",
+    "evidenceLevel": "E2"
+  }
+}

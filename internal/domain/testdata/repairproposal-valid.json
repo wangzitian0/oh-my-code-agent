@@ -1,0 +1,22 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "RepairProposal",
+  "metadata": {
+    "id": "repair:company-example:enable-code-review"
+  },
+  "spec": {
+    "reportFingerprint": "sha256:88ab5e32bbf5205cac37d9464c219373ac4bbbb169bcfc5035bf5baf56919202",
+    "author": { "kind": "llm", "model": "claude-sonnet-5" },
+    "rationale": "Enable the already-reviewed code-review skill to match the company baseline.",
+    "ownership": "managed",
+    "changes": [
+      {
+        "targetKind": "Activation",
+        "targetId": "worktree:sha256:abc",
+        "patch": { "spec": { "enable": { "skills": ["code-review"] } } }
+      }
+    ],
+    "confirmation": "AUTO_STAGE",
+    "restartRequired": false
+  }
+}

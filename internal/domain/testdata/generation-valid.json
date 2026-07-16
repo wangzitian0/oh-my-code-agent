@@ -1,0 +1,28 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "Generation",
+  "metadata": {
+    "id": "generation:sha256:fce460264c3d6cedd37ec0cd28eedf86aed8dd7e97bf85bb90672404960648be",
+    "worktree": "worktree:sha256:abc",
+    "parent": null,
+    "createdAt": "2026-07-16T00:00:00Z"
+  },
+  "spec": {
+    "desiredGraphDigest": "sha256:fce460264c3d6cedd37ec0cd28eedf86aed8dd7e97bf85bb90672404960648be",
+    "knowledgePacks": [
+      { "id": "codex:cli:0.144", "digest": "sha256:cffbbce1739188271eeae03fed45d5fe2231ee69e0b59fbb3ff6d3c7b888fa07" }
+    ],
+    "hosts": {
+      "codex": {
+        "surface": "cli",
+        "adapterId": "adapter:codex",
+        "adapterVersion": "0.1.0",
+        "ownership": "managed",
+        "artifacts": [
+          { "path": "AGENTS.md", "digest": "sha256:88ab5e32bbf5205cac37d9464c219373ac4bbbb169bcfc5035bf5baf56919202" }
+        ]
+      }
+    },
+    "status": "pending"
+  }
+}

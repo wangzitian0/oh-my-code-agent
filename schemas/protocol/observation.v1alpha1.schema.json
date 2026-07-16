@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omca.dev/schemas/protocol/observation.v1alpha1.schema.json",
+  "title": "Observation v1alpha1",
+  "description": "One normalized source record inventoried by a host adapter, shaped after the Adapter Record Contract in docs/ontology/README.md §7 and the Observed Graph in docs/architecture/README.md §5.1. An ObservationSet (docs/architecture/README.md §9 HostAdapter.Observe) is an array of these. Observation never executes discovered content (init.md invariant: 'observe never writes or executes discovered assets') and must retain opaque/unknown fields losslessly (docs/product/requirements.md FR-2).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": { "$ref": "common.v1alpha1.schema.json#/$defs/apiVersion" },
+    "kind": { "const": "Observation" },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "concept", "source", "scope", "disposition", "evidenceLevel"],
+      "properties": {
+        "host": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id"],
+          "properties": {
+            "id": { "$ref": "common.v1alpha1.schema.json#/$defs/hostId" },
+            "version": { "type": "string" }
+          }
+        },
+        "surface": {
+          "type": "string",
+          "description": "e.g. cli, editor, app, gateway (docs/ontology/README.md §1.1, host non-equivalence rule)."
+        },
+        "concept": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A canonical entity name from docs/ontology/README.md §1.1 (e.g. instruction, skill, mcp_server, agent, hook). Left open-string rather than a closed enum here because the ontology's entity list is still growing (see ontology/concepts/); internal/ontology is the source of truth for which concept IDs are currently known."
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "description": "docs/ontology/README.md §1.1 'source' entity: a physical file, managed policy, CLI flag, environment value, or built-in default."
+            },
+            "path": { "type": "string" },
+            "digest": { "$ref": "common.v1alpha1.schema.json#/$defs/digest" }
+          }
+        },
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "builtin", "managed", "user", "profile", "workspace",
+                "worktree", "directory", "local", "session"
+              ],
+              "description": "docs/ontology/README.md §2, Scope Model canonical scopes."
+            },
+            "root": { "type": "string" },
+            "selector": { "type": "string" },
+            "shared": { "type": "boolean" },
+            "trustRequired": { "type": "boolean" }
+          }
+        },
+        "disposition": { "$ref": "common.v1alpha1.schema.json#/$defs/sourceDisposition" },
+        "evidenceLevel": { "$ref": "common.v1alpha1.schema.json#/$defs/evidenceLevel" },
+        "rawDigest": { "$ref": "common.v1alpha1.schema.json#/$defs/digest" },
+        "parsedDigest": { "$ref": "common.v1alpha1.schema.json#/$defs/digest" },
+        "opaqueVendorFields": {
+          "type": "object",
+          "description": "docs/product/requirements.md FR-2: unknown fields and opaque assets are retained without execution.",
+          "additionalProperties": true
+        }
+      }
+    }
+  }
+}

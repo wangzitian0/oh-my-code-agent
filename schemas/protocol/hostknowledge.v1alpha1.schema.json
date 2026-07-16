@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omca.dev/schemas/protocol/hostknowledge.v1alpha1.schema.json",
+  "title": "HostKnowledge v1alpha1",
+  "description": "An immutable Knowledge Pack: changing facts about one host surface and version range, kept separate from stable ontology meaning (docs/knowledge/README.md §1, §4 'Knowledge Pack Contract'). Adapter code must consume a HostKnowledge document rather than embedding floating vendor facts without evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "evidence", "capabilities"],
+  "properties": {
+    "apiVersion": { "$ref": "common.v1alpha1.schema.json#/$defs/apiVersion" },
+    "kind": { "const": "HostKnowledge" },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "host", "surface", "versionRange", "status"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "host": { "$ref": "common.v1alpha1.schema.json#/$defs/hostId" },
+        "surface": { "type": "string" },
+        "versionRange": { "type": "string", "minLength": 1 },
+        "platforms": { "type": "array", "items": { "type": "string" } },
+        "observedAt": { "type": "string", "format": "date" },
+        "recheckAfter": { "type": "string", "format": "date" },
+        "status": { "$ref": "common.v1alpha1.schema.json#/$defs/knowledgeStatus" }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "kind": {
+            "type": "string",
+            "description": "docs/knowledge/README.md §6, Evidence Priority: official-doc, official-schema, official-source, executable-fixture, maintainer-observation, or community-lead."
+          },
+          "url": { "type": "string" },
+          "path": { "type": "string" },
+          "digest": { "$ref": "common.v1alpha1.schema.json#/$defs/digest" }
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "description": "concept -> operation -> capabilityLevel, plus the independent reconcileMode and verificationMethods (docs/knowledge/README.md §5).",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "discover": { "$ref": "common.v1alpha1.schema.json#/$defs/capabilityLevel" },
+          "parse": { "$ref": "common.v1alpha1.schema.json#/$defs/capabilityLevel" },
+          "normalize": { "$ref": "common.v1alpha1.schema.json#/$defs/capabilityLevel" },
+          "resolve": { "$ref": "common.v1alpha1.schema.json#/$defs/capabilityLevel" },
+          "compile": { "$ref": "common.v1alpha1.schema.json#/$defs/capabilityLevel" },
+          "verify": { "$ref": "common.v1alpha1.schema.json#/$defs/capabilityLevel" },
+          "reconcileMode": { "$ref": "common.v1alpha1.schema.json#/$defs/reconcileMode" },
+          "verificationMethods": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "precedencePrograms": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "operator"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "identity": { "type": "string" },
+          "operator": { "type": "string" },
+          "fixture": { "type": "string" }
+        }
+      }
+    },
+    "knownUnknowns": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

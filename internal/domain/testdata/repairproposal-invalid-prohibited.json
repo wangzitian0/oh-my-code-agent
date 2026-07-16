@@ -1,0 +1,20 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "RepairProposal",
+  "metadata": {
+    "id": "repair:import-native-credential"
+  },
+  "spec": {
+    "reportFingerprint": "sha256:88ab5e32bbf5205cac37d9464c219373ac4bbbb169bcfc5035bf5baf56919202",
+    "author": { "kind": "human" },
+    "ownership": "external",
+    "changes": [
+      {
+        "targetKind": "Profile",
+        "targetId": "personal:alice",
+        "patch": { "spec": { "assets": {} } }
+      }
+    ],
+    "confirmation": "PROHIBITED"
+  }
+}

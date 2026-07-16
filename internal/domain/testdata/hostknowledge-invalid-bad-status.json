@@ -1,0 +1,15 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "HostKnowledge",
+  "metadata": {
+    "id": "codex:cli:0.144",
+    "host": "codex",
+    "surface": "cli",
+    "versionRange": ">=0.144.0 <0.145.0",
+    "status": "ARCHIVED"
+  },
+  "evidence": [
+    { "id": "codex-environment-variables", "kind": "official-doc" }
+  ],
+  "capabilities": {}
+}
