@@ -239,6 +239,12 @@ future debugging does not depend on the current repository head.
 
 ## 12. Governance
 
+- Host support follows a two-tier policy. Tier 1 (first-party, qualified):
+  Claude Code and Codex — maintainers keep their Knowledge fresh and their
+  fixtures green. Tier 2 (knowledge-only): every other host stays at the
+  observation tier; its Packs may go `DUE` or `STALE` without blocking a
+  release, and promoting a capability requires an adapter plugin with fixtures
+  from a maintainer or the community.
 - Repository maintainers approve Knowledge PRs.
 - Evidence URLs must be allowlisted official domains or pinned official source repositories.
 - Generated candidates identify automation and collection time.

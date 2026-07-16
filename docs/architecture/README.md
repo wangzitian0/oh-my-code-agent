@@ -74,6 +74,7 @@ to policy outcomes.
 | Component | Responsibility |
 |---|---|
 | Context Detector | Resolve worktree, repository, identities, host, surface, cwd, trust, and explicit overrides. |
+| Host Adapter Plugins | Own physical host semantics behind the frozen adapter contract; ship with their own Knowledge Packs, fixtures, and qualification state. |
 | Native Observer | Inventory known sources without executing discovered assets. |
 | Knowledge Repository | Resolve immutable host/version facts and qualification state. |
 | Normalizer | Project supported observations into canonical ontology entities. |
@@ -120,7 +121,10 @@ constraints, and evidence.
 ### 5.3 Desired Graph
 
 Represents the host-neutral result of Profiles, Bindings, local Activation,
-policy, and exceptions. It contains no native host path.
+policy, and exceptions. It contains no native host path. Explicit `hosts`
+selectors are the only host-aware element: they narrow where an intent applies
+so parallel hosts can carry different loadouts, but they never describe native
+host behavior or precedence.
 
 ### 5.4 Generation Graph
 
@@ -148,10 +152,10 @@ edge contains Adapter ID, Knowledge digest, mapping relation, and ownership.
 │   ├── assurance/              # verification and guarantee classification
 │   ├── artifact/               # content-addressed local store
 │   ├── mcp/                    # minimal model-facing protocol
-│   └── adapters/
-│       ├── codex/
+│   ├── plugin/                 # adapter contract, manifests, loading
+│   └── adapters/               # first-party plugins
 │       ├── claude/
-│       └── opencode/
+│       └── codex/
 ├── ontology/
 │   ├── concepts/
 │   ├── operators/
@@ -235,8 +239,28 @@ re-creatable observations and compilation results live under XDG cache.
 
 ## 9. Core Interfaces
 
-Host adapters own physical host semantics. They do not compose Profiles or
-classify cross-host Drift.
+Host adapters are plugins behind one frozen contract. They own physical host
+semantics; they do not compose Profiles or classify cross-host Drift.
+
+Each plugin declares itself through a manifest:
+
+```go
+type PluginManifest struct {
+    AdapterID       AdapterID
+    AdapterVersion  string
+    ContractVersion string
+    Hosts           []HostSelector // canonical host ID, surfaces, version ranges
+    KnowledgePacks  []KnowledgeRef
+    Fixtures        []FixtureRef
+}
+```
+
+First-party adapters (`claude-code`, `codex`) compile into the `omca` binary
+but may use only the plugin contract — no private core APIs. The same contract
+is designed to run out of process (a separate executable speaking the versioned
+protocol over stdio), so an external plugin can qualify a new host without
+forking the core. The out-of-process transport becomes a qualified feature in
+M6; until then it is a design constraint, not a shipped mechanism.
 
 ```go
 type HostAdapter interface {

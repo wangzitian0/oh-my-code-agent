@@ -56,6 +56,13 @@ hosts behave identically.
     store, or references. OMCA does not copy native credential files by default.
 15. Third-party host knowledge changes only through repository pull requests
     approved by maintainers.
+16. Host support is packaged as versioned adapter plugins behind one frozen
+    adapter contract. Claude Code and OpenAI Codex are the first-party plugins;
+    every other host integrates through the same contract or stays at the
+    knowledge/observation tier.
+17. Desired state supports host-scoped selection. A Profile or Activation may
+    scope an asset intent to specific hosts, so parallel hosts in one worktree
+    can run deliberately different loadouts.
 
 ## Activation Intent
 
@@ -117,6 +124,8 @@ state, even when they persist across restarts.
 - Let a user activate only the assets needed for the current identity and task.
 - Make every generated value traceable to intent, source, adapter, Knowledge
   Pack, and evidence.
+- Run several managed hosts side by side in the same worktree, each with a
+  deliberately different loadout that matches what that host is best at.
 - Allow any MCP-capable LLM to query the report and propose a repair.
 - Make restart, rollback, and native-versus-runtime comparison routine.
 
@@ -132,6 +141,10 @@ state, even when they persist across restarts.
 - Build a hosted SaaS, secret manager, marketplace, or background fleet manager
   in v1.
 - Support every host concept for write operations.
+- Route tasks between hosts, schedule work, or orchestrate parallel host
+  sessions. OMCA makes per-host loadouts cheap, isolated, and comparable;
+  deciding which host works on what remains with the user or a separate
+  orchestration layer built on top of OMCA.
 
 ## Trust Boundary
 
@@ -149,9 +162,12 @@ blocked planning.
 
 ### Hosts
 
-- OpenAI Codex as the first end-to-end adapter.
-- Claude Code and OpenCode after the Codex runtime and report pass their exit gates.
-- Other hosts remain inventory and Knowledge targets until qualified per capability.
+- Claude Code and OpenAI Codex as first-party adapter plugins, both qualified
+  inside the MVP. Codex leads each runtime milestone because `CODEX_HOME` is
+  the cleanest documented isolation boundary; Claude Code follows within the
+  same milestone through its own qualified mechanisms.
+- OpenCode and every other host remain inventory and Knowledge targets until an
+  adapter plugin qualifies them per capability.
 
 ### Concepts
 
@@ -165,7 +181,7 @@ blocked planning.
 
 - `omca` TUI for report, activation, restart, rollback, and Debug views.
 - `omca env` for direnv integration.
-- Host shims such as `codex` inside an OMCA environment.
+- Host shims such as `codex` and `claude` inside an OMCA environment.
 - `omca mcp serve` for model-facing queries and repair proposals.
 - Stable JSON output for automation and test fixtures.
 
@@ -176,14 +192,14 @@ In a repository with shared project guidance and native user configuration:
 ```bash
 cd <worktree>
 direnv allow
-codex
+codex     # and, in a second terminal, claude
 ```
 
 The system must:
 
 1. create or select a clean bootstrap generation without inheriting native
    global configuration;
-2. start Codex with the OMCA MCP server and project-loadable inputs;
+2. start each host with the OMCA MCP server and project-loadable inputs;
 3. report native, current, desired, and excluded Instructions, Skills, MCP
    servers, Hooks, and permissions;
 4. show provenance, coverage, host version, evidence level, and context-cost
@@ -192,8 +208,10 @@ The system must:
 6. compile a pending generation without mutating the active one;
 7. activate it after restart and verify the new effective state;
 8. roll back to the previous generation;
-9. compare the isolated runtime with the native host configuration; and
-10. leave the real global configuration unchanged.
+9. compare the isolated runtime with the native host configuration;
+10. run Codex and Claude Code side by side in the same worktree, each with its
+    own host-scoped loadout compiled from the same desired state; and
+11. leave the real global configuration unchanged.
 
 ## Invariants
 

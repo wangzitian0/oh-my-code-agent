@@ -214,6 +214,11 @@ Examples:
 Aliases are lookup conveniences only. An adapter must bind the detected binary
 and version to a canonical ID before reading or writing anything.
 
+Registry entries are knowledge targets, not support commitments. First-party
+qualified adapter plugins exist for `claude-code` and `codex`; every other host
+remains at the knowledge/observation tier until an adapter plugin qualifies it
+per capability.
+
 ## 5. Cross-host Capability Map
 
 Legend: `E` = `EXACT`, `P` = `PARTIAL`, `V` = `VENDOR_ONLY`, `-` = `ABSENT`,
