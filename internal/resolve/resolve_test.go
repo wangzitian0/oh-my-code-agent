@@ -1,6 +1,7 @@
 package resolve
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -147,6 +148,51 @@ func TestResolve_HostsSelectorRefinement(t *testing.T) {
 	if !claudeState.IsActive(KindSkill, "shared-skill") {
 		t.Error("claude-code only sees the host-neutral DEFAULT and should get shared-skill")
 	}
+}
+
+// TestResolve_NoOpActivation_DoesNotMisattributeReason is a regression test
+// for a Copilot-flagged bug: applyLayer used to overwrite Reason on an
+// enable/disable that did not actually change the outcome, hiding the real
+// source of the decision.
+func TestResolve_NoOpActivation_DoesNotMisattributeReason(t *testing.T) {
+	profile := mustSkillProfile("company:example",
+		domain.AssetRef{ID: "already-default", Intent: domain.IntentDefault},
+		domain.AssetRef{ID: "already-denied", Intent: domain.IntentDenied},
+	)
+
+	t.Run("enabling an already-active DEFAULT asset does not overwrite its reason", func(t *testing.T) {
+		activation := domain.Activation{
+			Spec: domain.ActivationSpec{Enable: domain.ActivationSelection{Skills: []string{"already-default"}}},
+		}
+		state, err := Resolve([]domain.Profile{profile}, activation, nil, "claude-code", fixedNow)
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		asset, ok := state.Find(KindSkill, "already-default")
+		if !ok || !asset.Active {
+			t.Fatalf("already-default should be active; state = %+v", asset)
+		}
+		if strings.Contains(asset.Reason, "enable") {
+			t.Errorf("Reason = %q, should attribute activation to the Profile, not the no-op Activation enable", asset.Reason)
+		}
+	})
+
+	t.Run("disabling an already-inactive DENIED asset does not overwrite its reason", func(t *testing.T) {
+		activation := domain.Activation{
+			Spec: domain.ActivationSpec{Disable: domain.ActivationSelection{Skills: []string{"already-denied"}}},
+		}
+		state, err := Resolve([]domain.Profile{profile}, activation, nil, "claude-code", fixedNow)
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		asset, ok := state.Find(KindSkill, "already-denied")
+		if !ok || asset.Active {
+			t.Fatalf("already-denied should stay inactive; state = %+v", asset)
+		}
+		if strings.Contains(asset.Reason, "disable") {
+			t.Errorf("Reason = %q, should attribute inactivity to the Profile's DENIED, not the no-op Activation disable", asset.Reason)
+		}
+	})
 }
 
 // TestResolve_RequiredDisabledOnlyViaAllowedException is the round-2 audit
