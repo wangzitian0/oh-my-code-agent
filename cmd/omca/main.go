@@ -3,6 +3,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/wangzitian0/oh-my-code-agent/internal/version"
@@ -12,9 +13,11 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-func run(args []string, stdout, stderr *os.File) int {
+const usage = "usage: omca <command>"
+
+func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: omca <command>")
+		fmt.Fprintln(stderr, usage)
 		return 2
 	}
 
@@ -23,7 +26,7 @@ func run(args []string, stdout, stderr *os.File) int {
 		fmt.Fprintln(stdout, version.String())
 		return 0
 	default:
-		fmt.Fprintf(stderr, "omca: unknown command %q\n", args[0])
+		fmt.Fprintf(stderr, "omca: unknown command %q\n%s\n", args[0], usage)
 		return 2
 	}
 }
