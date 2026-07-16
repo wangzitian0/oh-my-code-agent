@@ -1,0 +1,16 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "Activation",
+  "metadata": {
+    "worktree": "worktree:sha256:0123456789abcdef"
+  },
+  "spec": {
+    "hosts": {
+      "claude-code": {
+        "enable": {
+          "skills": ["release-production"]
+        }
+      }
+    }
+  }
+}

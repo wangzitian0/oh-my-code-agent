@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omca.dev/schemas/domain/common.v1alpha1.schema.json",
+  "title": "Common v1alpha1 definitions",
+  "$defs": {
+    "apiVersion": {
+      "type": "string",
+      "const": "omca.dev/v1alpha1"
+    },
+    "hostId": {
+      "type": "string",
+      "enum": [
+        "claude-code",
+        "codex",
+        "opencode",
+        "cursor",
+        "github-copilot",
+        "antigravity-cli",
+        "pi",
+        "openclaw",
+        "hermes-agent"
+      ],
+      "description": "Canonical host ID from docs/ontology/README.md §4. Aliases are a lookup convenience at the adapter boundary only; desired-state documents must use the canonical ID."
+    },
+    "hostsSelector": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/hostId" },
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "Refines the containing intent to exactly these hosts. Absent or omitted means the intent applies to every host launched in the matching context."
+    },
+    "intent": {
+      "type": "string",
+      "enum": ["REQUIRED", "DEFAULT", "AVAILABLE", "DENIED"]
+    },
+    "assetRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "intent"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "intent": { "$ref": "#/$defs/intent" },
+        "hosts": { "$ref": "#/$defs/hostsSelector" }
+      }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "Binding",
+  "metadata": {
+    "id": "binding:order-service"
+  },
+  "spec": {
+    "match": {
+      "repository": "github.com/example/order-service",
+      "paths": ["**"]
+    },
+    "profiles": [
+      "personal:alice",
+      "company:example",
+      "team:payments",
+      "project:order-service"
+    ]
+  }
+}

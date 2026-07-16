@@ -1,0 +1,14 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "Profile",
+  "metadata": {
+    "id": "company:example"
+  },
+  "spec": {
+    "assets": {
+      "skills": [
+        { "id": "release-production", "intent": "DENIED" }
+      ]
+    }
+  }
+}
