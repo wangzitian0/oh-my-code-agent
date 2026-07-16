@@ -65,6 +65,7 @@
         "knowledgeStatus": {
           "type": "object",
           "description": "hostId -> knowledgeStatus, docs/knowledge/README.md §7.",
+          "propertyNames": { "$ref": "common.v1alpha1.schema.json#/$defs/hostId" },
           "additionalProperties": { "$ref": "common.v1alpha1.schema.json#/$defs/knowledgeStatus" }
         }
       }

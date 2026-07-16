@@ -2,6 +2,7 @@ package ontology
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -126,6 +127,7 @@ func TestLoadRegistry_RejectsMalformedConcepts(t *testing.T) {
 		"missing-mergeoperators",
 		"bad-operator",
 		"invalid-json",
+		"duplicate-conceptid",
 	}
 	for _, dir := range cases {
 		t.Run(dir, func(t *testing.T) {
@@ -133,5 +135,19 @@ func TestLoadRegistry_RejectsMalformedConcepts(t *testing.T) {
 				t.Errorf("LoadRegistry(testdata/%s) = nil error, want a rejection", dir)
 			}
 		})
+	}
+}
+
+// TestLoadRegistry_DuplicateConceptID_FailsClosed is the named regression:
+// two concept files declaring the same conceptId must reject the whole
+// load, never silently let the later file (in directory-listing order)
+// override the earlier one depending on filesystem enumeration order.
+func TestLoadRegistry_DuplicateConceptID_FailsClosed(t *testing.T) {
+	_, err := LoadRegistry(filepath.Join("testdata", "duplicate-conceptid"))
+	if err == nil {
+		t.Fatal("expected an error for two concept files declaring the same conceptId")
+	}
+	if !strings.Contains(err.Error(), "already declared") {
+		t.Errorf("error = %v, want it to mention the duplicate declaration", err)
 	}
 }

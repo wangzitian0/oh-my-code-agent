@@ -145,6 +145,10 @@ func TestValidateReport_RequiredFields(t *testing.T) {
 		{"drift invalid evidenceLevel", func(r *Report) { r.Spec.Drift[0].EvidenceLevel = "E9" }},
 		{"drift invalid guarantee", func(r *Report) { r.Spec.Drift[0].Guarantee = "MAYBE" }},
 		{"invalid knowledgeStatus", func(r *Report) { r.Spec.KnowledgeStatus["codex"] = "ARCHIVED" }},
+		{"knowledgeStatus key is not a canonical host id", func(r *Report) {
+			delete(r.Spec.KnowledgeStatus, "codex")
+			r.Spec.KnowledgeStatus["not-a-host"] = KnowledgeFresh
+		}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

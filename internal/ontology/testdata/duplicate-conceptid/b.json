@@ -1,0 +1,7 @@
+{
+  "conceptId": "dup",
+  "properties": {},
+  "x-nonEquivalenceRule": "n/a",
+  "x-logicalIdentity": { "fields": ["id"], "rule": "n/a" },
+  "x-mergeOperators": ["CONCAT_ORDERED"]
+}

@@ -45,6 +45,7 @@
         "hosts": {
           "type": "object",
           "description": "hostId -> per-host compiled artifact tree, each edge carrying Adapter ID, mapping relation, and ownership (docs/architecture/README.md §5.4).",
+          "propertyNames": { "$ref": "common.v1alpha1.schema.json#/$defs/hostId" },
           "additionalProperties": {
             "type": "object",
             "additionalProperties": false,
