@@ -105,6 +105,9 @@ func ValidateReport(r Report) error {
 		}
 	}
 	for host, status := range r.Spec.KnowledgeStatus {
+		if err := ValidateHostID(host); err != nil {
+			return fmt.Errorf("Report: spec.knowledgeStatus: %w", err)
+		}
 		if err := ValidateKnowledgeStatus(status); err != nil {
 			return fmt.Errorf("Report: spec.knowledgeStatus[%s]: %w", host, err)
 		}

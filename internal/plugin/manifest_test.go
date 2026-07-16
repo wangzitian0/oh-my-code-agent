@@ -49,6 +49,9 @@ func TestPluginManifestValidate(t *testing.T) {
 		{"missing contract version", func(m *PluginManifest) { m.ContractVersion = "" }},
 		{"no hosts", func(m *PluginManifest) { m.Hosts = nil }},
 		{"invalid host selector", func(m *PluginManifest) { m.Hosts[0].HostID = "not-a-host" }},
+		{"duplicate host id", func(m *PluginManifest) {
+			m.Hosts = append(m.Hosts, HostSelector{HostID: "codex", Surfaces: []string{"editor"}, VersionRange: ">=0.144.0"})
+		}},
 		{"empty knowledge ref", func(m *PluginManifest) { m.KnowledgePacks = []KnowledgeRef{{}} }},
 		{"empty fixture ref", func(m *PluginManifest) { m.Fixtures = []FixtureRef{{}} }},
 	}

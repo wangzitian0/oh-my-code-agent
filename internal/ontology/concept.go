@@ -35,6 +35,11 @@ type ConceptSchema struct {
 	NonEquivalence  string          `json:"x-nonEquivalenceRule"`
 	LogicalIdentity LogicalIdentity `json:"x-logicalIdentity"`
 	MergeOperators  []MergeOperator `json:"x-mergeOperators"`
+
+	// sourcePath is the file this concept was loaded from, kept only for a
+	// duplicate-conceptId error message; it plays no role in concept
+	// semantics and is deliberately unexported.
+	sourcePath string
 }
 
 // conceptFile mirrors the on-disk JSON shape (ontology/concepts/*.json) for
@@ -121,6 +126,10 @@ func LoadRegistry(dir string) (*Registry, error) {
 		if err != nil {
 			return nil, fmt.Errorf("ontology: %s: %w", path, err)
 		}
+		if existing, ok := reg.concepts[c.ID]; ok {
+			return nil, fmt.Errorf("ontology: %s: concept %q is already declared by %s; a duplicate conceptId must fail closed rather than silently override an earlier file", path, c.ID, existing.sourcePath)
+		}
+		c.sourcePath = path
 		reg.concepts[c.ID] = c
 	}
 	return reg, nil

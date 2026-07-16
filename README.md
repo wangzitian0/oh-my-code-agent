@@ -26,6 +26,7 @@ can give parallel hosts in the same worktree deliberately different loadouts.
 - [Trusted reporting](docs/architecture/reporting.md): evidence, drift, MCP tools, and debugging.
 - [Ontology](docs/ontology/README.md): canonical concepts and host mappings.
 - [Knowledge lifecycle](docs/knowledge/README.md): versioned third-party facts and upgrades.
+- [Architecture decision records](docs/adr/): frozen isolation, ownership, credential, knowledge update, and plugin distribution decisions.
 - [Roadmap](docs/project/roadmap.md): gated implementation plan.
 
 ## Development

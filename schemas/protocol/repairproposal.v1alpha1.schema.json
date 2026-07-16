@@ -38,9 +38,12 @@
             },
             "model": {
               "type": "string",
-              "description": "Required when kind is llm (runtime model ID, docs/architecture/reporting.md §12)."
+              "minLength": 1,
+              "description": "Required and non-empty when kind is llm (runtime model ID, docs/architecture/reporting.md §12)."
             }
-          }
+          },
+          "if": { "properties": { "kind": { "const": "llm" } } },
+          "then": { "required": ["kind", "model"] }
         },
         "rationale": {
           "type": "string",

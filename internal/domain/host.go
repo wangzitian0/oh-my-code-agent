@@ -26,12 +26,19 @@ func ValidateHostID(id string) error {
 	return nil
 }
 
-// ValidateHostIDs validates every entry in a hosts selector list.
+// ValidateHostIDs validates every entry in a hosts selector list. Entries
+// must be unique, matching the `uniqueItems: true` constraint on
+// `hostsSelector` in schemas/domain/common.v1alpha1.schema.json.
 func ValidateHostIDs(ids []string) error {
+	seen := make(map[string]bool, len(ids))
 	for _, id := range ids {
 		if err := ValidateHostID(id); err != nil {
 			return err
 		}
+		if seen[id] {
+			return fmt.Errorf("duplicate host id %q in hosts selector", id)
+		}
+		seen[id] = true
 	}
 	return nil
 }

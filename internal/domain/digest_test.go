@@ -53,8 +53,14 @@ func TestCanonicalDigest_ArrayOrderMatters(t *testing.T) {
 	a := map[string]any{"items": []string{"a", "b"}}
 	b := map[string]any{"items": []string{"b", "a"}}
 
-	digestA, _ := CanonicalDigest(a)
-	digestB, _ := CanonicalDigest(b)
+	digestA, err := CanonicalDigest(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digestB, err := CanonicalDigest(b)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if digestA == digestB {
 		t.Fatal("expected different digests when array order differs")

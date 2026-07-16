@@ -40,6 +40,20 @@ func Run(t *testing.T, adapter plugin.HostAdapter) {
 	runResolveCompileVerifyLaunch(t, ctx, adapter, host, capManifest)
 }
 
+// testInvocation returns a non-empty InvocationContext for every conformance
+// request. InvocationContext is a first-class, always-present part of the
+// contract (docs/architecture/README.md §9), so an adapter that validates or
+// relies on it must not be penalized by a conformance suite that only ever
+// sends it zero-valued.
+func testInvocation() plugin.InvocationContext {
+	return plugin.InvocationContext{
+		WorktreeID:   "conformance/worktree",
+		Cwd:          "/conformance/worktree",
+		Trust:        "trusted",
+		GenerationID: "conformance/generation-0",
+	}
+}
+
 func runID(t *testing.T, adapter plugin.HostAdapter) {
 	t.Helper()
 	if adapter.ID() == "" {
@@ -49,7 +63,7 @@ func runID(t *testing.T, adapter plugin.HostAdapter) {
 
 func runDetect(t *testing.T, ctx context.Context, adapter plugin.HostAdapter) plugin.HostInstance {
 	t.Helper()
-	instances, err := adapter.Detect(ctx, plugin.DetectRequest{})
+	instances, err := adapter.Detect(ctx, plugin.DetectRequest{Invocation: testInvocation()})
 	if err != nil {
 		t.Fatalf("Detect: unexpected error: %v", err)
 	}
@@ -88,19 +102,19 @@ func runNotDetectedTaxonomy(t *testing.T, ctx context.Context, adapter plugin.Ho
 	if _, err := adapter.Capabilities(ctx, notDetected); !errors.Is(err, plugin.ErrNotDetected) {
 		t.Errorf("Capabilities(undetected host) error = %v, want ErrNotDetected", err)
 	}
-	if _, err := adapter.Observe(ctx, plugin.ObserveRequest{Host: notDetected}); !errors.Is(err, plugin.ErrNotDetected) {
+	if _, err := adapter.Observe(ctx, plugin.ObserveRequest{Invocation: testInvocation(), Host: notDetected}); !errors.Is(err, plugin.ErrNotDetected) {
 		t.Errorf("Observe(undetected host) error = %v, want ErrNotDetected", err)
 	}
-	if _, err := adapter.Resolve(ctx, plugin.ResolveRequest{Host: notDetected}); !errors.Is(err, plugin.ErrNotDetected) {
+	if _, err := adapter.Resolve(ctx, plugin.ResolveRequest{Invocation: testInvocation(), Host: notDetected}); !errors.Is(err, plugin.ErrNotDetected) {
 		t.Errorf("Resolve(undetected host) error = %v, want ErrNotDetected", err)
 	}
-	if _, err := adapter.Compile(ctx, plugin.CompileRequest{Host: notDetected}); !errors.Is(err, plugin.ErrNotDetected) {
+	if _, err := adapter.Compile(ctx, plugin.CompileRequest{Invocation: testInvocation(), Host: notDetected}); !errors.Is(err, plugin.ErrNotDetected) {
 		t.Errorf("Compile(undetected host) error = %v, want ErrNotDetected", err)
 	}
-	if _, err := adapter.Verify(ctx, plugin.VerifyRequest{Host: notDetected}); !errors.Is(err, plugin.ErrNotDetected) {
+	if _, err := adapter.Verify(ctx, plugin.VerifyRequest{Invocation: testInvocation(), Host: notDetected}); !errors.Is(err, plugin.ErrNotDetected) {
 		t.Errorf("Verify(undetected host) error = %v, want ErrNotDetected", err)
 	}
-	if err := adapter.Launch(ctx, plugin.LaunchRequest{Host: notDetected}); !errors.Is(err, plugin.ErrNotDetected) {
+	if err := adapter.Launch(ctx, plugin.LaunchRequest{Invocation: testInvocation(), Host: notDetected}); !errors.Is(err, plugin.ErrNotDetected) {
 		t.Errorf("Launch(undetected host) error = %v, want ErrNotDetected", err)
 	}
 }
@@ -128,7 +142,7 @@ func runObserveZeroSideEffects(t *testing.T, ctx context.Context, adapter plugin
 		t.Fatalf("snapshot sandbox before Observe: %v", err)
 	}
 
-	if _, err := adapter.Observe(ctx, plugin.ObserveRequest{Host: host, Roots: []string{sandbox}}); err != nil {
+	if _, err := adapter.Observe(ctx, plugin.ObserveRequest{Invocation: testInvocation(), Host: host, Roots: []string{sandbox}}); err != nil {
 		t.Fatalf("Observe(sandboxed roots): unexpected error: %v", err)
 	}
 
@@ -174,12 +188,12 @@ func runResolveCompileVerifyLaunch(t *testing.T, ctx context.Context, adapter pl
 		t.Fatal("adapter's CapabilityManifest declares no concept usable for the resolve/compile/verify/launch happy path; conformance requires at least one")
 	}
 
-	obs, err := adapter.Observe(ctx, plugin.ObserveRequest{Host: host})
+	obs, err := adapter.Observe(ctx, plugin.ObserveRequest{Invocation: testInvocation(), Host: host})
 	if err != nil {
 		t.Fatalf("Observe (as Resolve input): unexpected error: %v", err)
 	}
 
-	effective, err := adapter.Resolve(ctx, plugin.ResolveRequest{Host: host, Concept: okConcept, Observations: obs})
+	effective, err := adapter.Resolve(ctx, plugin.ResolveRequest{Invocation: testInvocation(), Host: host, Concept: okConcept, Observations: obs})
 	if err != nil {
 		t.Fatalf("Resolve(%q): unexpected error: %v", okConcept, err)
 	}
@@ -187,23 +201,23 @@ func runResolveCompileVerifyLaunch(t *testing.T, ctx context.Context, adapter pl
 		t.Errorf("Resolve(%q).Host = %+v, want %+v", okConcept, effective.Host, host)
 	}
 
-	artifacts, err := adapter.Compile(ctx, plugin.CompileRequest{Host: host, Concept: okConcept, Desired: effective})
+	artifacts, err := adapter.Compile(ctx, plugin.CompileRequest{Invocation: testInvocation(), Host: host, Concept: okConcept, Desired: effective})
 	if err != nil {
 		t.Fatalf("Compile(%q): unexpected error: %v", okConcept, err)
 	}
 
-	if _, err := adapter.Verify(ctx, plugin.VerifyRequest{Host: host, Concept: okConcept, Artifacts: artifacts}); err != nil {
+	if _, err := adapter.Verify(ctx, plugin.VerifyRequest{Invocation: testInvocation(), Host: host, Concept: okConcept, Artifacts: artifacts}); err != nil {
 		t.Fatalf("Verify(%q): unexpected error: %v", okConcept, err)
 	}
 
-	if err := adapter.Launch(ctx, plugin.LaunchRequest{Host: host, Concept: okConcept, Artifacts: artifacts}); err != nil {
+	if err := adapter.Launch(ctx, plugin.LaunchRequest{Invocation: testInvocation(), Host: host, Concept: okConcept, Artifacts: artifacts}); err != nil {
 		t.Errorf("Launch(%q): unexpected error: %v", okConcept, err)
 	}
 
 	if unsupported, ok := firstConceptWith(capManifest, func(e plugin.CapabilityEntry) bool {
 		return e.Resolve == plugin.CapabilityUnsupported
 	}); ok {
-		if _, err := adapter.Resolve(ctx, plugin.ResolveRequest{Host: host, Concept: unsupported, Observations: obs}); !errors.Is(err, plugin.ErrUnsupportedOperation) {
+		if _, err := adapter.Resolve(ctx, plugin.ResolveRequest{Invocation: testInvocation(), Host: host, Concept: unsupported, Observations: obs}); !errors.Is(err, plugin.ErrUnsupportedOperation) {
 			t.Errorf("Resolve(%q) [capability UNSUPPORTED] error = %v, want ErrUnsupportedOperation", unsupported, err)
 		}
 	} else {
@@ -213,10 +227,10 @@ func runResolveCompileVerifyLaunch(t *testing.T, ctx context.Context, adapter pl
 	if blocked, ok := firstConceptWith(capManifest, func(e plugin.CapabilityEntry) bool {
 		return e.ReconcileMode == plugin.ReconcileBlocked
 	}); ok {
-		if _, err := adapter.Compile(ctx, plugin.CompileRequest{Host: host, Concept: blocked, Desired: effective}); !errors.Is(err, plugin.ErrCapabilityDenied) {
+		if _, err := adapter.Compile(ctx, plugin.CompileRequest{Invocation: testInvocation(), Host: host, Concept: blocked, Desired: effective}); !errors.Is(err, plugin.ErrCapabilityDenied) {
 			t.Errorf("Compile(%q) [reconcile BLOCKED] error = %v, want ErrCapabilityDenied", blocked, err)
 		}
-		if err := adapter.Launch(ctx, plugin.LaunchRequest{Host: host, Concept: blocked}); !errors.Is(err, plugin.ErrCapabilityDenied) {
+		if err := adapter.Launch(ctx, plugin.LaunchRequest{Invocation: testInvocation(), Host: host, Concept: blocked}); !errors.Is(err, plugin.ErrCapabilityDenied) {
 			t.Errorf("Launch(%q) [reconcile BLOCKED] error = %v, want ErrCapabilityDenied", blocked, err)
 		}
 	} else {

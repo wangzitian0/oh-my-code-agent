@@ -38,4 +38,7 @@ func TestValidateHostIDs(t *testing.T) {
 	if err := ValidateHostIDs(nil); err != nil {
 		t.Fatalf("empty selector should be valid: %v", err)
 	}
+	if err := ValidateHostIDs([]string{"codex", "codex"}); err == nil {
+		t.Fatal("expected an error for a duplicate host id (schema declares uniqueItems: true)")
+	}
 }
