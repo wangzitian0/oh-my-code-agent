@@ -1,0 +1,15 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "Evidence",
+  "metadata": {
+    "id": "evidence:codex:instruction:AGENTS.md:precedence"
+  },
+  "spec": {
+    "subject": {
+      "concept": "instruction",
+      "logicalId": "codex:instruction:AGENTS.md"
+    },
+    "level": "E9",
+    "observedAt": "2026-07-16T00:00:00Z"
+  }
+}

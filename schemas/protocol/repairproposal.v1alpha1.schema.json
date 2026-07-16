@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omca.dev/schemas/protocol/repairproposal.v1alpha1.schema.json",
+  "title": "RepairProposal v1alpha1",
+  "description": "A schema-constrained desired-state change proposal tied to a Report fingerprint (docs/architecture/reporting.md §11.3 omca_propose: 'Accepts a schema-constrained desired-state proposal tied to a report fingerprint. It does not accept raw native file edits.'). init.md decision 12: any LLM may submit a repair proposal, but only the deterministic core writes anything. docs/product/requirements.md §8 (LLM Boundary) and FR-10: OMCA validates every proposal against schemas, capability gates, policy, ownership, source digests, and risk confirmation before writing anything. docs/project/roadmap.md M4 additionally requires validating against report fingerprint, schemas, capability, ownership, policy, and risk.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": { "$ref": "common.v1alpha1.schema.json#/$defs/apiVersion" },
+    "kind": { "const": "RepairProposal" },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reportFingerprint", "author", "ownership", "changes", "confirmation"],
+      "properties": {
+        "reportFingerprint": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/digest",
+          "description": "Must match the spec.fingerprint of the Report this proposal was computed against; a stale fingerprint is rejected rather than reinterpreted."
+        },
+        "author": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": ["human", "llm"],
+              "description": "docs/architecture/reporting.md §12, LLM Annotations: author.kind."
+            },
+            "model": {
+              "type": "string",
+              "description": "Required when kind is llm (runtime model ID, docs/architecture/reporting.md §12)."
+            }
+          }
+        },
+        "rationale": {
+          "type": "string",
+          "description": "LLM or human explanation. Kept structurally separate from the deterministic fields above: docs/architecture/reporting.md §12, 'An annotation cannot change a Drift category, evidence level, capability, guarantee, or source disposition.'"
+        },
+        "ownership": {
+          "$ref": "common.v1alpha1.schema.json#/$defs/ownership",
+          "description": "The ownership tier of the artifacts this proposal would touch; validated against the target's actual ownership before compilation (docs/project/roadmap.md M4)."
+        },
+        "changes": {
+          "type": "array",
+          "minItems": 1,
+          "description": "One or more targeted desired-state patches (Profile/Binding/Activation), never a raw native file edit.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["targetKind", "targetId", "patch"],
+            "properties": {
+              "targetKind": { "type": "string", "enum": ["Profile", "Binding", "Activation"] },
+              "targetId": { "type": "string", "minLength": 1 },
+              "patch": {
+                "type": "object",
+                "description": "A partial document merged into the target using that document's own merge semantics; opaque to this schema."
+              }
+            }
+          }
+        },
+        "confirmation": {
+          "type": "string",
+          "enum": ["AUTO_STAGE", "CONFIRM_REQUIRED", "REVIEWABLE_DIFF", "PROHIBITED"],
+          "description": "Derived from the risk-based confirmation table in docs/product/requirements.md §7 (not a verbatim doc enum name — that table lists actions, this closes them into a checkable vocabulary). A PROHIBITED proposal must be rejected before staging, never merely flagged."
+        },
+        "requiredConfirmations": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "e.g. network-destination, secret-reference, executable-behavior (docs/product/requirements.md §7)."
+        },
+        "restartRequired": { "type": "boolean" }
+      }
+    }
+  }
+}

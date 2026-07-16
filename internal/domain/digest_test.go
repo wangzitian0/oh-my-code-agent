@@ -60,3 +60,26 @@ func TestCanonicalDigest_ArrayOrderMatters(t *testing.T) {
 		t.Fatal("expected different digests when array order differs")
 	}
 }
+
+func TestIsCanonicalDigest(t *testing.T) {
+	digest, err := CanonicalDigest(map[string]any{"id": "company:example"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !IsCanonicalDigest(digest) {
+		t.Errorf("IsCanonicalDigest(%q) = false, want true for a real CanonicalDigest output", digest)
+	}
+
+	cases := []string{
+		"",
+		"sha256:",
+		"sha256:abc",
+		"md5:d41d8cd98f00b204e9800998ecf8427e",
+		"sha256:" + "G" + digest[7+1:], // uppercase hex is invalid
+	}
+	for _, c := range cases {
+		if IsCanonicalDigest(c) {
+			t.Errorf("IsCanonicalDigest(%q) = true, want false", c)
+		}
+	}
+}
