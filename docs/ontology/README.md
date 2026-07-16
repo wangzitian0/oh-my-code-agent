@@ -1,6 +1,6 @@
 # Coding Agent Harness Ontology
 
-Status: draft v0.2
+Status: draft v0.3
 
 Evidence snapshot: 2026-07-16
 
@@ -16,6 +16,12 @@ not TUI ontology.
 Host behavior changes quickly. A mapping is usable only when it records the
 host version, evidence URL or source revision, physical source, scope, merge
 operator, and confidence. `UNKNOWN` is safer than a guessed adapter.
+
+This document defines canonical meaning and cross-host mappings. Versioned host
+facts, evidence retention, and upgrade workflow belong to the
+[Host Knowledge Lifecycle](../knowledge/README.md). Product defaults and runtime
+behavior belong to the [Project Charter](../../init.md) and
+[Runtime Architecture](../architecture/runtime.md).
 
 ## 1. Canonical Tree
 
@@ -64,11 +70,12 @@ flowchart TD
     R --> R2[Session History Cache]
     R --> R3[Credentials and Secrets]
     R --> R4[Effective Snapshot and Diagnostics]
+    R --> R5[Runtime Generation]
 
     D --> D1[Built-in]
     D --> D2[Managed User Project]
     D --> D3[Package Marketplace]
-    D --> D4[Provenance Version Update]
+    D --> D4[Knowledge Pack Version Update]
 ```
 
 ### 1.1 Core entities
@@ -78,6 +85,8 @@ flowchart TD
 | `host` | One product installation and surface, such as `copilot:cli` | A brand is not a single host when CLI, editor, and cloud resolve differently. |
 | `source` | A physical file, managed policy, CLI flag, environment value, or built-in default | A generated runtime view is output, not a source of truth. |
 | `scope` | The subjects and locations affected by a source | Scope does not imply precedence. |
+| `profile` | A composable set of desired assets, preferences, and constraints | A Profile is host-neutral intent, not a native host profile file. |
+| `activation_intent` | `REQUIRED`, `DEFAULT`, `AVAILABLE`, or `DENIED` intent for one entity in a context | Activation intent selects desired state; it is not native host precedence. |
 | `instruction` | Always-on or conditionally loaded behavioral context | Instructions guide the model; they do not enforce security. |
 | `skill` | Discoverable, on-demand procedural context, normally with `SKILL.md` | A skill is not a plugin and not necessarily a slash command. |
 | `agent` | A delegated role with its own prompt, model, context, and tool boundary | A profile that only changes preferences is not an agent. |
@@ -90,6 +99,7 @@ flowchart TD
 | `state` | Sessions, cache, trust decisions, credentials, and runtime metadata | State is inventory-only unless an operation explicitly manages it. |
 | `binding` | Includes/excludes an entity for a context, profile, or agent | Binding resolves after source discovery and before host generation. |
 | `effective_harness` | Immutable resolved view with provenance for one run | It must be reproducible and must never silently overwrite real global config. |
+| `runtime_generation` | Immutable host artifacts compiled from one Desired Graph and Knowledge set | A generation is a build output, never a desired-state source. |
 
 ### 1.2 Classification vocabulary
 
@@ -114,6 +124,7 @@ Scopes form a graph, not a universal priority ladder.
 | `user` | One OS user across workspaces | Home-directory config |
 | `profile` | Explicitly selected isolated persona/configuration | Named config or alternate home |
 | `workspace` | Repository or opened workspace | Committed project config |
+| `worktree` | One Git checkout or directory runtime instance | Local Activation and immutable runtime state |
 | `directory` | A subtree or matching path/glob | Nested instructions/rules |
 | `local` | One user in one workspace | Gitignored project-local config |
 | `session` | One invocation or conversation | CLI flags, environment, runtime UI |
@@ -151,16 +162,28 @@ layer. The resolver must not place all three on one guessed ladder.
 
 ### 3.2 Resolution contract
 
-There is no host-wide `last write wins` rule. Resolve each concept separately:
+There is no host-wide `last write wins` rule. Native effective state, desired
+state, and generated runtime state are separate resolutions:
 
 ```text
-discover sources
+Native:
+discover native sources
   -> normalize entities and scopes
   -> apply host-specific merge operator per concept
   -> apply managed/trust/policy constraints
-  -> apply profile/context bindings
   -> detect duplicate logical capabilities
-  -> emit effective snapshot + provenance + unresolved conflicts
+  -> emit native effective snapshot + provenance + unresolved conflicts
+
+Desired:
+select context and Profiles
+  -> apply activation intent, policy, and exceptions
+  -> emit host-neutral Desired Graph
+
+Runtime:
+Desired Graph + qualified Host Knowledge
+  -> compile complete immutable generation
+  -> restart host
+  -> verify host-effective state
 ```
 
 Examples:
@@ -412,7 +435,7 @@ capability:
   discover: EXACT
   parse: EXACT
   resolve: EXACT
-  render: PARTIAL
+  compile: PARTIAL
   verify: PARTIAL
   reconcile_mode: PATCHED
   verification_methods: [static-resolver]
@@ -427,7 +450,7 @@ Minimum adapter operations:
 2. `capabilities`: resolve the immutable Knowledge Pack and supported operations.
 3. `observe`: inventory sources and state without mutation or execution.
 4. `resolve`: compute host-effective values for an explicit invocation context.
-5. `render`: produce isolated or ownership-bounded artifacts only for proven mappings.
+5. `compile`: produce isolated or ownership-bounded artifacts only for proven mappings.
 6. `verify`: return evidence without overstating advisory behavior as enforcement.
 7. `launch`: use a generated runtime view through the least invasive supported mechanism.
 
@@ -447,11 +470,16 @@ rollback, and reporting belong to the control plane rather than an Adapter.
   sources. Duplicate logical capabilities must be shown before launch.
 - `UNKNOWN` precedence blocks destructive generation. It does not block
   read-only inventory or preservation as an opaque vendor extension.
-- Real global configuration is not a build target. Generated host views live
-  in an immutable run directory and are passed through supported home/config
-  flags or another reversible mechanism.
+- Real global configuration is an observation source, not an implicit parent or
+  build target for an isolated runtime.
+- A minimal bootstrap generation establishes isolation before the target host
+  loads the OMCA MCP server.
+- MCP may update desired state or stage a pending generation, but it never
+  mutates the active generation.
+- Generated host views live in immutable generations and are activated only at
+  a restart boundary through a reversible mechanism.
 
-## 9. Open Questions for v0.3
+## 9. Open Questions for v0.4
 
 1. Pin adapter fixtures and golden effective-config tests for each supported
    host version.
@@ -475,3 +503,5 @@ The evidence date is part of this document because configuration contracts are
 not temporally stable. Community posts may help discovery but cannot promote a
 mapping from `UNKNOWN` to generated configuration. A runtime probe may do so
 only when its host version and fixture output are stored with the adapter test.
+Publication, staleness, retention, and upgrade rules are defined in the
+[Host Knowledge Lifecycle](../knowledge/README.md).
