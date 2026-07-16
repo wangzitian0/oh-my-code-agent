@@ -1,0 +1,28 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "Activation",
+  "metadata": {
+    "worktree": "worktree:sha256:0123456789abcdef"
+  },
+  "spec": {
+    "enable": {
+      "skills": ["code-review"],
+      "mcpServers": ["codegraph"]
+    },
+    "disable": {
+      "skills": ["release-production"]
+    },
+    "hosts": {
+      "claude-code": {
+        "enable": {
+          "skills": ["ui-review"]
+        }
+      },
+      "codex": {
+        "disable": {
+          "mcpServers": ["internal-docs"]
+        }
+      }
+    }
+  }
+}

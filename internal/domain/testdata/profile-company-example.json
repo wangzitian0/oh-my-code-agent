@@ -1,0 +1,27 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "Profile",
+  "metadata": {
+    "id": "company:example"
+  },
+  "spec": {
+    "assets": {
+      "skills": [
+        { "id": "code-review", "intent": "AVAILABLE" },
+        { "id": "deep-refactor", "intent": "DEFAULT", "hosts": ["claude-code"] }
+      ],
+      "mcpServers": [
+        { "id": "internal-docs", "intent": "AVAILABLE" },
+        { "id": "codegraph", "intent": "DEFAULT", "hosts": ["codex"] }
+      ],
+      "instructions": [
+        { "id": "engineering-baseline", "intent": "DEFAULT" }
+      ]
+    },
+    "policy": {
+      "permissions": {
+        "sandbox": { "intent": "DEFAULT", "value": "workspace-write" }
+      }
+    }
+  }
+}

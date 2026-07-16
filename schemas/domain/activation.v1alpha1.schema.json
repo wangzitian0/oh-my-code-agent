@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omca.dev/schemas/domain/activation.v1alpha1.schema.json",
+  "title": "Activation v1alpha1",
+  "description": "Records worktree-specific choices without modifying a shared Profile. Host-scoped entries refine the host-neutral selection for one host and can never re-enable a DENIED asset (docs/product/requirements.md §4.3).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "$defs": {
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "skills": { "type": "array", "items": { "type": "string" } },
+        "mcpServers": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  },
+  "properties": {
+    "apiVersion": { "$ref": "common.v1alpha1.schema.json#/$defs/apiVersion" },
+    "kind": { "const": "Activation" },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["worktree"],
+      "properties": {
+        "worktree": { "type": "string", "minLength": 1 }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enable": { "$ref": "#/$defs/selection" },
+        "disable": { "$ref": "#/$defs/selection" },
+        "hosts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enable": { "$ref": "#/$defs/selection" },
+              "disable": { "$ref": "#/$defs/selection" }
+            }
+          },
+          "propertyNames": { "$ref": "common.v1alpha1.schema.json#/$defs/hostId" }
+        }
+      }
+    }
+  }
+}
