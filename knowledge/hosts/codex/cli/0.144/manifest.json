@@ -1,0 +1,86 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "HostKnowledge",
+  "metadata": {
+    "id": "codex:cli:0.144",
+    "host": "codex",
+    "surface": "cli",
+    "versionRange": ">=0.144.0 <0.145.0",
+    "platforms": ["darwin-arm64"],
+    "observedAt": "2026-07-17",
+    "recheckAfter": "2026-08-17",
+    "status": "FRESH"
+  },
+  "evidence": [
+    {
+      "id": "codex-environment-variables-doc",
+      "kind": "official-doc",
+      "url": "https://learn.chatgpt.com/docs/config-file/environment-variables"
+    },
+    {
+      "id": "codex-cli-doc",
+      "kind": "official-doc",
+      "url": "https://learn.chatgpt.com/docs/codex/cli"
+    },
+    {
+      "id": "codex-agents-md-doc",
+      "kind": "official-doc",
+      "url": "https://learn.chatgpt.com/docs/agent-configuration/agents-md"
+    },
+    {
+      "id": "codex-skills-doc",
+      "kind": "official-doc",
+      "url": "https://learn.chatgpt.com/docs/build-skills"
+    },
+    {
+      "id": "codex-cli-0.144.5-local-binary-fingerprint",
+      "kind": "maintainer-observation",
+      "path": "fixtures/README.md",
+      "digest": "sha256:5e29ab10ca1171be158f7335dd6bd8ce1aaf9af1556939db36a5ee338be6f5f2"
+    },
+    {
+      "id": "codex-home-skills-undocumented-root-static-inspection",
+      "kind": "maintainer-observation",
+      "path": "fixtures/README.md"
+    },
+    {
+      "id": "codex-skill-collision-fixture",
+      "kind": "executable-fixture",
+      "path": "fixtures/codex/0.144.5/skill-collision"
+    },
+    {
+      "id": "codex-instructions-collision-fixture",
+      "kind": "executable-fixture",
+      "path": "fixtures/codex/0.144.5/instructions-collision"
+    },
+    {
+      "id": "codex-mcp-merge-fixture",
+      "kind": "executable-fixture",
+      "path": "fixtures/codex/0.144.5/mcp-merge"
+    }
+  ],
+  "capabilities": {
+    "skill": {
+      "discover": "PARTIAL",
+      "resolve": "UNKNOWN",
+      "reconcileMode": "OBSERVED",
+      "verificationMethods": ["official-doc-review", "binary-strings-inspection"]
+    },
+    "instruction": {
+      "discover": "PARTIAL",
+      "resolve": "UNKNOWN",
+      "reconcileMode": "OBSERVED",
+      "verificationMethods": ["official-doc-review"]
+    },
+    "mcp_server": {
+      "discover": "PARTIAL",
+      "resolve": "UNKNOWN",
+      "reconcileMode": "OBSERVED",
+      "verificationMethods": ["official-doc-review"]
+    }
+  },
+  "knownUnknowns": [
+    "whether $CODEX_HOME/skills is a real, additional skill discovery root beyond the four documented in docs/ontology/README.md §6.2 (repo .agents/skills discovered from cwd/ancestors/root, $HOME/.agents/skills, /etc/codex/skills, bundled/extra configured paths), and how it ranks against them if so -- discovered only by static, read-only `strings` inspection of the installed 0.144.5 binary, never behaviorally confirmed (see fixtures/README.md and fixtures/codex/0.144.5/skill-collision/expected-effective.json)",
+    "same-name precedence across Instructions, Skill, and MCP sources for this version -- no safe, non-interactive, no-network, no-model-call introspection path was found that dumps effective/merged configuration without starting a real session (see fixtures/README.md); every PR-06 fixture case for this host records selectedSource: UNKNOWN, including the documented claim 'closer instructions appear later' for Instructions, which remains a documentedClaim rather than a confirmed fact"
+  ]
+}
