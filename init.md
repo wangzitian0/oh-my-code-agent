@@ -1,705 +1,884 @@
-# Harness Profile Resolver — Project Initialization
+# oh-my-code-agent 项目初始化与端到端设计
 
-## 项目目标
+## 1. 项目目标
 
-构建一个 local-first、vendor-neutral 的 Coding TUI harness 治理层，首批兼容 Claude Code、OpenAI Codex 与 OpenCode。
+构建一个 local-first、vendor-neutral 的 Coding Agent Harness 控制面。它面向
+Claude Code、OpenAI Codex、OpenCode 等宿主，统一回答三个问题：
 
-项目只解决三个核心问题：
-
-1. **Ontology**：定期对各 Coding TUI 暴露的配置概念求并集，并维护等价、部分等价和厂商特有概念之间的映射。
-2. **Drift**：识别同一逻辑实体在多个 TUI、多个 scope 和多个物理位置上的值差异、缺失、覆盖与异常加载。
-3. **Profiles**：将个人、公司、团队、项目，以及后续可选的任务 Profile，在启动时动态组合成一次会话的 Effective Harness。
-
-核心解析链：
+1. **Observe**：当前机器、用户、团队和项目实际存在什么配置，宿主可能加载什么；
+2. **Model**：这些厂商配置在统一 Ontology 中分别意味着什么，哪些语义可以证明等价；
+3. **Reconcile**：哪些配置由 Harness 托管，如何安全地让实际状态收敛到期望状态。
 
 ```text
-Context → Select Profiles → Compose Entities → Apply Policies
-        → Materialize Runtime View → Launch TUI → Verify Effective State
+Observe -> Model -> Reconcile
+观测       建模       托管收敛
 ```
 
-Harness 是运行时计算结果，不是永久安装在全局目录中的静态配置。
+`Plan`、`Apply` 和 `Rollback` 是 Reconcile 的内部事务步骤，不是用户需要学习的产品概念。
+`Verify` 是附着在每项结论上的证据等级，`Enforce` 是附着在每项策略上的保证等级，也不是额外流水线阶段。
 
-## 问题背景
+项目首批端到端支持 Claude Code、OpenAI Codex 与 OpenCode。Cursor、GitHub
+Copilot、Antigravity CLI、Pi、OpenClaw 和 Hermes 先进入版本化知识库与只读
+Inventory，再按 capability 逐项晋级，不能使用一个含糊的“支持某宿主”承诺。
 
-当前 Coding TUI 的配置分散在：
+## 2. 产品边界
 
-- 用户全局目录；
-- 共享 Agent 目录；
-- 仓库目录；
-- 插件目录；
-- 安装器维护目录；
-- 账号级 Connector；
-- 公司内部工具目录。
+Harness 是由 Context、Profiles、Policies 和宿主能力共同计算出的 Effective State，
+不是永久散落在全局目录中的一套复制文件。
 
-不同安装器普遍以“保证到处可用”为目标，把 Skills、MCP、Hooks、Instructions、Connectors 和 Plugins 安装到全局。这会导致：
+产品负责：
 
-- 公司能力进入个人项目；
-- 项目专用工具全局加载；
-- 同一 Skill 在多个位置存在不同版本；
-- 高优先级配置覆盖项目配置；
-- 已卸载工具留下孤立 Instruction；
-- 不知道某个配置由谁安装、在哪里生效；
-- Hooks、Loops、Agents、Plugins 等语法糖增加后，供应商锁定不断加深；
-- 无法回答“当前仓库实际运行的 Harness 是什么”。
+- 广泛但安全地发现 Coding Agent 配置、能力和来源；
+- 保留原始表示、未知字段、来源、版本和证据；
+- 将可理解的观测事实投影到 Ontology；
+- 组合个人、公司、团队、项目和临时任务的期望状态；
+- 按根因聚合 Drift，而不是向用户展示配置叉乘；
+- 对已验证的能力生成 dry-run、执行原子修改、验证和回滚；
+- 为人和任意 LLM 提供同一套结构化查询与修复协议。
 
-## 产品原则
+产品不负责：
 
-1. Runtime composition 优先于 global installation。
-2. 以 logical entity 为中心，不以文件为中心。
-3. Ontology 取各 TUI 能力并集，不退化为最小公分母。
-4. Profiles 是可组合集合，不是硬编码的四层继承树。
-5. 每种 ontology concept 拥有自己的合并策略。
-6. 默认只读、可解释、可复现。
-7. 发现、解析、优先级和 Drift 判定尽量确定性完成。
-8. 大模型负责复杂语义差异的解释和修复建议。
-9. 本地优先，配置与 Secret 默认不上传。
-10. 厂商特有能力以 Vendor Extension 保存，不能静默丢失。
-11. 所有写操作必须支持 dry-run、备份和回滚。
-12. Generated Harness 是临时构建产物，不能反向成为隐式真源。
+- 保证不同模型或宿主产生相同行为；
+- 把所有宿主压缩成最低公共子集；
+- 猜测未公开或未通过 fixture 证明的优先级；
+- 将 Instructions 伪装成安全强制策略；
+- 自动翻译或执行任意 Plugin、Extension、Hook 代码；
+- 接管 OAuth token、会话历史、密钥或账号级授权状态；
+- 用 LLM 直接修改原生配置文件。
 
-## Profile 模型
+## 3. 产品原则
 
-初始支持：
+1. 以 logical entity 和 policy intent 为中心，不以文件为中心。
+2. Observe 追求全面和无损；Model 允许局部和未知；Reconcile 必须保守和可证明。
+3. Ontology 取能力并集，厂商特有能力保存在 `vendorExtensions`，不能静默丢失。
+4. Scope 是带约束的组合图，不是假设固定顺序的四层继承树。
+5. 每个 concept 和 field 有自己的 identity、merge、precedence 与 enforcement 语义。
+6. 宿主优先级是版本化 resolver program，不是一个全局 `rank`。
+7. `UNKNOWN`、`PARTIAL`、`OPAQUE` 和 `UNSUPPORTED` 是正常结果，不能包装成 Managed。
+8. 只读路径不得依赖远端 LLM，也不得执行发现到的 Hook、MCP、Plugin 或 Extension。
+9. 所有写操作必须支持 dry-run、compare-and-swap、备份、回滚和 Ledger。
+10. Generated Artifact 是可查询构建产物，不能反向成为隐式真源。
+11. 用户默认只看意图、根因、影响范围、样例和动作；宿主优先级只进入 Explain/Debug。
+12. 第三方知识必须带版本和证据；未验证的新版本 fail closed 到只读模式。
+
+## 4. 四个控制面
+
+```text
+┌────────────────────────────────────────────────────────────┐
+│ Desired State                                              │
+│ Profiles · Bindings · Policies · Exceptions · Assets       │
+├────────────────────────────────────────────────────────────┤
+│ Ontology and Knowledge                                     │
+│ Concepts · Mappings · Host versions · Evidence · Fixtures  │
+├────────────────────────────────────────────────────────────┤
+│ Reconciliation                                             │
+│ Inventory · Effective State · Drift · Plans · Artifacts    │
+├────────────────────────────────────────────────────────────┤
+│ Assurance                                                  │
+│ Evidence · Verification · Guarantees · Ledger · Rollback   │
+└────────────────────────────────────────────────────────────┘
+```
+
+Desired State 只表达用户意图，不包含 `~/.claude`、`.codex` 等厂商路径。
+Knowledge 记录可升级的第三方事实。Adapter 将两者编译为宿主产物。Assurance 为每个结论附加证据和保证，不另造一份状态真源。
+
+## 5. Scope、Profile 与 Policy
+
+初始 scope：
 
 ```text
 personal:<identity>
 company:<organization>
 team:<team>
 project:<repository>
-task:<temporary-purpose>   # Post-MVP
+task:<temporary-purpose>       # Post-MVP
 ```
 
-一次运行上下文示例：
+它们不是固定的覆盖链。一次 Context 可以同时命中多个团队、环境和工作区：
 
 ```yaml
-context:
-  personal: wangzitian
-  company: sea
-  team: marketplace-buyer
-  project: order-service
-  task: incident-debug
+personal: wangzitian
+companies: [sea]
+teams: [marketplace-buyer, infra]
+project: order-service
+workspace: /work/order-service
+environment: staging
+invocation:
+  host: codex
+  surface: cli
+  cwd: /work/order-service/api
+  profile: pragmatic
 ```
 
-这些维度不是固定的优先级链。例如：
-
-- 公司 deny policy 不允许被团队、项目或个人覆盖；
-- 项目 Instruction 可以覆盖个人编码偏好；
-- 个人 UI 偏好不应被团队控制；
-- 项目可以增加自己的 Skill；
-- 公司禁用的 MCP 不能被项目重新启用。
-
-## Ontology
-
-### MVP Concepts
+组合通过 concept-specific operations 表达：
 
 ```text
-instruction
-skill
-mcp_server
+SET            设置标量值
+UNSET          删除继承值
+APPEND         有序追加
+INCLUDE        按 logical ID 加入实体
+EXCLUDE        按 logical ID 移除实体
+DENY           形成不可被低层削弱的约束
+LOCK           锁定字段或允许范围
+PRESERVE       保留厂商原生表示
 ```
 
-### Post-MVP Concepts
+因此公司可以锁定网络策略，项目可以增加 Skill，个人可以保留语言和 UI 偏好；这些行为不需要用户理解各宿主的文件优先级。
+
+### 5.1 Context 与 Binding 解析
+
+Context discovery 可以使用当前 Git root、remote、目录祖先、`.harness/project.yaml`、
+组织 repository registry、环境 marker 和 CLI 显式覆盖。选择顺序只用于定位 Binding，
+不等于各 concept 的配置优先级：
 
 ```text
-command
-agent
-hook
-permission
-plugin
-connector
-memory
-loop
-background_task
-session_policy
+explicit CLI context
+  -> project declaration
+  -> signed organization/team registry
+  -> local personal mapping
+  -> safe auto-detection
 ```
 
-每个 concept 必须定义：
+如果 remote、嵌套 repository、worktree 或 submodule 产生多个合法 project identity，
+系统必须显示候选并要求选择，不能静默绑定错误 Profile。一次确认可以保存为 local
+mapping，但不得写回共享项目配置。
 
-- stable concept ID；
-- logical entity identity 规则；
-- 各 TUI 的表示方式；
-- global/project 等发现位置；
-- TUI 内部 precedence；
-- normalization 规则；
-- merge strategy；
+## 6. Ontology 与第三方 Knowledge
+
+Ontology 是稳定的 canonical vocabulary 和关系模型。Normalization 是把部分
+Observation 投影进 Ontology 的过程，两者不是两份概念系统。
+
+每个 concept 至少定义：
+
+- stable concept ID 和 schema version；
+- logical identity 与 collision 规则；
+- canonical fields 和 constraints；
+- merge operators；
 - portability classification；
-- known lossy mappings；
-- vendor extensions；
-- ontology schema version。
+- 可接受的 evidence 和 verification 方法；
+- vendor extension 边界。
 
-示例：
+每个宿主事实必须独立版本化，至少记录：
 
-```yaml
-concept: skill
+- host、surface、version range 和 platform；
+- discovery roots、trust gate 和 invocation context；
+- precedence program 与 merge operator；
+- capability matrix；
+- 官方文档 URL、schema 或源码 revision；
+- observed time、recheck time 和 confidence；
+- fixture、probe 和 golden output；
+- 已知 lossy mapping、unknown 与 retirement 状态。
 
-identity:
-  primary: metadata.id
-  fallback:
-    - source_repository_and_name
-    - directory_name
-    - normalized_title
-
-merge: union_by_logical_id
-
-representations:
-  claude:
-    global:
-      - ~/.claude/skills/*
-    project:
-      - .claude/skills/*
-  codex:
-    global:
-      - ~/.codex/skills/*
-      - ~/.agents/skills/*
-    project:
-      - .codex/skills/*
-      - .agents/skills/*
-  opencode:
-    global:
-      - ~/.config/opencode/skills/*
-    project:
-      - .opencode/skills/*
-      - .agents/skills/*
-      - .claude/skills/*
-```
-
-### Ontology 更新
-
-Ontology 与用户 Profile 分开版本化。更新流程：
-
-1. 检查官方文档、Schema、CLI help 和已知配置位置；
-2. 发现新增 concept、field、location 或 precedence；
-3. 与现有 ontology 做匹配；
-4. 分类为 EXACT、EQUIVALENT、PARTIAL、VENDOR_ONLY 或 UNKNOWN；
-5. 人工确认后固化为确定性映射；
-6. 为每个支持的 TUI 版本保存 regression fixtures。
-
-LLM 可以提出映射候选，但运行时不能每次重新猜测已确认映射。
-
-## Logical Entity
-
-Scanner 必须区分逻辑实体和物理表示：
+示例 Knowledge Pack：
 
 ```yaml
-entity:
-  concept: skill
-  logical_id: deep-research
+apiVersion: harnessctl.dev/v1alpha1
+kind: HostKnowledge
 
-locations:
-  - host: claude
-    scope: personal
-    path: ~/.claude/skills/deep-research/SKILL.md
-  - host: codex
-    scope: personal
-    path: ~/.agents/skills/deep-research/SKILL.md
-  - host: opencode
-    scope: project
-    path: .opencode/skills/deep-research/SKILL.md
+metadata:
+  id: cursor:cli:3.9
+  host: cursor
+  surface: cli
+  versionRange: ">=3.9.0 <4.0.0"
+  observedAt: 2026-07-16
+  recheckAfter: 2026-08-16
+
+evidence:
+  - kind: official-doc
+    url: https://docs.cursor.com/context/rules
+    digest: sha256:...
+  - kind: executable-fixture
+    path: fixtures/cursor/3.9/rule-conflict
+    digest: sha256:...
+
+capabilities:
+  instruction:
+    discover: EXACT
+    parse: EXACT
+    resolve: PARTIAL
+    render: PARTIAL
+    verify: PARTIAL
+    reconcileMode: PATCHED
+    verificationMethods: [static-resolver]
+    guarantee: ADVISORY
+
+precedencePrograms:
+  - id: cursor.instructions.applicable-rules
+    operator: CONCAT_APPLICABLE
+    conflict: UNSPECIFIED
 ```
 
-匹配优先级：
-
-1. 显式 stable logical ID；
-2. source repository + entity name；
-3. MCP server name 等原生稳定 ID；
-4. 已知路径映射；
-5. normalized structure；
-6. 文本相似度或 LLM 建议，需人工确认。
-
-模糊匹配一旦确认，应保存映射，避免反复推断。
-
-## Drift Model
-
-必须比较两类 Drift：
-
-1. **Source Drift**：同一逻辑实体在多个物理位置的值不同。
-2. **Effective Drift**：实际 TUI 加载结果与 Profile 解析出的期望状态不同。
-
-状态分类：
+Knowledge 状态：
 
 ```text
-IDENTICAL   原始值或 Canonical Value 完全一致
-EQUIVALENT  格式不同，但归一化语义等价
-DRIFTED     对应值存在实质差异
-MISSING     期望位置或能力缺失
-UNEXPECTED  实际加载了 Profile 未选择的能力
-SHADOWED    一个位置被更高优先级位置覆盖
-ORPHANED    实体引用的依赖、安装器或来源已经消失
-UNKNOWN     无法安全确认身份或等价性
+FRESH       版本与证据在验证窗口内
+DUE         到达复查时间，现有已验证版本仍可使用
+STALE       检测到宿主新版本或证据变化，禁止扩大写入
+CONFLICTED  文档、schema、源码或 probe 互相冲突
+RETIRED     不再支持新生成，只保留历史解释能力
 ```
 
-每条 Drift 至少输出：
+`latest` 只能用于发现更新，不能作为 Adapter 的事实依赖。运行时必须解析到不可变
+Knowledge Pack ID 和 digest。
 
-- concept 和 logical entity ID；
-- 所有发现位置；
-- raw hash 与 normalized hash；
-- Profile 期望状态；
-- precedence 与 shadowing 原因；
-- provenance；
-- 潜在行为影响；
-- repairability；
-- 供 LLM 判断的相关内容或 diff；
-- 推断置信度与证据。
+### 6.1 Knowledge 更新工作流
 
-Scanner 本身不得依赖远端 LLM。
-
-## Profile 格式
-
-个人 Profile：
-
-```yaml
-apiVersion: harnessctl.dev/v1alpha1
-kind: Profile
-
-metadata:
-  id: personal:wangzitian
-
-include:
-  skills:
-    - deep-research
-  mcp:
-    - github
-
-preferences:
-  language: zh-CN
+```text
+Poll official sources
+  -> detect candidate change
+  -> create KnowledgeCandidate
+  -> diff facts and affected capabilities
+  -> run qualification fixtures
+  -> human review
+  -> publish immutable Knowledge Pack
+  -> adapters opt in by version range
 ```
 
-公司 Profile：
+更新任务只能产生候选 PR，不能自动把 `UNKNOWN` 提升为 `MANAGED`。官方文档优先；
+官方 schema 和源码可补足文档；社区信息只能触发调查；runtime probe 必须绑定宿主版本、平台和 fixture。
 
-```yaml
-apiVersion: harnessctl.dev/v1alpha1
-kind: Profile
+## 7. Capability 与 Assurance
 
-metadata:
-  id: company:sea
+不能用 `supports: true` 表达一个宿主。每个 `host × surface × version × concept`
+分别声明操作能力：
 
-include:
-  mcp:
-    - skynet
-    - jira
-
-policy:
-  mcp:
-    deny:
-      - gmail
-  network:
-    allow:
-      - "*.sea.com"
+```text
+discover -> parse -> normalize -> resolve -> render -> verify -> enforce
 ```
 
-项目声明：
+每项操作使用以下支持等级：
+
+```text
+EXACT        语义和 round trip 已证明
+COMPATIBLE   行为兼容，但原生表示不同
+PARTIAL      只覆盖已声明字段或场景
+OPAQUE       只保留位置、hash 和原始块
+UNKNOWN      缺少足够证据
+UNSUPPORTED  宿主没有该能力
+```
+
+Reconcile mode 由 capability 自动决定：
+
+```text
+MANAGED      可以生成、修改并验证
+PATCHED      只修改明确拥有的字段
+OBSERVED     只扫描和报告
+OPAQUE       不解析内容，只保留和追踪
+BLOCKED      语义未知，禁止 Apply
+```
+
+### 7.1 Evidence Level
+
+```text
+E0 DISCOVERED          找到物理来源
+E1 PARSED              无损解析或安全保留
+E2 RESOLVED            版本化 resolver 得到 effective value
+E3 HOST_REPORTED       宿主原生命令或诊断接口确认
+E4 BEHAVIOR_PROBED     隔离会话中的行为探针符合预期
+E5 EXTERNALLY_PROVEN   OS、企业策略或独立审计系统证明
+```
+
+### 7.2 Guarantee Level
+
+```text
+HARD        OS sandbox、企业控制或权限系统阻止违规
+RECONCILED 周期扫描并恢复，期间仍可能短暂 Drift
+ADVISORY    依赖 Instruction 或模型服从
+OBSERVED    只能发现，不能控制
+```
+
+Canary Probe 只能提升验证证据，不能把 `ADVISORY` 提升为 `HARD`。探针必须在临时
+HOME、临时 workspace、随机 nonce 和全新 session 中运行，不得使用秘密，不得污染真实项目。优先使用宿主 introspection、status/debug API 和 prompt assembly 日志，只有缺少原生证据时才使用行为探针。
+
+## 8. 配置组织方式
+
+### 8.1 用户与组织配置
+
+```text
+~/.config/harnessctl/
+├── config.yaml
+├── sources.yaml
+├── profiles/
+│   ├── personal/
+│   ├── company/
+│   ├── team/
+│   └── task/
+├── bindings/
+├── policies/
+├── exceptions/
+└── assets/
+    ├── instructions/
+    ├── skills/
+    └── mcp/
+```
+
+公司和团队 Profile 可以来自受控 Git repository 或 package source，`sources.yaml`
+只保存来源、版本和签名策略。Secret 只能保存引用。
+
+### 8.2 项目配置
+
+```text
+<project>/.harness/
+├── project.yaml
+├── profiles/
+├── policies/
+├── exceptions/
+└── assets/
+```
+
+项目只声明 profile binding、项目资产、参数和例外，不写宿主路径：
 
 ```yaml
 apiVersion: harnessctl.dev/v1alpha1
 kind: ProjectHarness
+
+metadata:
+  id: project:order-service
 
 profiles:
   - personal:wangzitian
   - company:sea
   - team:marketplace-buyer
 
-include:
+desired:
+  instructions:
+    include: [order-service-development]
   skills:
-    - order-state-machine
-  mcp:
-    - codegraph
+    include: [order-state-machine]
+    exclude: [unrelated-finance-workflow]
+  mcpServers:
+    include: [codegraph]
 
-exclude:
-  skills:
-    - unrelated-finance-workflow
+exceptions:
+  - ref: exception:sandbox-lab-network
+
+vendorExtensions:
+  cursor: {}
 ```
 
-Profile 支持：
+### 8.3 State、Cache 与不可变产物
 
-- include；
-- exclude；
-- parameters；
-- match conditions；
-- policy；
-- Secret reference。
+```text
+~/.local/state/harnessctl/
+├── ledger/
+├── backups/
+└── ownership/
 
-Secret 只能保存引用，不能写入 Profile 内容或 Diff。
+~/.cache/harnessctl/
+├── knowledge/
+├── observations/
+└── runs/<run-id>/
+    ├── manifest.yaml
+    ├── inventory.json
+    ├── effective.json
+    ├── drift.json
+    ├── plan.json
+    ├── evidence.json
+    ├── provenance.json
+    └── artifacts/<host>/<surface>/
+```
 
-## Composition Semantics
+每个 Artifact 必须有稳定 URI、input/expected/observed digest、Adapter 与 Knowledge
+版本、ownership 和 Plan ID。计划执行使用 source digest 做 compare-and-swap，避免覆盖 plan 生成之后发生的手工修改。
 
-不能使用统一的 Last Write Wins。
+## 9. Observe
+
+Observe 追求覆盖面，但不等于任意遍历用户目录。Adapter 只扫描已知配置根、显式
+source 和安全的宿主状态接口，并且发现不授权执行。
+
+Observation 至少包含：
 
 ```yaml
-merge_strategies:
-  skills: union_by_logical_id
-  mcp_servers: merge_by_logical_id
-  instructions: ordered_compose
-  permissions: deny_wins
-  preferences: nearest_scope_wins
-  vendor_extensions: preserve_per_host
+id: observation://order-service/codex/instruction/root-agents
+host: codex
+surface: cli
+hostVersion: 0.144.5
+invocationContext:
+  cwd: /work/order-service
+source:
+  kind: file
+  path: /work/order-service/AGENTS.md
+scope:
+  kind: workspace
+rawDigest: sha256:...
+parsedDigest: sha256:...
+ownership: observed
+opaqueVendorFields: {}
+evidenceLevel: E1
 ```
 
-冲突必须保留：
+观测覆盖率分别报告 source discovery、parse、normalize、resolve 和 runtime verification，不能用一个总百分比掩盖能力缺口。
 
-- 双方值；
-- Provenance；
-- 冲突原因；
-- 未能自动解析的规则。
+## 10. Model
 
-Effective Harness 必须可以解释：
+Model 阶段生成三张图：
+
+1. **Observed Graph**：物理来源、内容、宿主、scope、trust 和 provenance；
+2. **Effective Graph**：在给定 invocation context 下，宿主预计或确认加载的值；
+3. **Desired Graph**：Profiles、Policies、Bindings 和 Exceptions 组合出的期望状态。
+
+状态主键不是简单的 `Project × TUI`，而是：
 
 ```text
-payment-debug came from team:marketplace-buyer
-codegraph came from project:order-service
-gmail was excluded by company:sea policy
-language=zh-CN came from personal:wangzitian
+Project × Host × Surface × Version × Concept × Invocation Context
 ```
 
-## Context Detection
+工具负责计算和缓存这个叉乘。用户界面只显示 logical entity、有效来源和根因。
 
-支持自动检测和显式覆盖。
+Composition 不能统一使用 Last Write Wins：
 
-自动信号包括：
-
-- 当前 Git root；
-- Git remote；
-- 仓库中的 `.harness.yaml`；
-- 目录祖先；
-- repository/company/team mapping；
-- 环境 marker；
-- CLI 显式增删 Profile。
-
-示例：
-
-```bash
-harnessctl run codex +task:incident-debug -personal:finance
+```yaml
+mergeStrategies:
+  skills: UNION_BY_LOGICAL_ID
+  mcpServers: MERGE_BY_LOGICAL_ID
+  instructions: CONCAT_ORDERED
+  permissions: DENY_WINS
+  preferences: NEAREST_SCOPE_WINS
+  vendorExtensions: PRESERVE_PER_HOST
 ```
 
-启动前必须显示检测结果和 Profile 来源，并允许覆盖。
+宿主 resolver 还需要支持 `REPLACE`、`DEEP_MERGE`、`FIRST_MATCH`、`KEEP_BOTH`、
+`NAMESPACE`、`ALL_RUN`、`LAST_MATCH`、`MANAGED_GUARDRAIL` 和 `UNSPECIFIED`。
 
-## Runtime Effective Harness
+## 11. Drift 与用户报告
 
-每次运行生成不可变快照：
+Drift 先归一化为 assertion：
 
 ```text
-~/.cache/harnessctl/runs/<run-id>/
-├── effective.yaml
-├── provenance.json
-├── drift.json
-├── claude/
-├── codex/
-└── opencode/
+entity_id + field + expected + observed + root_cause + remediation
 ```
 
-快照包含：
-
-- detected context；
-- selected profiles；
-- resolved entities；
-- blocked/degraded entities；
-- provenance；
-- ontology version；
-- source hashes；
-- adapter versions；
-- generation time；
-- reproducible resolution fingerprint。
-
-生成的 Host 配置是一次性 build output。
-
-## 动态加载策略
-
-按优先顺序使用侵入性最低的方式：
-
-1. TUI 官方支持的 config/home 参数；
-2. project-local generated runtime directory；
-3. atomic symlink/runtime view；
-4. 能保证恢复的 temporary overlay。
-
-正常启动路径禁止覆盖真实全局配置。
-
-Skills 通过 per-run 链接目录加载。Instructions 通过 per-run 生成视图加载。
-
-MCP 后续优先设计为单一 local gateway：
+然后按 `root_cause + remediation + outcome + adapter version` 聚合。复杂度为：
 
 ```text
-All TUIs → harnessctl MCP Gateway → Context-filtered MCP servers/tools
+机器成本 = Projects × Hosts × Concepts × Contexts
+人类成本 ≈ 根因数 + Adapter 缺口数 + 显式例外数
 ```
 
-Gateway 根据 Effective Harness 动态暴露工具，避免所有 MCP 被永久注册为全局能力。
+Drift 类别：
 
-## LLM-Assisted Repair Boundary
+```text
+CONFIG_DRIFT       可管理配置与期望不同
+EFFECTIVE_DRIFT    宿主有效状态与期望不同
+SOURCE_DRIFT       同一 logical entity 的物理表示不同
+CAPABILITY_GAP     Adapter 缺少解释、写入或验证能力
+KNOWLEDGE_DRIFT    宿主版本或第三方事实超出已验证范围
+EXCEPTION          已授权且未过期的差异
+UNKNOWN            身份、语义或结果无法安全判断
+```
 
-程序确定性负责：
+默认报告只展示根因、影响范围、1 到 3 个覆盖不同 outcome 的确定性样例、建议动作、
+Evidence 和 Guarantee。完整叉乘进入 `matrix`，原生优先级进入 `explain --trace`。
 
-- discovery；
-- parsing；
-- logical identity candidates；
-- precedence；
-- normalization；
-- profile expectation；
-- drift；
-- provenance；
-- backup 与 atomic write。
+```text
+DR-017  公司安全基线未完全应用                         HIGH
 
-当前 Coding TUI 中的大模型负责：
+期望      workspace-write + on-request
+来源      company/security-default
+影响      8 projects · 5 hosts · 40 artifacts
+证据      38 × E3, 2 × E2
+保证      RECONCILED
+建议      修改 38 个 artifact，保留 2 个有效 exception
 
-- 解释自然语言差异；
-- 判断差异互补还是冲突；
-- 提出 merged value；
-- 修改 canonical Profile 或 Asset；
-- 重新生成 Runtime View；
-- 验证修复后的状态。
+样例
+  infra2 / Codex       danger-full-access -> workspace-write
+  finance / Claude     approval bypass    -> on-request
+```
 
-后续提供 CLI JSON 与本地 MCP：
+## 12. Reconcile
+
+Reconcile 是确定性事务：
+
+```text
+Desired Graph + Effective Graph + Capability Manifest
+  -> Change Set
+  -> Dry-run Plan
+  -> Policy and risk checks
+  -> Human/automation approval
+  -> Atomic Apply
+  -> Verify
+  -> Ledger or Rollback
+```
+
+Ownership：
+
+```text
+managed      Harness 拥有并可收敛
+patched      Harness 只拥有已声明字段
+observed     只报告，不写入
+passthrough  解析时保留，输出时原样带回
+external     由企业策略、MDM、其他工具或账号控制
+```
+
+正常启动优先使用宿主官方 config/home 参数、隔离 runtime directory 或可恢复 overlay。
+默认禁止覆盖真实全局配置。若用户明确选择持久托管，Adapter 必须证明 lossless patch、
+ownership boundary、backup 和 rollback。
+
+MCP 在 MVP 中优先编译为宿主原生 registry。后续可以增加可选的 local gateway：
+
+```text
+Coding Hosts -> harnessctl MCP Gateway -> context-filtered servers and tools
+```
+
+Gateway 是独立 runtime capability，不能和原生 MCP 定义静默合并，也不能成为所有宿主必须使用的架构前提。
+
+## 13. LLM 修复协议
+
+任意 LLM 通过相同的 CLI JSON 或本地 MCP 读取 Observation、Drift、Explain 和 Plan。
+LLM 只能提交 canonical `RepairProposal`：
+
+```yaml
+apiVersion: harnessctl.dev/v1alpha1
+kind: RepairProposal
+
+metadata:
+  driftId: DR-017
+  basedOnFingerprint: sha256:...
+
+changes:
+  - target: policy/company/security-default
+    operation: SET
+    path: spec.permissions.sandbox
+    value: workspace-write
+    rationale: Align managed company baseline
+```
+
+程序确定性负责 schema validation、capability gating、policy checks、render、diff、
+apply、verify 和 rollback。LLM 不得直接写原生配置，也不能把行为探针结果升级成安全强制证据。
+
+本地 MCP/CLI contract：
 
 ```text
 harness.status
-harness.diff
+harness.observe
+harness.drift
 harness.explain
-harness.plan_repair
+harness.matrix
+harness.propose_repair
+harness.plan
 harness.apply
-harness.validate
+harness.verify
+harness.knowledge_status
 ```
 
-权限扩大、Secret 暴露或破坏性写入必须显式确认。
-
-## MVP
-
-### Supported TUIs
-
-- Claude Code
-- OpenAI Codex
-- OpenCode
-
-### Supported Concepts
-
-- Instructions
-- Skills
-- MCP Servers
-
-### Supported Profiles
-
-- Personal
-- Company
-- Team
-- Project
-
-### Required Commands
-
-```bash
-harnessctl scan
-harnessctl profiles resolve
-harnessctl diff
-harnessctl explain
-harnessctl run <claude|codex|opencode>
-```
-
-### Required Behavior
-
-1. 发现三个 TUI 的 global/project 配置；
-2. 解析为统一 Inventory；
-3. 将明显对应的表示匹配为 Logical Entity；
-4. 根据 Context 和项目声明选择 Profiles；
-5. 生成带 Provenance 的 Effective Harness；
-6. 报告 MISSING、UNEXPECTED、DRIFTED、SHADOWED、ORPHANED 和 UNKNOWN；
-7. 在隔离 Runtime View 中加载 Skills 与 Instructions；
-8. 不永久修改全局配置地生成或暴露 MCP 配置；
-9. 第一阶段至少启动一个 TUI，再扩展到另外两个；
-10. 所有只读命令提供 JSON 输出。
-
-## MVP Non-goals
-
-- GUI；
-- Hosted SaaS；
-- 企业用户管理；
-- 自动语义冲突解决；
-- 保证三个 TUI 体验完全一致；
-- Memory/Session 迁移；
-- Plugin Marketplace；
-- Secret Manager；
-- 后台常驻 Daemon；
-- 支持所有 Coding Assistant；
-- 未审核的自动 Ontology 更新；
-- 替代 CC Switch、SkillDock 或现有 Package Manager。
-
-## 建议仓库结构
+## 14. 建议仓库结构
 
 ```text
 .
 ├── cmd/harnessctl/
 ├── internal/
-│   ├── ontology/
-│   ├── discovery/
-│   ├── identity/
-│   ├── normalize/
-│   ├── profiles/
-│   ├── resolver/
-│   ├── drift/
-│   ├── runtime/
+│   ├── domain/                 # canonical types, IDs and invariants
+│   ├── observe/                # discovery orchestration and inventory
+│   ├── model/                  # normalization and graph construction
+│   ├── profiles/               # profiles, bindings, policies, exceptions
+│   ├── resolve/                # desired/effective resolvers
+│   ├── drift/                  # assertions, root-cause grouping, reports
+│   ├── reconcile/              # plans, apply, rollback and ownership
+│   ├── assurance/              # evidence, verification and guarantees
+│   ├── knowledge/              # immutable packs and update candidates
+│   ├── artifact/               # manifests, provenance and content store
+│   ├── runtime/                # isolated views and host launch
+│   ├── report/                 # human, JSON and TUI projections
 │   └── adapters/
 │       ├── claude/
 │       ├── codex/
 │       └── opencode/
 ├── ontology/
 │   ├── concepts/
-│   ├── hosts/
-│   └── versions/
-├── profiles/examples/
-├── fixtures/
-│   ├── claude/
-│   ├── codex/
-│   └── opencode/
+│   ├── operators/
+│   └── schemas/
+├── knowledge/
+│   ├── sources.yaml
+│   └── hosts/<host>/<surface>/<version>/
+│       ├── manifest.yaml
+│       ├── capabilities.yaml
+│       ├── precedence.yaml
+│       └── evidence.yaml
 ├── schemas/
+│   ├── config/
+│   ├── domain/
+│   └── protocol/
+├── profiles/examples/
+├── fixtures/<host>/<version>/<case>/
 ├── docs/
-└── tests/
+│   ├── ontology/
+│   ├── architecture/
+│   └── operations/
+├── tests/
+└── README.md
 ```
 
-优先单一跨平台二进制。Go 是默认选择：项目主要涉及文件发现、解析、Profile Resolution、CLI、进程启动和后续文件监听。若实现者明确偏好 Rust，也可以选择 Rust。不要为了假设的性能优势提前复杂化。
+优先实现单一跨平台 Go 二进制。项目主要复杂度来自文件系统、schema、图解析、
+内容寻址、进程隔离和可复现测试，不需要提前引入多服务控制面。
 
-## 核心接口草案
+## 15. 核心接口草案
+
+Adapter 只负责宿主物理语义，不承担 Profile 组合和跨宿主 Drift：
 
 ```go
 type HostAdapter interface {
-    Detect(ctx Context) ([]Installation, error)
-    Scan(ctx Context) ([]Representation, error)
-    Normalize(rep Representation) (CanonicalValue, error)
-    Materialize(effective EffectiveHarness, targetDir string) error
-    Launch(runtime RuntimeSnapshot, args []string) error
+    ID() AdapterID
+    Detect(context.Context, DetectRequest) ([]HostInstance, error)
+    Capabilities(context.Context, HostInstance) (CapabilityManifest, error)
+    Observe(context.Context, ObserveRequest) (ObservationSet, error)
+    Resolve(context.Context, ResolveRequest) (HostEffectiveState, error)
+    Render(context.Context, RenderRequest) (ArtifactSet, error)
+    Verify(context.Context, VerifyRequest) (EvidenceSet, error)
+    Launch(context.Context, LaunchRequest) error
 }
 
-type Resolver interface {
-    Resolve(ctx Context, profiles []Profile, inventory Inventory) (EffectiveHarness, error)
+type KnowledgeRepository interface {
+    Resolve(context.Context, HostInstance) (KnowledgePack, error)
+    Status(context.Context, KnowledgeQuery) ([]KnowledgeStatus, error)
+    ProposeUpdate(context.Context, UpdateRequest) (KnowledgeCandidate, error)
+}
+
+type Normalizer interface {
+    Normalize(context.Context, ObservationSet, KnowledgePack) (ObservedGraph, error)
+}
+
+type ProfileResolver interface {
+    Resolve(context.Context, InvocationContext, []Profile) (DesiredGraph, error)
 }
 
 type DriftEngine interface {
-    Compare(inventory Inventory, expected EffectiveHarness) ([]Drift, error)
+    Compare(context.Context, DesiredGraph, EffectiveGraph) (DriftReport, error)
+    Explain(context.Context, ExplainQuery) (Explanation, error)
+}
+
+type Reconciler interface {
+    Plan(context.Context, ReconcileRequest) (Plan, error)
+    Apply(context.Context, Plan, ApplyOptions) (ApplyResult, error)
+    Rollback(context.Context, LedgerEntry) (RollbackResult, error)
+}
+
+type AssuranceEngine interface {
+    Verify(context.Context, VerifyTarget) (EvidenceSet, error)
+    ClassifyGuarantee(context.Context, PolicyOutcome) (GuaranteeLevel, error)
 }
 ```
 
-Ontology 尽量声明式维护；Host-specific parsing 和 materialization 放在 Adapter。
+关键请求必须显式传入 `InvocationContext`、Adapter version、Knowledge digest 和输入
+fingerprint，禁止函数隐式读取“当前最新”事实。
 
-## 安全与正确性
-
-- 只读命令绝不修改源文件；
-- Generated directory 必须标记并加入 Git ignore；
-- 不在日志、Diff、Provenance 或 JSON 中输出 Secret；
-- Secret reference 与普通配置分开；
-- 拒绝未知 Ontology Schema Version；
-- 保留未知 Vendor Field；
-- Generated output 使用 atomic write；
-- 修改非生成文件前必须备份；
-- Applied change 写入本地 Ledger；
-- 检测 symlink，不能静默遍历意外目标；
-- 只扫描已知配置根目录；
-- 权限扩大必须明确确认；
-- 所有写操作支持 dry-run。
-
-## 测试策略
-
-1. 每个 TUI 和版本的 Golden Fixtures；
-2. Parser/Normalizer Unit Tests；
-3. Logical Identity Matching Tests；
-4. Profile Composition 与 Policy Conflict Tests；
-5. Drift Classification Tests；
-6. 声称 Lossless 的 Adapter 必须有 Round-trip Tests；
-7. Runtime Materialization Snapshot Tests；
-8. 使用临时 HOME/Config 的 Integration Tests；
-9. Secret Redaction Tests；
-10. 证明只读命令不会修改 Fixture 的测试。
-
-必须保持的 Invariants：
-
-```text
-相同输入必须产生相同 fingerprint
-scan 不写入
-unknown fields 在支持的 round trip 中不丢失
-deny policy 不能被低层 profile 削弱
-每个 effective value 必须有 provenance
-generated artifact 不会隐式成为 canonical source
-```
-
-## Milestones
-
-### M0 — Evidence and Schemas
-
-- 收集脱敏后的 Claude、Codex、OpenCode 配置 Fixture；
-- 记录发现位置和 Precedence；
-- 定义 Ontology、Profile、ProjectHarness、EffectiveHarness v1alpha1 Schema；
-- 写 Runtime Isolation ADR。
-
-### M1 — Inventory and Doctor
-
-- 实现 Instructions、Skills、MCP 的 scan；
-- 生成 normalized inventory；
-- 识别重复、缺失、意外、覆盖和明显 Drift；
-- 输出人类可读格式和 JSON。
-
-### M2 — Profile Resolver
-
-- 加载 Personal/Company/Team/Project Profiles；
-- 检测当前 Context；
-- 使用 Concept-specific Merge Rules 组合；
-- 生成 effective.yaml 和 provenance.json。
-
-### M3 — Runtime Launch
-
-- 为一个 TUI 生成隔离 Runtime View；
-- 在不永久修改全局配置的情况下启动；
-- 再增加另外两个 Adapter。
-
-### M4 — Agent-Assisted Repair
-
-- 输出结构化 Repair Context；
-- 增加 Portable Skill 或 Local MCP；
-- 写操作要求 Preview 和确认。
-
-### M5 — Ontology Update Workflow
-
-- 版本化 Host Capability Data；
-- 检测上游文档或 Schema 的候选变化；
-- 通过人工审核和 Regression Fixtures 发布更新。
-
-## MVP 验收标准
-
-在包含 `.harness.yaml` 的仓库中执行：
+## 16. CLI 与 TUI 信息架构
 
 ```bash
-harnessctl scan
-harnessctl profiles resolve
-harnessctl diff
+harnessctl observe [--host codex] [--json]
+harnessctl status
+harnessctl drift [--project <id>]
+harnessctl drift show <drift-id>
+harnessctl explain <project> <host> <concept> [--trace]
+harnessctl matrix <drift-id>
+harnessctl plan [--drift <id>]
+harnessctl apply <plan-id>
+harnessctl verify <artifact-or-policy>
+harnessctl run <claude|codex|opencode>
+harnessctl knowledge status
+harnessctl knowledge update --dry-run
+```
+
+TUI 默认按根因组织：
+
+```text
+Workspace
+├── Drift
+├── Plans
+├── Profiles
+├── Bindings
+├── Exceptions
+└── Debug
+    ├── Effective State
+    ├── Host Matrix
+    ├── Precedence Trace
+    └── Native Artifacts
+```
+
+默认页面禁止展示厂商目录和 rank。用户选择 `Explain` 后才展开：effective value、
+selected source、ignored sources、policy constraint、Adapter rule、Artifact URI 和 evidence。
+
+## 17. 安全与正确性
+
+- 只读命令绝不修改源文件或执行发现到的配置；
+- Scanner 不读取 keyring、OAuth token、session transcript 和 saved approval；
+- Secret reference 与普通配置分开，日志、Diff、Provenance 和 LLM context 全部脱敏；
+- 未验证宿主版本、`UNKNOWN` precedence 和 lossy round trip 禁止 Apply；
+- 所有写入使用 atomic write、source digest compare-and-swap、backup 和 Ledger；
+- 未知 Vendor Field 必须保留；
+- symlink、跨 filesystem、文件权限和 owner 变化必须进入 Plan；
+- 权限扩大、网络开放、Hook/MCP/Extension 启用必须单独确认；
+- 公司 deny/lock policy 不能被团队、项目、个人或 LLM proposal 削弱；
+- Probe 只能在隔离 fixture 中运行，结果标记为行为证据而非强制保证；
+- Generated Artifact 必须可重建、可查询、可追溯且不会成为 canonical source。
+
+## 18. 测试与 Adapter Qualification
+
+每个可写 capability 必须通过版本化 qualification suite：
+
+1. User、Project、Local、CLI 和 managed policy 同时存在；
+2. 同名 Instruction、Skill、MCP、Agent 或 Hook 冲突；
+3. 未知字段、注释和顺序的无损 round trip；
+4. Plan 与 Apply 之间发生手工修改；
+5. 宿主版本升级后 discovery 或 precedence 变化；
+6. 无法查询 effective state；
+7. 企业策略禁止本地值；
+8. 多个项目共享一个全局 source；
+9. 临时 HOME、不同 cwd、profile 和 CLI flags；
+10. Secret redaction 与只读不写入证明。
+
+核心 invariants：
+
+```text
+相同输入和 Knowledge digest 产生相同 fingerprint
+observe 不写入、不执行
+unknown fields 在声明 lossless 的 round trip 中不丢失
+deny/lock policy 不能被低保证层削弱
+每个 effective value 有 provenance 和 evidence level
+Apply 只接受未过期且 source digest 匹配的 Plan
+未验证的新宿主版本自动降级而不是继续写入
+同一根因的完整矩阵始终可从报告追溯
+```
+
+## 19. 端到端项目计划
+
+### M0: Contracts and Qualification Lab
+
+交付：
+
+- 冻结 `Profile`、`ProjectHarness`、`Observation`、`KnowledgePack`、`Plan` 和 `Evidence` v1alpha1 schema；
+- 建立 Claude、Codex、OpenCode 的临时 HOME fixture harness；
+- 为 Instructions、Skills、MCP 建 precedence 和 collision fixtures；
+- 产出 Runtime Isolation ADR、Ownership ADR 和 Knowledge Update ADR。
+
+退出条件：任何未验证 precedence 都返回 `UNKNOWN`；所有 read-only fixture 证明零写入。
+
+### M1: Observe
+
+交付：
+
+- 检测宿主 binary、version、surface、home、workspace、trust 和 invocation context；
+- 扫描三个首批宿主的 Instructions、Skills 和 MCP；
+- 输出 lossless Inventory、opaque facts、source digest 和 coverage；
+- 提供 `observe`、`status` 和 JSON contract。
+
+退出条件：同一 fixture 扫描结果确定，Secret 不进入输出，未知内容不丢失。
+
+### M2: Model
+
+交付：
+
+- 实现 Ontology normalization、logical identity 和 ambiguity handling；
+- 实现 Personal、Company、Team、Project Profile 与 Binding；
+- 构建 Observed、Effective、Desired 三张图；
+- 每个 effective value 输出 provenance、capability、evidence 和 guarantee。
+
+退出条件：四层组合和多团队冲突可解释；不存在统一 Last Write Wins 捷径。
+
+### M3: Drift and Explain
+
+交付：
+
+- 生成 Config、Effective、Source、Capability 和 Knowledge Drift；
+- 按根因聚合，提供代表样例和完整 matrix；
+- 实现 `drift`、`explain`、`matrix` 与 immutable run manifest；
+- 生成供任意 LLM 使用的脱敏 Repair Context。
+
+退出条件：`N` 个项目和 `M` 个宿主的同一根因默认只产生一张人类 action card，所有叉乘单元仍可查询。
+
+### M4: Reconcile One Host
+
+交付：
+
+- 选择 qualification 最完整的一个宿主；
+- 实现 capability-gated Plan、patch/render、CAS Apply、Verify、Ledger 和 Rollback；
+- 支持隔离 Runtime View 和 `run`；
+- 对持久托管文件实现 ownership boundary。
+
+退出条件：dry-run 与 Apply 内容一致；并发手工修改会阻止 Apply；失败可恢复；原始全局配置不被隐式覆盖。
+
+### M5: Multi-host Managed Capabilities
+
+交付：
+
+- 将已证明的 Instructions、Skills、MCP capability 扩展到另外两个首批宿主；
+- 标记 EXACT、COMPATIBLE、PARTIAL 和 vendor extension；
+- 支持同一 Desired Graph 编译多个宿主 Artifact；
+- 不支持的 operation 自动降级到 OBSERVED/BLOCKED。
+
+退出条件：不以最低公共子集限制 Ontology，也不因一个宿主缺失能力而伪造等价配置。
+
+### M6: Knowledge Lifecycle
+
+交付：
+
+- 监控官方文档、schema、release 和源码 revision；
+- 生成 KnowledgeCandidate PR 和影响分析；
+- 自动运行受影响 fixture，人工批准 Knowledge Pack；
+- 对未验证新版本产生 Knowledge Drift 并停止扩大写入。
+
+退出条件：第三方升级不会静默改变 Reconcile 行为，历史 Run 仍能解析到原 Knowledge digest。
+
+### M7: TUI and Agent Protocol
+
+交付：
+
+- 按根因呈现 Drift、Plan、Profiles、Bindings、Exceptions 和 Debug tree；
+- 提供稳定 CLI JSON 与本地 MCP；
+- 允许任意 LLM 提交 RepairProposal；
+- 支持在用户批准一次后展开并执行完整 Change Set。
+
+退出条件：普通用户完成日常 Drift 修复不需要理解宿主路径和优先级；高级用户可以从任一 action card 追到原始 Artifact 和 evidence。
+
+## 20. MVP 验收场景
+
+在包含 `.harness/project.yaml` 的仓库执行：
+
+```bash
+harnessctl observe
+harnessctl drift
+harnessctl explain order-service codex instruction
+harnessctl plan
+harnessctl apply <plan-id>
+harnessctl verify <artifact-id>
 harnessctl run codex
 ```
 
 必须得到：
 
-1. Global 与 Project 配置 Inventory；
-2. 被选择的 Personal/Company/Team/Project Profiles；
-3. 仅包含期望 Assets 的 Effective Harness；
-4. 每个 Included/Blocked Entity 的 Provenance；
-5. Drift、Missing、Unexpected 和 Shadowing 报告；
-6. 使用隔离 Runtime View 启动的 Coding TUI；
-7. 用户原有全局配置没有被永久修改。
+1. Global、Project、Invocation Context 的无损 Inventory；
+2. Personal、Company、Team、Project 组合出的 Desired Graph；
+3. 带 Knowledge digest 的 Effective Graph；
+4. 根因聚合的 Drift 报告和可展开完整矩阵；
+5. 每个值的 provenance、Evidence Level 和 Guarantee Level；
+6. capability-gated dry-run、原子 Apply、Verify、Ledger 和 Rollback；
+7. 使用隔离 Runtime View 启动的至少一个宿主；
+8. 用户原有全局配置没有被隐式或不可恢复地修改；
+9. 未验证版本和未知 precedence 明确降级为只读；
+10. 任意 LLM 能通过稳定协议提议修复，但不能绕过 deterministic checks。
 
-## 第一项实现任务
+## 21. 第一批实现任务
 
-不要先实现所有 Adapter。按以下顺序：
+1. 建立 v1alpha1 domain schemas 和 stable ID 规则；
+2. 建立 Claude、Codex、OpenCode 的 Adapter Qualification fixture；
+3. 将现有 Markdown Ontology 拆成 concept schema 与版本化 Host Knowledge Pack；
+4. 实现只读 Observe 和 immutable Run Manifest；
+5. 实现三图模型、Profile Resolver 和 provenance；
+6. 实现 root-cause Drift、样例选择和 matrix query；
+7. 选择一个 capability 最完整的宿主完成 Reconcile；
+8. 证明 Plan、Apply、Verify、Rollback 和 Knowledge 升级降级路径。
 
-1. 定义四个 v1alpha1 Schema；
-2. 使用临时目录建立 Fixture Harness；
-3. 定义 instruction、skill、mcp_server 三个 Ontology Entry；
-4. 实现确定性 Scan 与 Inventory JSON；
-5. 实现 Profile Composition 与 Provenance；
-6. 实现 Drift Classification；
-7. 选择最容易隔离运行的一个 TUI Adapter；
-8. 演示 Personal + Company + Team + Project 的端到端组合。
+开始大量 Adapter 编码前，必须先完成：
 
-开始大量编码前，必须先产出：
+- 三个首批宿主、三个首批 concept 的 executable precedence fixtures；
+- 配置 ownership 和 lossless patch contract；
+- Knowledge Pack 更新与过期策略；
+- 一份跨 Personal、Company、Team、Project 的端到端 golden scenario；
+- 一份根因报告到原生 Artifact 的完整 Explain trace。
 
-- Runtime Isolation ADR；
-- 三个 TUI、三个初始 Concept 的 Precedence Matrix；
-- Example Profiles；
-- Expected Effective Harness；
-- 需要针对已安装 CLI 实验验证的 Known Unknowns。
+## 22. 产品定位
 
-## 产品定位
+这不是另一个 MCP Manager，也不是通用配置复制器。
 
-这不是另一个 MCP Manager 或配置复制器。
+> Observe every coding-agent harness, model what can be proven, and reconcile only what can be managed safely.
 
-> Compose the right AI coding harness for every repository, detect configuration drift across Claude Code, Codex, and OpenCode, and keep workflow assets portable without installing everything globally.
-
-暂定 CLI 名称：`harnessctl`。正式命名前保持可替换。
+暂定 CLI 名称为 `harnessctl`，正式命名前保持可替换。
