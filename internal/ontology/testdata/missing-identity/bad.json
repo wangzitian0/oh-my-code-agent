@@ -1,0 +1,6 @@
+{
+  "conceptId": "no-identity",
+  "properties": {},
+  "x-nonEquivalenceRule": "n/a",
+  "x-mergeOperators": ["REPLACE"]
+}

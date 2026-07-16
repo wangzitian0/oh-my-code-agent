@@ -1,0 +1,15 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "Evidence",
+  "metadata": {
+    "id": "evidence:missing-subject"
+  },
+  "spec": {
+    "subject": {
+      "concept": "instruction",
+      "logicalId": ""
+    },
+    "level": "E2",
+    "observedAt": "2026-07-16T00:00:00Z"
+  }
+}

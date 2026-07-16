@@ -1,0 +1,6 @@
+{
+  "conceptId": "no-nonequivalence",
+  "properties": {},
+  "x-logicalIdentity": { "fields": ["id"], "rule": "n/a" },
+  "x-mergeOperators": ["REPLACE"]
+}

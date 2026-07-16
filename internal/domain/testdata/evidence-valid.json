@@ -1,0 +1,27 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "Evidence",
+  "metadata": {
+    "id": "evidence:codex:instruction:AGENTS.md:precedence"
+  },
+  "spec": {
+    "subject": {
+      "concept": "instruction",
+      "logicalId": "codex:instruction:AGENTS.md",
+      "field": "precedence"
+    },
+    "level": "E2",
+    "guarantee": "RECONCILED",
+    "method": "static-resolver",
+    "observedAt": "2026-07-16T00:00:00Z",
+    "source": {
+      "kind": "official-doc",
+      "url": "https://learn.chatgpt.com/docs/agent-configuration/agents-md",
+      "digest": "sha256:677779508486072e789cbcc991f6e6320ca1fd3f6780f8b258f43edccd465baf"
+    },
+    "knowledgeRef": {
+      "id": "codex:cli:0.144",
+      "digest": "sha256:cffbbce1739188271eeae03fed45d5fe2231ee69e0b59fbb3ff6d3c7b888fa07"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "Observation",
+  "metadata": {
+    "id": "obs:codex:cli:instruction:/repo/AGENTS.md"
+  },
+  "spec": {
+    "host": { "id": "codex", "version": "0.144.5" },
+    "surface": "cli",
+    "concept": "instruction",
+    "source": { "kind": "file", "path": "/repo/AGENTS.md" },
+    "scope": { "kind": "workspace", "root": "/repo" },
+    "disposition": "HIDDEN",
+    "evidenceLevel": "E2"
+  }
+}

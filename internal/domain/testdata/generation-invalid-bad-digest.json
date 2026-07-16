@@ -1,0 +1,14 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "Generation",
+  "metadata": {
+    "id": "generation:1",
+    "worktree": "worktree:sha256:abc",
+    "createdAt": "2026-07-16T00:00:00Z"
+  },
+  "spec": {
+    "desiredGraphDigest": "not-a-digest",
+    "knowledgePacks": [],
+    "hosts": {}
+  }
+}
