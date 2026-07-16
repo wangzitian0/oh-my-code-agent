@@ -25,6 +25,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "version":
 		fmt.Fprintln(stdout, version.String())
 		return 0
+	case "context":
+		return runContext(stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "omca: unknown command %q\n%s\n", args[0], usage)
 		return 2

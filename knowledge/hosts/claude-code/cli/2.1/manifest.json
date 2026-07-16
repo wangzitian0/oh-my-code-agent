@@ -1,0 +1,81 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "HostKnowledge",
+  "metadata": {
+    "id": "claude-code:cli:2.1",
+    "host": "claude-code",
+    "surface": "cli",
+    "versionRange": ">=2.1.0 <2.2.0",
+    "platforms": ["darwin-arm64"],
+    "observedAt": "2026-07-17",
+    "recheckAfter": "2026-08-17",
+    "status": "FRESH"
+  },
+  "evidence": [
+    {
+      "id": "claude-code-settings-doc",
+      "kind": "official-doc",
+      "url": "https://code.claude.com/docs/en/settings"
+    },
+    {
+      "id": "claude-code-memory-doc",
+      "kind": "official-doc",
+      "url": "https://code.claude.com/docs/en/memory"
+    },
+    {
+      "id": "claude-code-skills-doc",
+      "kind": "official-doc",
+      "url": "https://code.claude.com/docs/en/skills"
+    },
+    {
+      "id": "claude-code-2.1.211-local-binary-fingerprint",
+      "kind": "maintainer-observation",
+      "path": "fixtures/README.md",
+      "digest": "sha256:5a728a76198b6eca7f3c7cdbff43bab44b77b48c2108f7a3107d889773382629"
+    },
+    {
+      "id": "claude-config-dir-static-inspection",
+      "kind": "maintainer-observation",
+      "path": "fixtures/README.md"
+    },
+    {
+      "id": "claude-skill-collision-fixture",
+      "kind": "executable-fixture",
+      "path": "fixtures/claude-code/2.1.211/skill-collision"
+    },
+    {
+      "id": "claude-instructions-collision-fixture",
+      "kind": "executable-fixture",
+      "path": "fixtures/claude-code/2.1.211/instructions-collision"
+    },
+    {
+      "id": "claude-mcp-merge-fixture",
+      "kind": "executable-fixture",
+      "path": "fixtures/claude-code/2.1.211/mcp-merge"
+    }
+  ],
+  "capabilities": {
+    "skill": {
+      "discover": "PARTIAL",
+      "resolve": "UNKNOWN",
+      "reconcileMode": "OBSERVED",
+      "verificationMethods": ["official-doc-review"]
+    },
+    "instruction": {
+      "discover": "PARTIAL",
+      "resolve": "UNKNOWN",
+      "reconcileMode": "OBSERVED",
+      "verificationMethods": ["official-doc-review"]
+    },
+    "mcp_server": {
+      "discover": "PARTIAL",
+      "resolve": "UNKNOWN",
+      "reconcileMode": "OBSERVED",
+      "verificationMethods": ["official-doc-review"]
+    }
+  },
+  "knownUnknowns": [
+    "whether CLAUDE_CONFIG_DIR's relocation behavior (both the .claude/-equivalent asset tree and the ~/.claude.json-equivalent trust/MCP state file, joined directly under CLAUDE_CONFIG_DIR rather than a nested .claude/ subdirectory) was ever behaviorally confirmed by actually launching Claude Code with the variable set -- it was established only by static, read-only `strings` inspection of the installed 2.1.211 binary (E1 evidence: discovered/parsed from a source, not host-reported or behavior-probed), not by observing real launch behavior (see fixtures/README.md)",
+    "same-name precedence across Instructions, Skill, and MCP sources for this version -- no safe, non-interactive, no-network, no-model-call introspection path was found that dumps effective/merged configuration without starting a real session (see fixtures/README.md); every PR-06 fixture case for this host records selectedSource: UNKNOWN, including the documented claim 'enterprise > personal > project > bundled' for Skills, which remains a documentedClaim rather than a confirmed fact"
+  ]
+}
