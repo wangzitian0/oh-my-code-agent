@@ -1,10 +1,28 @@
 package plugin
 
 import (
+	"errors"
 	"os/exec"
 	"strings"
 	"testing"
 )
+
+// runGoList runs `go list` and includes stderr in the failure message: a
+// bare exec error (usually just an exit status) hides *why* go list failed
+// (missing files, invalid build tags, module resolution errors), which
+// matters most exactly when CI hits this check.
+func runGoList(t *testing.T, args ...string) []byte {
+	t.Helper()
+	out, err := exec.Command("go", append([]string{"list"}, args...)...).Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			t.Fatalf("go list %s: %v\nstderr:\n%s", strings.Join(args, " "), err, exitErr.Stderr)
+		}
+		t.Fatalf("go list %s: %v", strings.Join(args, " "), err)
+	}
+	return out
+}
 
 // TestImportBoundary enforces docs/architecture/README.md §9 and ADR 0005:
 // core packages reach adapters only through this contract package. No
@@ -23,10 +41,7 @@ func TestImportBoundary(t *testing.T) {
 	const pluginPkg = modulePrefix + "internal/plugin"
 	const adaptersPrefix = modulePrefix + "internal/adapters/"
 
-	out, err := exec.Command("go", "list", modulePrefix+"internal/...").Output()
-	if err != nil {
-		t.Fatalf("go list %sinternal/...: %v", modulePrefix, err)
-	}
+	out := runGoList(t, modulePrefix+"internal/...")
 	pkgs := strings.Fields(string(out))
 	if len(pkgs) == 0 {
 		t.Fatal("go list returned no internal packages; the check would vacuously pass")
@@ -41,10 +56,7 @@ func TestImportBoundary(t *testing.T) {
 		}
 		checked++
 
-		depsOut, err := exec.Command("go", "list", "-deps", pkg).Output()
-		if err != nil {
-			t.Fatalf("go list -deps %s: %v", pkg, err)
-		}
+		depsOut := runGoList(t, "-deps", pkg)
 		for _, dep := range strings.Fields(string(depsOut)) {
 			if strings.HasPrefix(dep, adaptersPrefix) {
 				t.Errorf("import boundary violation: %s depends on %s; core packages must reach adapters only through %s", pkg, dep, pluginPkg)

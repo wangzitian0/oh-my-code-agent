@@ -89,10 +89,18 @@ func (m PluginManifest) Validate() error {
 	if len(m.Hosts) == 0 {
 		return fmt.Errorf("plugin manifest %q: at least one host selector is required", m.AdapterID)
 	}
+	seenHosts := make(map[string]bool, len(m.Hosts))
 	for _, host := range m.Hosts {
 		if err := host.Validate(); err != nil {
 			return fmt.Errorf("plugin manifest %q: %w", m.AdapterID, err)
 		}
+		// The registry keys one adapter per host ID (Registry.Lookup), so a
+		// manifest declaring the same host ID twice can never be served
+		// correctly regardless of how its surfaces differ between entries.
+		if seenHosts[host.HostID] {
+			return fmt.Errorf("plugin manifest %q: host %q is declared more than once", m.AdapterID, host.HostID)
+		}
+		seenHosts[host.HostID] = true
 	}
 	for _, kp := range m.KnowledgePacks {
 		if kp.ID == "" {
