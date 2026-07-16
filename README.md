@@ -28,6 +28,19 @@ can give parallel hosts in the same worktree deliberately different loadouts.
 - [Knowledge lifecycle](docs/knowledge/README.md): versioned third-party facts and upgrades.
 - [Roadmap](docs/project/roadmap.md): gated implementation plan.
 
+## Development
+
+```bash
+make build   # go build ./...
+make test    # go test ./... -race -coverprofile=coverage.out
+make cover   # print total coverage; CI floor is 67%
+make lint    # golangci-lint run ./...
+make fixtures
+```
+
+Requires Go 1.22+. CI runs build+test with a 67% coverage floor, lint, a
+markdown link check, and a secret-leak scan on every pull request.
+
 ## Product Model
 
 ```text
