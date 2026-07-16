@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omca.dev/schemas/domain/profile.v1alpha1.schema.json",
+  "title": "Profile v1alpha1",
+  "description": "A composable set of host-neutral or host-scoped desired-state intent (docs/product/requirements.md §4.1).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": { "$ref": "common.v1alpha1.schema.json#/$defs/apiVersion" },
+    "kind": { "const": "Profile" },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "assets": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "skills": {
+              "type": "array",
+              "items": { "$ref": "common.v1alpha1.schema.json#/$defs/assetRef" }
+            },
+            "mcpServers": {
+              "type": "array",
+              "items": { "$ref": "common.v1alpha1.schema.json#/$defs/assetRef" }
+            },
+            "instructions": {
+              "type": "array",
+              "items": { "$ref": "common.v1alpha1.schema.json#/$defs/assetRef" }
+            }
+          }
+        },
+        "policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "permissions": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["intent"],
+                "properties": {
+                  "intent": { "$ref": "common.v1alpha1.schema.json#/$defs/intent" },
+                  "value": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
