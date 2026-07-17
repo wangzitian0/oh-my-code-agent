@@ -115,6 +115,23 @@ type Resolution struct {
 	pack *Pack
 }
 
+// Status returns the matched Pack's lifecycle state (domain.KnowledgeStatus,
+// e.g. FRESH/DUE/STALE) and true when this Resolution is Qualified. An
+// unqualified Resolution has no matched Pack to report a status for, so ok is
+// false rather than returning a zero-value KnowledgeStatus that could be
+// mistaken for a real (if unusual) lifecycle state — the same "degrade
+// honestly, never guess" discipline CapabilityFor documents for its own
+// unqualified/undeclared-concept cases. Exported for a report projection
+// (internal/report, PR-19/issue #23's round-2 audit "per-host Knowledge
+// status" requirement) to surface without reaching into Resolution's
+// unexported pack field.
+func (r Resolution) Status() (domain.KnowledgeStatus, bool) {
+	if !r.Qualified || r.pack == nil {
+		return "", false
+	}
+	return r.pack.Knowledge.Metadata.Status, true
+}
+
 // CapabilityFor returns the capability relations this Resolution proves for
 // concept. An unqualified Resolution — or a concept the matched Pack never
 // declared — degrades to ReconcileModeObserved with every capability level
