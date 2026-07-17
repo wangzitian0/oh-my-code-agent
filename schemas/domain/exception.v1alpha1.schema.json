@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omca.dev/schemas/domain/exception.v1alpha1.schema.json",
+  "title": "Exception v1alpha1",
+  "description": "Excepts one asset from the normal REQUIRED/DENIED enforcement rules for a stated, expiring window (init.md \"Activation Intent\"; docs/product/requirements.md §4; internal/resolve.Resolve is the sole consumer of the resolver-input fields below). Unlike Profile/Binding/Activation, the exception fields are top-level siblings of apiVersion/kind/metadata rather than nested under a `spec` object -- see internal/domain/exception.go's doc comment for why.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "assetId", "scope", "justification", "expiresAt"],
+  "properties": {
+    "apiVersion": { "$ref": "common.v1alpha1.schema.json#/$defs/apiVersion" },
+    "kind": { "const": "Exception" },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "assetId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The asset id (skill/mcpServer/instruction) this exception applies to."
+    },
+    "scope": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The defining Profile's metadata.id whose REQUIRED or DENIED intent this exception excepts. An exception whose scope does not match the defining Profile's id does not apply."
+    },
+    "justification": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-authored reason this exception is allowed."
+    },
+    "expiresAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "The instant this exception stops applying. An exception whose expiresAt is at or before the resolver's reference time is expired and inert."
+    }
+  }
+}
