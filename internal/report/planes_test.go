@@ -1,6 +1,7 @@
 package report
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/wangzitian0/oh-my-code-agent/internal/domain"
@@ -135,5 +136,78 @@ func TestComparePlanes_DesiredVsEffective(t *testing.T) {
 	}
 	if len(result.Rows) == 0 {
 		t.Fatal("no rows")
+	}
+}
+
+// TestAddSourceRows_CapabilityGapEntry_GetsSyntheticID is Bug 2's direct
+// regression test: internal/runtime/compile.go's
+// claudeConfigDirExclusionGapSources() (issue #47) produces
+// GenerationSourceEntry values with Source == "" -- a capability-gap
+// placeholder describing a whole exclusion class, not one discovered
+// physical file. Before the fix, addSourceRows fell back to id =
+// s.Concept, so this rendered as a row literally keyed ("mcp_server",
+// "mcp_server") or ("skill", "skill") -- indistinguishable at a glance in
+// `omca compare`/`omca diff` output from a real source whose path happened
+// to equal the bare concept name. A Source-less entry must never produce a
+// row whose ID equals its own bare Concept string.
+func TestAddSourceRows_CapabilityGapEntry_GetsSyntheticID(t *testing.T) {
+	gapSources := []domain.GenerationSourceEntry{
+		{Concept: "mcp_server", Scope: "user", Included: false, Reason: "capability gap", CapabilityGap: true, TrackingIssue: "https://example.com/issue/47"},
+		{Concept: "skill", Scope: "user", Included: false, Reason: "capability gap", CapabilityGap: true, TrackingIssue: "https://example.com/issue/47"},
+	}
+	rows := map[planeKey]PlaneRow{}
+	addSourceRows(rows, gapSources, nil)
+
+	if len(rows) != 2 {
+		t.Fatalf("addSourceRows produced %d rows, want 2 (one per gap entry, no collision): %+v", len(rows), rows)
+	}
+	for k, row := range rows {
+		if row.ID == row.Concept {
+			t.Errorf("capability-gap row ID equals its own bare Concept %q -- indistinguishable from a real Source in human output; row: %+v", row.Concept, row)
+		}
+		if k.id == k.concept {
+			t.Errorf("capability-gap planeKey{concept:%q, id:%q}: id must not equal concept", k.concept, k.id)
+		}
+		if !strings.HasPrefix(row.ID, "capability-gap:") {
+			t.Errorf("capability-gap row ID %q is not unambiguously marked as a gap-tracking placeholder", row.ID)
+		}
+	}
+}
+
+// TestAddSourceRows_NonFragmentedConcepts_Unchanged is Bug 1's CURRENT/
+// PENDING regression test: instruction/skill/hook/policy/plugin sources are
+// already 1:1 file-to-Candidate (extract.go extracts exactly one Candidate
+// per Observation for these concepts, unlike mcp_server), so the
+// mcp_server-scoped Candidate cross-reference addSourceRows now performs
+// must be a no-op for them -- each still produces exactly one row keyed by
+// its own bare Source path, with Active/Detail unchanged.
+func TestAddSourceRows_NonFragmentedConcepts_Unchanged(t *testing.T) {
+	candidates := []effective.Candidate{
+		{Concept: "instruction", Ref: "AGENTS.md"},
+		{Concept: "skill", Ref: "skills/foo/SKILL.md"},
+	}
+	sources := []domain.GenerationSourceEntry{
+		{Concept: "instruction", Source: "AGENTS.md", Included: true, Reason: "repository instructions"},
+		{Concept: "skill", Source: "skills/foo/SKILL.md", Included: true, Reason: "activated skill"},
+	}
+	rows := map[planeKey]PlaneRow{}
+	addSourceRows(rows, sources, candidates)
+
+	if len(rows) != 2 {
+		t.Fatalf("addSourceRows produced %d rows, want 2 (one per file, no fragmentation): %+v", len(rows), rows)
+	}
+	instrRow, ok := rows[planeKey{"instruction", "AGENTS.md"}]
+	if !ok {
+		t.Fatalf("no row keyed (instruction, AGENTS.md), got: %+v", rows)
+	}
+	if !instrRow.Active || instrRow.Detail != "repository instructions" {
+		t.Errorf("instruction row unexpectedly changed: %+v", instrRow)
+	}
+	skillRow, ok := rows[planeKey{"skill", "skills/foo/SKILL.md"}]
+	if !ok {
+		t.Fatalf("no row keyed (skill, skills/foo/SKILL.md), got: %+v", rows)
+	}
+	if !skillRow.Active || skillRow.Detail != "activated skill" {
+		t.Errorf("skill row unexpectedly changed: %+v", skillRow)
 	}
 }
