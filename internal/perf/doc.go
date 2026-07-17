@@ -43,7 +43,10 @@
 // A synthetic-fixture number and a real-environment number are structurally
 // different measurements (a controlled, fixed-size fixture vs. whatever
 // this machine's actual installation happens to contain) and must never be
-// merged into one figure — every caller of this package keeps them in
-// separate, clearly labeled fields (Result.Synthetic vs. RealEnvironment
-// Result.Hosts) for exactly this reason.
+// merged into one figure — they are two entirely separate return types,
+// MeasureSynthetic's Result and MeasureRealEnvironment's
+// RealEnvironmentResult (whose per-host breakdown lives in its own Hosts
+// field), and every caller of this package keeps them in separate, clearly
+// labeled sections (see docs/evidence/perf-v0.1.0.md's §1/§2 split) for
+// exactly this reason.
 package perf

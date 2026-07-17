@@ -163,11 +163,13 @@ func handleLine(line []byte, status StatusFunc) *jsonrpcResponse {
 		// fine but does not shape a valid JSON-RPC request (Invalid Request,
 		// -32600).
 		code := codeInvalidRequest
+		message := "invalid request: " + err.Error()
 		var syntaxErr *json.SyntaxError
 		if errors.As(err, &syntaxErr) {
 			code = codeParseError
+			message = "parse error: " + err.Error()
 		}
-		return &jsonrpcResponse{JSONRPC: "2.0", ID: req.ID, Error: &jsonrpcError{Code: code, Message: "parse error: " + err.Error()}}
+		return &jsonrpcResponse{JSONRPC: "2.0", ID: req.ID, Error: &jsonrpcError{Code: code, Message: message}}
 	}
 	isNotification := len(req.ID) == 0
 

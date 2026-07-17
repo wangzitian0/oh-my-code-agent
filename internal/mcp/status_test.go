@@ -248,3 +248,43 @@ func TestComputeStatus_NoHostsManaged_NeverErrors(t *testing.T) {
 		}
 	}
 }
+
+// TestCountUserExclusions_ExcludesCapabilityGapPlaceholders is a
+// regression test for a real Copilot review finding on this PR:
+// CountUserExclusions's own doc comment claimed a capability-gap entry
+// "carries no Scope at all," but internal/runtime/compile.go's actual
+// claudeConfigDirExclusionGapSources sets Scope: "user" on both of its
+// placeholder entries (mcp_server and skill) — so, before this fix, they
+// were silently counted as confirmed exclusions alongside real observed-
+// and-excluded sources, inflating N/M by one per gap class. This builds a
+// domain.Generation with one real excluded mcp_server source, one real
+// excluded skill source, and two CapabilityGap:true placeholders (one per
+// concept, mirroring claudeConfigDirExclusionGapSources exactly), and
+// proves the count reflects only the two real sources.
+func TestCountUserExclusions_ExcludesCapabilityGapPlaceholders(t *testing.T) {
+	gen := domain.Generation{
+		Spec: domain.GenerationSpec{
+			Sources: []domain.GenerationSourceEntry{
+				{Concept: "mcp_server", Scope: "user", Source: "/native/.claude.json", Included: false, Reason: "excluded: native user-global source"},
+				{Concept: "skill", Scope: "user", Source: "/native/skills/deploy/SKILL.md", Included: false, Reason: "excluded: native user-global source"},
+				{Concept: "mcp_server", Scope: "user", Included: false, Reason: "capability gap: ...", CapabilityGap: true, TrackingIssue: "https://github.com/wangzitian0/oh-my-code-agent/issues/47"},
+				{Concept: "skill", Scope: "user", Included: false, Reason: "capability gap: ...", CapabilityGap: true, TrackingIssue: "https://github.com/wangzitian0/oh-my-code-agent/issues/47"},
+				// A workspace-scope excluded source and an included source
+				// must not be counted either — already covered by the
+				// existing Scope/Included filters, included here so this
+				// test is a complete proof of the function's whole filter,
+				// not just the new CapabilityGap line.
+				{Concept: "mcp_server", Scope: "workspace", Included: false, Reason: "excluded: repository-scope Skill/MCP source, not yet activated"},
+				{Concept: "instruction", Scope: "workspace", Included: true, Reason: "included: repository-scope Instructions chain"},
+			},
+		},
+	}
+
+	mcpServers, skills := CountUserExclusions(gen)
+	if mcpServers != 1 {
+		t.Errorf("mcpServers = %d, want 1 (one real exclusion; the capability-gap placeholder must not count)", mcpServers)
+	}
+	if skills != 1 {
+		t.Errorf("skills = %d, want 1 (one real exclusion; the capability-gap placeholder must not count)", skills)
+	}
+}

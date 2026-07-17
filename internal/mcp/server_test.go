@@ -312,6 +312,14 @@ func TestServe_TypeMismatchJSON_EchoesKnownID_UsesInvalidRequestCode(t *testing.
 	if code, _ := errObj["code"].(float64); int(code) != codeInvalidRequest {
 		t.Errorf("error.code = %v, want %d (Invalid Request, not Parse error -- the JSON itself was syntactically valid)", errObj["code"], codeInvalidRequest)
 	}
+	// Copilot review finding on this PR: the message text used to always
+	// say "parse error: ..." regardless of which code was returned,
+	// misleading a client/log reader into thinking a syntactically invalid
+	// message was received when it was not.
+	msg, _ := errObj["message"].(string)
+	if !strings.HasPrefix(msg, "invalid request:") {
+		t.Errorf("error.message = %q, want it prefixed \"invalid request:\" (matching codeInvalidRequest), not \"parse error:\"", msg)
+	}
 }
 
 // TestServe_InitializedSentAsRequest_StillGetsAResponse is a regression
