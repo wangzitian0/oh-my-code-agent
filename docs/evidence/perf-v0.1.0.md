@@ -90,20 +90,45 @@ not a fabricated "dozens" scenario:
 | Host | Native MCP servers registered (single config source) | Native Skills discovered |
 |---|---|---|
 | codex | 9 (`$CODEX_HOME/config.toml`'s `[mcp_servers.*]` tables) | 26 (`$HOME/.agents/skills` + `$CODEX_HOME/skills`, the latter empty on this machine) |
-| claude-code | 3 (`~/.claude.json`'s top-level `mcpServers`) | 43 (`~/.claude/skills` + `$HOME/.agents/skills`) |
+| claude-code | 3 (`~/.claude.json`'s top-level `mcpServers`) | 42 (`~/.claude/skills` + `$HOME/.agents/skills`) |
 
-The exclusion count `omca_status`/`omca doctor`/`omca env` all report is
-**1** native MCP *configuration source* per host, not 9 or 3 — see
-`internal/mcp/status.go`'s `HostStatus.ExcludedMCPServers` doc comment for
-why: `internal/observe`'s `mcp_server` concept is file-level (one
-observation per registration file, not per registered server inside it),
-so a generation's manifest records "this one file was excluded," and that
-is genuinely all the manifest can honestly claim without re-reading the
-real native file's content at report time (which this project deliberately
-never does — see that same doc comment). The Skill count (26 / 43) has no
-such ceiling: `internal/observe` emits one observation per discovered
-`SKILL.md` file, so it is a true per-Skill count, and both numbers are
-comfortably "dozens" on their own.
+The exclusion count `omca_status`/`omca doctor`/`omca env` all report is the
+count of `internal/observe`-discovered native sources this generation
+actually excluded — **not** a re-derived count of registered servers inside
+a config file: `internal/observe`'s `mcp_server` concept is file-level (one
+observation per registration file, not per registered server inside it), so
+a generation's manifest records "this one file was excluded," and that is
+genuinely all the manifest can honestly claim without re-reading the real
+native file's content at report time (which this project deliberately never
+does — see `internal/mcp/status.go`'s `HostStatus.ExcludedMCPServers` doc
+comment).
+
+For codex this is **1** (the real `$CODEX_HOME/config.toml`, discovered and
+excluded). For **claude-code it is 0**, not 1 — a real, honest finding, not
+a rounding choice: `internal/observe`'s `claudeUserRules`
+(`internal/observe/rules.go`) looks for the MCP registration file at
+`$CLAUDE_CONFIG_DIR/.claude.json` (defaulting to `~/.claude/.claude.json`
+when `CLAUDE_CONFIG_DIR` is unset), but this machine's real file lives at
+`~/.claude.json` — the home root, one level up — so `internal/observe` never
+discovers it here, and a source that was never discovered cannot appear in
+the generation's exclusion count. The "3 servers registered" fact in the
+table above came from direct inspection of the real file for this evidence
+entry, independent of `internal/observe`; the "0 excluded" fact is what the
+actual, current production code reports. This is a real gap in
+`internal/observe`'s claude-code coverage (out of this PR's scope to fix —
+see PR-08/issue #12), not a defect in this PR's counting logic, and is
+recorded here rather than smoothed over, per `docs/architecture/runtime.md`
+§12's "native exclusions are explained rather than hidden" — the one honest
+correction this failure to explain would itself have violated.
+
+The Skill count (26 / 42) has no such per-file ceiling: `internal/observe`
+emits one observation per discovered `SKILL.md` file, so it is a true
+per-Skill count, and both numbers are comfortably "dozens" on their own.
+(An earlier draft of this evidence file reported 43 for claude-code's Skill
+count — off by exactly one, from the same class of bug the Copilot review
+on this PR caught and fixed in `internal/mcp.CountUserExclusions`: a
+capability-gap placeholder entry was being counted as a real, discovered-
+and-excluded Skill. 42 is the corrected, real count.)
 
 | Host | Phase | n | min | mean | p95 | max |
 |---|---|---|---|---|---|---|
@@ -135,16 +160,34 @@ framing describes the shim's own contribution accurately.
 | Host | Excluded native MCP config source(s) | Excluded native Skill(s) | Estimated context-cost delta | Method | Confidence |
 |---|---|---|---|---|---|
 | codex | 1 | 26 | 4100 tokens | 1 x ~200 tokens/source + 26 x ~150 tokens/description | estimate, not measured |
-| claude-code | 1 | 43 | 6650 tokens | 1 x ~200 tokens/source + 43 x ~150 tokens/description | estimate, not measured |
+| claude-code | 0 | 42 | 6300 tokens | 0 x ~200 tokens/source + 42 x ~150 tokens/description | estimate, not measured |
 
 **Native baseline vs. managed, in words**: an unmanaged native launch on
 this machine would have loaded all 9 (codex) / 3 (claude-code) registered
-MCP servers and all 26 (codex) / 43 (claude-code) discovered Skills into
+MCP servers and all 26 (codex) / 42 (claude-code) discovered Skills into
 every session, unconditionally. A managed bootstrap launch loads **zero** of
 them (`internal/runtime`'s M1 bootstrap policy excludes every native
 user-global source unconditionally — see
 `internal/runtime/bootstrap_codex_test.go`'s own 30-MCP/20-skill
-"none leak" proof, mirrored on real data here). The estimated context-cost
+"none leak" proof, mirrored on real data here).
+
+**Caveat specific to claude-code's 3 native MCP servers**: unlike codex
+(where "the generation directory cannot contain content this compiler never
+wrote into it" is a structural guarantee — see
+`internal/runtime/compile.go`'s `claudeConfigDirExclusionGapSources` doc
+comment), claude-code's isolation relies on `CLAUDE_CONFIG_DIR` relocation,
+a mechanism this project has only statically inspected, never behaviorally
+confirmed (tracked as issue #47's capability gap). Combined with this
+evidence run's own finding above — `internal/observe` did not even discover
+this machine's real `~/.claude.json` — the "loads zero" claim for
+claude-code's 3 real native MCP servers rests on the relocation mechanism
+alone, not on both the relocation AND an explicit observed-and-excluded
+record the way codex's claim does. This is exactly the kind of residual
+uncertainty the manifest's `CapabilityGap` entries exist to flag rather than
+paper over (`docs/architecture/runtime.md` §12: "system-level residual
+behavior is reported explicitly").
+
+The estimated context-cost
 delta above is the token-budget expression of that same zero-vs-native
 gap — see the "estimated context-cost delta" method below for how the
 200/150-token-per-item constants were chosen and why the result is labeled

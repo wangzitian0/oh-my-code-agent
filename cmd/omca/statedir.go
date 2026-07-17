@@ -63,16 +63,26 @@ func shimDirPath(worktreeStateDir string) string {
 }
 
 // resolveOMCABinaryPath resolves the absolute, symlink-evaluated path to
-// the currently running omca binary. This is the exact resolution env.go's
-// installShims already performed inline for the codex/claude PATH shim
-// symlinks; factored out here so it has exactly one implementation, reused
-// by installShims and by every caller that needs to populate
-// runtime.BootstrapRequest.OMCABinaryPath (env.go's runEnv, run.go's
-// runIsolated, doctor.go's checkStaleGeneration) — those three call sites
-// must all resolve the identical value for a given running omca process, or
-// `omca doctor` would spuriously report every generation as stale the
-// moment this PR's MCP registration wiring folded OMCABinaryPath into
-// GenerationID (see internal/runtime/generationid.go).
+// the currently running omca binary. Its one job today is supplying the
+// symlink target for the shim directory's own "omca" entry (env.go's
+// installShims — the MCP registration's command points at that stable
+// shimDir/omca path, via omcaCommandPath, never at this function's result
+// directly).
+//
+// This comment previously (incorrectly) described this function as also
+// feeding runtime.BootstrapRequest.OMCABinaryPath and therefore
+// GenerationID/checkStaleGeneration — that described an earlier design,
+// abandoned mid-development because os.Executable() resolves to a
+// different path on every `go run` invocation (see
+// internal/runtime/request.go's OMCABinaryPath doc comment and this PR's
+// own description for the full history). The actual current design is the
+// opposite: OMCABinaryPath is always the STABLE omcaCommandPath(shimDir)
+// value (env.go's runEnv, run.go's runIsolated), which this function has no
+// part in, and GenerationID deliberately excludes OMCABinaryPath entirely
+// (TestGenerationID_StableAcrossOMCABinaryPathChange) — so this function's
+// own possibly-per-invocation result can never make a generation look
+// spuriously stale (Copilot review finding on this PR: the old comment
+// text was misleading future readers about which function does what).
 func resolveOMCABinaryPath() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {

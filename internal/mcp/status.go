@@ -209,16 +209,23 @@ func hostStatus(worktreeStateDir, host string) HostStatus {
 // managed... context cost before/after" round-2 AC line) can reuse the
 // identical count rather than a second, driftable copy.
 //
-// Only Scope == "user" entries count, matching the AC's own filter: a
-// capability-gap entry (internal/runtime/compile.go's
-// claudeConfigDirExclusionGapSources) carries no Scope at all, since it
-// describes an unproven exclusion *class*, not one discovered source this
-// generation counted and excluded -- conflating the two would overstate
-// confidence in a number that is, for that class, genuinely unknown rather
-// than a confirmed count.
+// Only Scope == "user" entries count, and a CapabilityGap entry (internal/
+// runtime/compile.go's claudeConfigDirExclusionGapSources) is explicitly
+// excluded even though it also carries Scope == "user" (Copilot review
+// finding on this PR: an earlier version of this doc comment claimed a
+// capability-gap entry "carries no Scope at all," which was never true of
+// the actual claudeConfigDirExclusionGapSources implementation -- the
+// filter below is what actually enforces the distinction the comment only
+// asserted). A capability-gap entry describes an unproven exclusion
+// *class* ("we don't yet behaviorally know whether every native user-global
+// MCP server was really excluded"), not one discovered physical source this
+// generation counted and excluded; counting it the same as a real,
+// observed-and-excluded source would silently inflate N/M by one per gap
+// class and overstate confidence in a number that is, for that class,
+// genuinely unknown rather than confirmed.
 func CountUserExclusions(gen domain.Generation) (mcpServers, skills int) {
 	for _, s := range gen.Spec.Sources {
-		if s.Included || s.Scope != "user" {
+		if s.Included || s.Scope != "user" || s.CapabilityGap {
 			continue
 		}
 		switch s.Concept {
