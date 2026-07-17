@@ -48,6 +48,26 @@ func NativeHomeDirName(host string) (string, error) {
 	}
 }
 
+// VirtualHomeDirName is the directory name this package uses, inside a
+// generation's per-host tree (alongside NativeHomeDirName), for the
+// directory a launch shim points the exec'd process's own HOME environment
+// variable at (docs/architecture/runtime.md §7.1: "HOME=<generation>/
+// virtual-home"). Unlike NativeHomeDirName, this name does not vary by
+// host: HOME is not a host-specific config-location variable that only
+// codex or only claude-code reads, it is the process's own home directory,
+// and every first-party host resolves at least one native-home location
+// relative to it regardless of a host-specific override --
+// internal/context/host.go's codexNativeHomes and claudeNativeHomes both
+// append a "HOME/.agents/skills" entry independent of whatever CODEX_HOME/
+// CLAUDE_CONFIG_DIR resolve to. A launch shim that only relocates
+// CODEX_HOME/CLAUDE_CONFIG_DIR and never HOME itself therefore still lets
+// the real, unmanaged $HOME/.agents/skills load into the host process --
+// this directory (created empty by Bootstrap/Compile, exactly like
+// NativeHomeDir's directory) is what a real HOME override
+// (internal/shim/exec.go's Plan.Exec, cmd/omca/run.go's runIsolated) points
+// at instead, closing that gap for both hosts identically.
+const VirtualHomeDirName = "virtual-home"
+
 // NativeHomeEnvVar returns the environment variable name a launch shim must
 // set to point host's native config/state resolution at a generation's
 // NativeHomeDir: "CODEX_HOME" for codex, "CLAUDE_CONFIG_DIR" for
@@ -394,6 +414,26 @@ func hostConfigFiles(host, nativeHomeDir, omcaBinaryPath string, permissions map
 // fixtures/README.md's evidentiary trail. See doc.go and policy.go's
 // ClaudeConfigDirExclusionGapIssueURL doc comment for the tracking issue
 // this links.
+//
+// This "structural, compiler-controlled" claim was, for a time, only half
+// true: CODEX_HOME relocation always was compiler-controlled the way this
+// comment describes, but HOME itself was NOT actually redirected at launch
+// (internal/shim/exec.go's Plan.Exec and cmd/omca/run.go's runIsolated only
+// ever injected CODEX_HOME/CLAUDE_CONFIG_DIR), so the real, unmanaged
+// $HOME/.agents/skills a host binary resolves independent of either
+// variable (internal/context/host.go's codexNativeHomes and
+// claudeNativeHomes both append it unconditionally) still loaded on every
+// real launch -- a genuine native-config leak this bootstrap generation's
+// own manifest never reported, for either host, because Codex's Sources
+// list carried no capability-gap entry for it at all. That gap is now
+// closed: VirtualHomeDirName (above) gives every generation an empty,
+// compiler-controlled directory, and the launch paths now redirect HOME to
+// it (docs/architecture/runtime.md §7.1's full documented env set), so the
+// "this compiler itself fully controls by construction" claim now actually
+// covers HOME resolution too, not only CODEX_HOME -- see
+// TestPlanExec_SetsHomeAndRealHome (internal/shim/exec_test.go) and
+// TestRunIsolated_EndToEnd_VirtualizesHome (cmd/omca/run_exec_test.go) for
+// the regression coverage proving it.
 func claudeConfigDirExclusionGapSources() []domain.GenerationSourceEntry {
 	const reasonTemplate = "capability gap: whether CLAUDE_CONFIG_DIR relocation completely excludes every native user-global %s was only established by static, read-only binary inspection (E1 evidence), never behaviorally confirmed by an actual launch (see knowledge/hosts/claude-code/cli/2.1/manifest.json's knownUnknowns and fixtures/README.md); reported explicitly rather than silently assumed clean, per issue #13's policy: capability-gap shipping is allowed, hiding is not"
 	return []domain.GenerationSourceEntry{

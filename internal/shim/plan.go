@@ -69,6 +69,22 @@ type Plan struct {
 	// GenerationDir is the resolved "current" generation directory for Host
 	// under OMCA_STATE_DIR.
 	GenerationDir string
+	// VirtualHomeDir is the current generation's virtual-home directory for
+	// Host (runtime.VirtualHomeDirName, joined under GenerationDir, exactly
+	// parallel to NativeHomeDir's own construction). Exec sets HOME to this
+	// directory before exec'ing RealBinaryPath (docs/architecture/
+	// runtime.md §7.1) -- an empty, compiler-controlled directory that is
+	// never the caller's real home, so a native discovery path a host
+	// resolves relative to HOME (e.g. $HOME/.agents/skills,
+	// internal/context/host.go's codexNativeHomes/claudeNativeHomes) finds
+	// nothing real there.
+	VirtualHomeDir string
+	// RealHomeDir is the caller's real HOME, read from environ, that Exec
+	// records as OMCA_REAL_HOME on the exec'd process (docs/architecture/
+	// runtime.md §7.1) -- purely informational for the launched process (and
+	// anything it spawns) to recover the identity-shared real home it was
+	// launched from; Exec itself never reads it back.
+	RealHomeDir string
 }
 
 // getEnv returns the value of the last environ entry named key
@@ -99,9 +115,11 @@ func getEnv(environ []string, key string) string {
 // compiled.
 //
 // Every failure mode here is a clear, actionable error (never a silent
-// fallback to an unmanaged launch): OMCA_STATE_DIR unset, no "current"
-// pointer for this host, or a pointer whose generation directory has no
-// native-home directory all mean "run `omca env` again," and Build says so.
+// fallback to an unmanaged launch): HOME or OMCA_STATE_DIR unset, no
+// "current" pointer for this host, or a pointer whose generation directory
+// has no native-home or virtual-home directory all mean "run `omca env`
+// again" (or, for HOME specifically, "this shell's environment is missing
+// HOME entirely"), and Build says so.
 func Build(invokedName string, environ []string) (Plan, error) {
 	host, ok := hostForInvokedName[invokedName]
 	if !ok {
@@ -121,6 +139,20 @@ func Build(invokedName string, environ []string) (Plan, error) {
 	realPath, err := ResolveReal(invokedName, getEnv(environ, "PATH"), shimDir)
 	if err != nil {
 		return Plan{}, fmt.Errorf("shim: Build: %w", err)
+	}
+
+	// HOME is required, the same fail-closed way OMCA_STATE_DIR is below:
+	// Exec must always set HOME to the generation's virtual-home directory
+	// (docs/architecture/runtime.md §7.1), and it must always record the
+	// caller's real HOME as OMCA_REAL_HOME -- a shim invoked with no HOME at
+	// all (e.g. a stripped-down environment, or a caller that forgot
+	// `eval "$(omca env)"`) has no real value to preserve, so this fails
+	// loudly rather than silently exec'ing with an empty/missing
+	// OMCA_REAL_HOME that would be indistinguishable from "this really is
+	// the real home."
+	realHome := getEnv(environ, "HOME")
+	if realHome == "" {
+		return Plan{}, fmt.Errorf("shim: Build: HOME is not set in this shell's environment; run `eval \"$(omca env)\"` (usually via direnv's .envrc) before invoking %s", invokedName)
 	}
 
 	stateDir := getEnv(environ, "OMCA_STATE_DIR")
@@ -147,6 +179,11 @@ func Build(invokedName string, environ []string) (Plan, error) {
 		return Plan{}, fmt.Errorf("shim: Build: current generation %s for %s has no %s directory at %s; run `omca env` again", genDir, host, homeDirName, nativeHomeDir)
 	}
 
+	virtualHomeDir := filepath.Join(genDir, "hosts", host, surfaceCLI, runtime.VirtualHomeDirName)
+	if info, statErr := os.Stat(virtualHomeDir); statErr != nil || !info.IsDir() {
+		return Plan{}, fmt.Errorf("shim: Build: current generation %s for %s has no %s directory at %s; run `omca env` again", genDir, host, runtime.VirtualHomeDirName, virtualHomeDir)
+	}
+
 	return Plan{
 		Host:             host,
 		RealBinaryPath:   realPath,
@@ -154,5 +191,7 @@ func Build(invokedName string, environ []string) (Plan, error) {
 		NativeHomeDir:    nativeHomeDir,
 		GenerationID:     genID,
 		GenerationDir:    genDir,
+		VirtualHomeDir:   virtualHomeDir,
+		RealHomeDir:      realHome,
 	}, nil
 }

@@ -114,6 +114,213 @@ func TestRunIsolated_EndToEnd_ExecsWithGenerationEnv(t *testing.T) {
 	}
 }
 
+// dumpedEnvLine returns the value of the exact "key=..." line inside a
+// fakehost environment dump (output), or "" plus false if no such line
+// exists — a whole-line lookup, not strings.Contains/strings.TrimPrefix
+// against the raw dump, so a longer variable that happens to contain key as
+// a substring (e.g. "OMCA_REAL_HOME=" containing "HOME=") can never be
+// mistaken for it.
+func dumpedEnvLine(output, key string) (string, bool) {
+	prefix := key + "="
+	for _, line := range strings.Split(output, "\n") {
+		if rest, ok := strings.CutPrefix(line, prefix); ok {
+			return rest, true
+		}
+	}
+	return "", false
+}
+
+// TestRunIsolated_EndToEnd_VirtualizesHome is this fix's own hard-requirement
+// regression test: this project's entire reason to exist is that launching a
+// coding-agent CLI through it loads ZERO unselected native MCP servers/
+// Skills, and internal/context/host.go's codexNativeHomes/claudeNativeHomes
+// both resolve a "HOME/.agents/skills" native home directly from HOME,
+// independent of CODEX_HOME/CLAUDE_CONFIG_DIR -- so a real, unmanaged
+// $HOME/.agents/skills still loads on every launch unless the exec'd
+// process's own HOME is actually redirected away from the caller's real
+// home. This plants a real skill file at a scratch $HOME/.agents/skills/
+// some-skill/SKILL.md, runs the real `omca run codex --mode isolated` exec
+// path (never the real codex/claude binary -- testFixtureBinaries.fakeHost
+// stands in, dumping the environment it actually received), and asserts:
+//
+//  1. the exec'd process's own HOME is NOT the scratch HOME (it is the
+//     compiled generation's virtual-home directory instead), and
+//  2. the scratch HOME's planted skill file is therefore unreachable via
+//     $HOME/.agents/skills from the exec'd process's own perspective --
+//     computed by joining the exec'd process's OWN dumped HOME value (not
+//     the scratch HOME the test planted the file under) with
+//     ".agents/skills/some-skill/SKILL.md" and confirming nothing exists
+//     there.
+//
+// Before this fix, `overrides` in both internal/shim/exec.go's Plan.Exec and
+// this function's own production counterpart (runIsolated, run.go) only ever
+// set CODEX_HOME/CLAUDE_CONFIG_DIR -- HOME itself passed through completely
+// unmodified, so this test's step 1 assertion fails against the pre-fix
+// code (HOME dumped by fakehost equals the scratch HOME verbatim) and step 2
+// would have found the real planted file reachable. See this file's git
+// history / the PR description for the fail-before/pass-after proof this
+// test was written to satisfy.
+func TestRunIsolated_EndToEnd_VirtualizesHome(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("syscall.Exec-based `omca run` is macOS-first scope")
+	}
+
+	worktreeRoot := t.TempDir()
+	if err := os.Mkdir(filepath.Join(worktreeRoot, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Plant a real, scratch-HOME native skill exactly where
+	// codexNativeHomes (internal/context/host.go) says a real installation
+	// would resolve "HOME/.agents/skills" from -- never the real machine's
+	// actual $HOME (this repo's own hard rule for any test touching
+	// HOME/CODEX_HOME/CLAUDE_CONFIG_DIR: always t.TempDir(), never the real
+	// paths of the machine actually running this suite).
+	scratchHome := t.TempDir()
+	skillFile := filepath.Join(scratchHome, ".agents", "skills", "some-skill", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skillFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(skillFile, []byte("# some-skill\n\nunmanaged, native, unselected.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stateRoot := t.TempDir()
+	restoreWritableTree(t, stateRoot) // a compiled generation lands read-only under here; see internal/runtime/readonly.go
+	binDir := t.TempDir()
+	if err := os.Symlink(testFixtureBinaries.fakeHost, filepath.Join(binDir, "codex")); err != nil {
+		t.Fatal(err)
+	}
+
+	environ := []string{
+		"HOME=" + scratchHome,
+		"PATH=" + binDir,
+		"XDG_STATE_HOME=" + stateRoot,
+	}
+	stdout, stderr, code := runOmcaSubprocess(t, worktreeRoot, []string{"run", "codex", "--mode", "isolated"}, environ)
+	if code != 0 {
+		t.Fatalf("omca run --mode isolated codex = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+
+	execdHome, ok := dumpedEnvLine(stdout, "HOME")
+	if !ok {
+		t.Fatalf("fakehost's dumped environment did not contain a HOME line at all; stdout:\n%s", stdout)
+	}
+
+	// Assertion 1: the exec'd process's own HOME must not be the scratch
+	// HOME this test planted the skill file under -- this is the literal
+	// bug: pre-fix, HOME passed straight through untouched.
+	if execdHome == scratchHome {
+		t.Fatalf("exec'd process's HOME (%s) is the scratch HOME verbatim; HOME was never virtualized -- the real, unmanaged %s is still reachable through it", execdHome, skillFile)
+	}
+	if !strings.Contains(execdHome, filepath.Join(stateRoot, "omca")) {
+		t.Errorf("exec'd process's HOME (%s) does not point inside the compiled generation under the configured XDG_STATE_HOME (%s); stdout:\n%s", execdHome, stateRoot, stdout)
+	}
+
+	// Assertion 2: from the exec'd process's OWN perspective (its own
+	// reported HOME, not the scratch HOME this test happens to know about),
+	// the planted skill file must be unreachable -- codexNativeHomes'
+	// "HOME/.agents/skills" resolution, replayed here against the exec'd
+	// HOME, must find nothing.
+	unreachablePath := filepath.Join(execdHome, ".agents", "skills", "some-skill", "SKILL.md")
+	if _, statErr := os.Stat(unreachablePath); statErr == nil {
+		t.Errorf("the planted skill file is reachable via the exec'd process's own HOME/.agents/skills (%s); isolation was not applied", unreachablePath)
+	} else if !os.IsNotExist(statErr) {
+		t.Errorf("unexpected error statting %s: %v", unreachablePath, statErr)
+	}
+
+	// The real, scratch-HOME skill file must still physically exist
+	// untouched (this test never claims to delete or hide real state, only
+	// that the exec'd process cannot see it through its own HOME).
+	if _, err := os.Stat(skillFile); err != nil {
+		t.Fatalf("planted skill file %s no longer exists: %v", skillFile, err)
+	}
+
+	// docs/architecture/runtime.md §7.1's other required export:
+	// OMCA_REAL_HOME must carry the caller's real (here: scratch) HOME
+	// forward, so the launched process can still recover it. dumpedEnvLine,
+	// not strings.Contains: a substring check on the whole dump could false-
+	// positive if some other env var's value happens to contain scratchHome
+	// as a substring (e.g. a var whose own value is itself HOME-prefixed).
+	execdRealHome, ok := dumpedEnvLine(stdout, "OMCA_REAL_HOME")
+	if !ok {
+		t.Fatalf("fakehost's dumped environment did not contain an OMCA_REAL_HOME line at all; stdout:\n%s", stdout)
+	}
+	if execdRealHome != scratchHome {
+		t.Errorf("OMCA_REAL_HOME = %q, want %q", execdRealHome, scratchHome)
+	}
+}
+
+// TestRunIsolated_StaleGenerationMissingVirtualHome_FailsClosed proves the
+// Copilot-review fix: EnsureGeneration treats any directory with a valid
+// manifest.json as a cache hit, without re-checking that the rest of the
+// on-disk directory set still matches what the current compiler promises
+// to have created. A generation compiled before HOME virtualization
+// existed (simulated here by deleting an already-compiled generation's
+// virtual-home directory and reusing the same worktree/state dir, so the
+// second `omca run` call is guaranteed to hit EnsureGeneration's cache
+// path rather than recompiling) must make `omca run` fail loudly rather
+// than silently launching with HOME pointed at a path that does not
+// exist -- which would reopen the exact isolation gap this generation-
+// compiler change exists to close.
+func TestRunIsolated_StaleGenerationMissingVirtualHome_FailsClosed(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("syscall.Exec-based `omca run` is macOS-first scope")
+	}
+
+	worktreeRoot := t.TempDir()
+	if err := os.Mkdir(filepath.Join(worktreeRoot, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	scratchHome := t.TempDir()
+	stateRoot := t.TempDir()
+	restoreWritableTree(t, stateRoot)
+	binDir := t.TempDir()
+	if err := os.Symlink(testFixtureBinaries.fakeHost, filepath.Join(binDir, "codex")); err != nil {
+		t.Fatal(err)
+	}
+	environ := []string{
+		"HOME=" + scratchHome,
+		"PATH=" + binDir,
+		"XDG_STATE_HOME=" + stateRoot,
+	}
+
+	// First call: a genuinely fresh compile, virtual-home included. Reuses
+	// the exact same environ/worktreeRoot on the second call below so
+	// EnsureGeneration's content-address computation is identical and it
+	// returns the (about to be tampered with) cached directory instead of
+	// recompiling.
+	stdout, stderr, code := runOmcaSubprocess(t, worktreeRoot, []string{"run", "codex", "--mode", "isolated"}, environ)
+	if code != 0 {
+		t.Fatalf("first omca run (fresh compile) = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	execdHome, ok := dumpedEnvLine(stdout, "HOME")
+	if !ok {
+		t.Fatalf("fakehost's dumped environment did not contain a HOME line at all; stdout:\n%s", stdout)
+	}
+	// The compiled generation tree lands read-only (internal/runtime/
+	// readonly.go); restore write permission before tampering with it.
+	// restoreWritableTree only registers a t.Cleanup hook for end-of-test,
+	// so call the underlying restore function directly to get an
+	// immediate, mid-test effect.
+	restoreWritableSkippingSymlinks(stateRoot)
+	if err := os.RemoveAll(execdHome); err != nil {
+		t.Fatalf("removing the compiled generation's virtual-home directory (%s): %v", execdHome, err)
+	}
+
+	// Second call: same environ, same worktree -- EnsureGeneration must find
+	// the same content-addressed generation directory (manifest.json is
+	// untouched) and treat it as a cache hit, exactly the scenario a real
+	// pre-fix-compiled generation would present.
+	_, stderr2, code2 := runOmcaSubprocess(t, worktreeRoot, []string{"run", "codex", "--mode", "isolated"}, environ)
+	if code2 == 0 {
+		t.Fatal("second omca run (virtual-home missing) exited 0, want a non-zero fail-closed exit -- HOME would have been set to a nonexistent path")
+	}
+	if !strings.Contains(stderr2, "virtual-home") {
+		t.Errorf("stderr does not mention the missing virtual-home directory, want an actionable message; stderr:\n%s", stderr2)
+	}
+}
+
 // TestRunNative_EndToEnd_NoGenerationEnvInjected proves `--mode native`
 // really does exec with the caller's ambient environment completely
 // unmodified — no CODEX_HOME injected — after printing its unmanaged

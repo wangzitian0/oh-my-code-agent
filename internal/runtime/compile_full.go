@@ -637,6 +637,14 @@ func Compile(req CompileRequest, outputDir string) (domain.Generation, error) {
 			artifacts = append(artifacts, domain.GenerationArtifact{Path: f.RelPath, Digest: digest})
 		}
 
+		// See Bootstrap's (bootstrap.go) identical MkdirAll for why the
+		// virtual-home directory needs an explicit call rather than coming
+		// into existence as a side effect of writing a file into it.
+		virtualHomeDir := filepath.Join(outputDir, "hosts", h.Detection.Host, surface, VirtualHomeDirName)
+		if mkErr := os.MkdirAll(virtualHomeDir, 0o755); mkErr != nil {
+			return domain.Generation{}, fmt.Errorf("runtime: Compile: %w", mkErr)
+		}
+
 		hosts[h.Detection.Host] = domain.GenerationHostEntry{
 			Surface:   surface,
 			AdapterID: AdapterID,

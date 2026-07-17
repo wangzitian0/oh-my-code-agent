@@ -82,11 +82,24 @@ func sortStrings(keys []string) {
 }
 
 // Exec builds the injected environment for p (p.NativeHomeEnvVar ->
-// p.NativeHomeDir, plus OMCA_RUN_ID -> p.GenerationID when known) and calls
-// ExecReplace against p.RealBinaryPath with args appended to argv. Like
+// p.NativeHomeDir, HOME -> p.VirtualHomeDir, OMCA_REAL_HOME ->
+// p.RealHomeDir, plus OMCA_RUN_ID -> p.GenerationID when known) and calls
+// ExecReplace against p.RealBinaryPath with args appended to argv. The
+// HOME/OMCA_REAL_HOME pair is the other half of docs/architecture/
+// runtime.md §7.1's documented env set, alongside NativeHomeEnvVar: without
+// it, a real host binary still resolves its own native, unmanaged
+// $HOME/.agents/skills (internal/context/host.go's codexNativeHomes/
+// claudeNativeHomes both append that entry independent of CODEX_HOME/
+// CLAUDE_CONFIG_DIR) even though NativeHomeEnvVar alone was already
+// correctly redirected -- this was a real gap this project's exec path had
+// until this fix, see compile.go's VirtualHomeDirName doc comment. Like
 // ExecReplace, this never returns on success.
 func (p Plan) Exec(args []string, environ []string) error {
-	overrides := map[string]string{p.NativeHomeEnvVar: p.NativeHomeDir}
+	overrides := map[string]string{
+		p.NativeHomeEnvVar: p.NativeHomeDir,
+		"HOME":             p.VirtualHomeDir,
+		"OMCA_REAL_HOME":   p.RealHomeDir,
+	}
 	if p.GenerationID != "" {
 		overrides["OMCA_RUN_ID"] = p.GenerationID
 	}
