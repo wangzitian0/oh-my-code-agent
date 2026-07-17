@@ -90,6 +90,10 @@
               "concept": { "type": "string", "minLength": 1 },
               "source": { "type": "string" },
               "scope": { "type": "string" },
+              "host": {
+                "type": "string",
+                "description": "Additive v1alpha1 field (issue #19, PR-15): which host this entry's decision belongs to, for a Generation whose spec.hosts names more than one host. Empty for a genuinely host-neutral entry."
+              },
               "included": { "type": "boolean" },
               "reason": { "type": "string", "minLength": 1 },
               "capabilityGap": { "type": "boolean" },

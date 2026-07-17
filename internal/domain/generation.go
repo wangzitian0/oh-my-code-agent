@@ -81,10 +81,25 @@ type GenerationHostEntry struct {
 // below, the same "fail closed on an unexplained gap" stance
 // domain.IsCanonicalDigest's doc comment describes for a malformed digest
 // reference.
+//
+// Host names which host this entry's decision belongs to (Copilot review
+// finding on PR-15/issue #19): PR-14 made GenerationSpec.Hosts a map so one
+// Generation can share multiple hosts' artifact trees, but Spec.Sources is
+// one flat list across all of them -- without a per-entry Host, two hosts'
+// entries sharing the same (Concept, Source) (a host-scoped asset active
+// for codex but not claude-code, for instance) become indistinguishable,
+// which silently broke host-scoped confirmation-gating
+// (internal/runtime.DiffProposedChanges) for exactly the differentiated-
+// per-host-loadout scenario M2's own exit gate exists to prove. Empty for
+// a genuinely host-neutral entry, though this compiler does not produce any
+// today -- every compileHostTree/resolvedAssetSources call already runs in
+// a known per-host context, so every entry it emits gets stamped with that
+// host.
 type GenerationSourceEntry struct {
 	Concept       string `json:"concept"`
 	Source        string `json:"source,omitempty"`
 	Scope         string `json:"scope,omitempty"`
+	Host          string `json:"host,omitempty"`
 	Included      bool   `json:"included"`
 	Reason        string `json:"reason"`
 	CapabilityGap bool   `json:"capabilityGap,omitempty"`

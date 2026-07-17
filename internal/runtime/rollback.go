@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -65,7 +66,19 @@ func Rollback(worktreeStateDir, generationsRoot, host string, detection hostcont
 
 	currentDir, err := CurrentGenerationDir(worktreeStateDir, host)
 	if err != nil {
-		return RollbackResult{}, fmt.Errorf("runtime: Rollback: no current generation for %s to roll back from: %w", host, err)
+		// Distinguish "no current pointer yet" (os.IsNotExist -- there is
+		// genuinely nothing to roll back from) from any other failure (e.g.
+		// a corrupt pointer that isn't a readable symlink): wrapping both
+		// under the same "no current generation ... to roll back from"
+		// message was misleading for the corrupt case and made debugging
+		// harder (Copilot review finding on this PR) -- the same
+		// not-found-vs-corrupt distinction cmd/omca/doctor.go's
+		// checkGenerationFreshness already draws for the identical
+		// CurrentGenerationDir error.
+		if os.IsNotExist(err) {
+			return RollbackResult{}, fmt.Errorf("runtime: Rollback: no current generation for %s to roll back from: %w", host, err)
+		}
+		return RollbackResult{}, fmt.Errorf("runtime: Rollback: current-generation pointer for %s is corrupt: %w", host, err)
 	}
 	currentGen, err := ReadGenerationManifest(currentDir)
 	if err != nil {

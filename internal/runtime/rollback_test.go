@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -133,5 +134,39 @@ func TestRollback_ParentGenerationMissingOnDisk_ReturnsError(t *testing.T) {
 	_, err := Rollback(worktreeStateDir, generationsRoot, "codex", fx.req.Hosts[0].Detection, now.Add(time.Minute))
 	if err == nil {
 		t.Fatal("Rollback with a parent generation missing on disk: want error, got nil")
+	}
+}
+
+// TestRollback_CorruptCurrentPointer_ReportsCorruptionNotMissing is a
+// regression test for a real Copilot review finding on this PR: Rollback
+// used to wrap every CurrentGenerationDir error -- not just os.IsNotExist --
+// under the same "no current generation ... to roll back from" message,
+// which was misleading for a genuinely corrupt pointer (e.g. a "current"
+// entry that exists but isn't a readable symlink) and made debugging
+// harder. This plants exactly that corruption and proves the error now
+// says "corrupt," not "no current generation."
+func TestRollback_CorruptCurrentPointer_ReportsCorruptionNotMissing(t *testing.T) {
+	worktreeStateDir := t.TempDir()
+	generationsRoot := filepath.Join(worktreeStateDir, "generations")
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	fx := compileFixture(t, worktreeStateDir, nil, nil, now)
+
+	linkPath := pointerLinkPath(worktreeStateDir, "current", "codex")
+	if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(linkPath, []byte("not a symlink"), 0o644); err != nil {
+		t.Fatalf("planting a corrupt (non-symlink) 'current' entry: %v", err)
+	}
+
+	_, err := Rollback(worktreeStateDir, generationsRoot, "codex", fx.req.Hosts[0].Detection, now)
+	if err == nil {
+		t.Fatal("Rollback with a corrupt current pointer: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "corrupt") {
+		t.Errorf("error = %q, want it to mention the pointer is corrupt, not just \"no current generation\"", err.Error())
+	}
+	if strings.Contains(err.Error(), "no current generation") {
+		t.Errorf("error = %q, downgraded real pointer corruption to the ordinary not-yet-managed message", err.Error())
 	}
 }

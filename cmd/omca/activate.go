@@ -61,15 +61,46 @@ func compositionDirsFor(configRoot, repoRoot string) (profileDirs, bindingDirs, 
 	return profileDirs, bindingDirs, exceptionDirs
 }
 
+// confirmArg is one parsed --confirm flag: a confirmation class plus, for a
+// class that gates a specific asset (enable-mcp-server, expand-access), the
+// exact asset ID the operator reviewed. Host is filled in later, once
+// runActivate has resolved the target host (parseActivateArgs runs before
+// that) -- see runActivate's confirmedSet construction.
+//
+// AssetID-scoped, not bare-Kind: an earlier version of this flag confirmed
+// an entire ChangeKind at once, which meant --confirm enable-mcp-server
+// would silently also approve every OTHER MCP server enabled in the same
+// activation, not just the one the operator actually reviewed (Copilot
+// review finding on this PR, fixed at its root in
+// runtime.ConfirmationKey/RequireConfirmation -- this flag format is the
+// CLI-level half of that same fix).
+type confirmArg struct {
+	Kind    runtime.ChangeKind
+	AssetID string
+}
+
 // activateArgs is `omca activate`'s parsed command line: the target host,
-// plus zero or more --confirm <changeKind> flags naming a confirmation
-// class the operator has already explicitly reviewed and approved outside
-// this process (there is no TUI yet, roadmap M7 -- this is the CLI-level
-// stand-in issue #19's round-2 addendum asks for: "CLI activation enforces
-// confirmation classes ... from the first activation path").
+// plus zero or more --confirm <changeKind>[:<assetId>] flags naming a
+// specific proposed change the operator has already explicitly reviewed and
+// approved outside this process (there is no TUI yet, roadmap M7 -- this is
+// the CLI-level stand-in issue #19's round-2 addendum asks for: "CLI
+// activation enforces confirmation classes ... from the first activation
+// path"). The :<assetId> suffix is required for an asset-scoped class
+// (enable-mcp-server, expand-access) -- RequireConfirmation only ever
+// matches a confirmation to the exact ProposedChange it names, never to
+// "any change of this Kind," so an assetId-less confirmation for one of
+// those classes simply never matches anything and activation stays blocked,
+// rather than silently over-confirming.
 type activateArgs struct {
 	Host    string
-	Confirm []runtime.ChangeKind
+	Confirm []confirmArg
+}
+
+func parseConfirmValue(v string) confirmArg {
+	if i := strings.IndexByte(v, ':'); i >= 0 {
+		return confirmArg{Kind: runtime.ChangeKind(v[:i]), AssetID: v[i+1:]}
+	}
+	return confirmArg{Kind: runtime.ChangeKind(v)}
 }
 
 func parseActivateArgs(args []string) (activateArgs, error) {
@@ -79,12 +110,12 @@ func parseActivateArgs(args []string) (activateArgs, error) {
 		switch {
 		case a == "--confirm":
 			if i+1 >= len(args) {
-				return activateArgs{}, fmt.Errorf("--confirm requires a value (a confirmation class's ChangeKind, e.g. enable-mcp-server)")
+				return activateArgs{}, fmt.Errorf("--confirm requires a value (e.g. enable-mcp-server:codegraph, or a bare class like select-reviewed-skill:my-skill)")
 			}
-			out.Confirm = append(out.Confirm, runtime.ChangeKind(args[i+1]))
+			out.Confirm = append(out.Confirm, parseConfirmValue(args[i+1]))
 			i++
 		case strings.HasPrefix(a, "--confirm="):
-			out.Confirm = append(out.Confirm, runtime.ChangeKind(strings.TrimPrefix(a, "--confirm=")))
+			out.Confirm = append(out.Confirm, parseConfirmValue(strings.TrimPrefix(a, "--confirm=")))
 		case out.Host == "" && !strings.HasPrefix(a, "-"):
 			out.Host = a
 		default:
@@ -92,7 +123,7 @@ func parseActivateArgs(args []string) (activateArgs, error) {
 		}
 	}
 	if out.Host == "" {
-		return activateArgs{}, fmt.Errorf("a host is required: omca activate [--confirm <changeKind>]... <codex|claude>")
+		return activateArgs{}, fmt.Errorf("a host is required: omca activate [--confirm <changeKind>[:<assetId>]]... <codex|claude>")
 	}
 	return out, nil
 }
@@ -164,18 +195,19 @@ func runActivate(stdout, stderr io.Writer, args []string) int {
 	}
 
 	changes := runtime.DiffProposedChanges(currentGen, pendingGen, host)
-	confirmed := make(map[runtime.ChangeKind]bool, len(parsed.Confirm))
-	for _, k := range parsed.Confirm {
-		confirmed[k] = true
+	// Host is filled in here, not at parse time (confirmArg has no Host of
+	// its own): --confirm flags are parsed before this command knows its
+	// target host, and every ProposedChange DiffProposedChanges produces
+	// for this invocation is scoped to that same, single host anyway.
+	confirmed := make(map[runtime.ConfirmationKey]bool, len(parsed.Confirm))
+	for _, c := range parsed.Confirm {
+		confirmed[runtime.ConfirmationKey{Kind: c.Kind, AssetID: c.AssetID, Host: host}] = true
 	}
 	if confErr := runtime.RequireConfirmation(changes, confirmed); confErr != nil {
-		fmt.Fprintf(stderr, "omca: activate: %s: activation blocked -- the following changes require explicit confirmation (pass --confirm <changeKind> for each, once reviewed):\n", host)
-		for _, c := range changes {
-			cr := runtime.ClassifyChange(c)
-			if !cr.RequiresConfirmation || confirmed[c.Kind] {
-				continue
-			}
-			fmt.Fprintf(stderr, "  - --confirm %s (asset=%q class=%s detailKeys=%v)\n    %s\n", c.Kind, c.AssetID, cr.Class, cr.RequiredDetailKeys, cr.Explanation)
+		fmt.Fprintf(stderr, "omca: activate: %s: activation blocked -- the following changes require explicit confirmation (pass --confirm <changeKind>:<assetId> for each, once reviewed):\n", host)
+		for i, cr := range confErr.Requirements {
+			c := confErr.Changes[i]
+			fmt.Fprintf(stderr, "  - --confirm %s:%s (class=%s detailKeys=%v)\n    %s\n", c.Kind, c.AssetID, cr.Class, cr.RequiredDetailKeys, cr.Explanation)
 		}
 		return 1
 	}
