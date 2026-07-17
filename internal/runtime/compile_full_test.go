@@ -143,6 +143,87 @@ func TestCompileGenerationID_SensitiveToKnowledgePacks(t *testing.T) {
 	}
 }
 
+// TestCompileGenerationID_SensitiveToExceptionExpiry is a regression test
+// for a real Copilot review finding on this PR: CompileGenerationID used to
+// exclude Now entirely, but resolve.Resolve's actual output depends on Now
+// through each Exception's now.Before(ExpiresAt) liveness check -- so two
+// Compile calls with identical Profiles/Activation/Exceptions, differing
+// only in Now landing on either side of an Exception's expiry, could
+// produce different compiled Sources/artifacts under the SAME generation
+// ID, breaking content-addressing's core guarantee ("same ID implies same
+// content"). This proves the fix: a Now before expiry and a Now after
+// expiry produce DIFFERENT IDs for the same Exception.
+func TestCompileGenerationID_SensitiveToExceptionExpiry(t *testing.T) {
+	profiles := []domain.Profile{sandboxProfile("company:example", domain.IntentDefault, "workspace-write")}
+	exceptions := []domain.Exception{
+		{AssetID: "code-review", Scope: "company:example", Justification: "temporary", ExpiresAt: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)},
+	}
+
+	beforeExpiry := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	afterExpiry := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+
+	// One fixture/worktree, built once (buildSimpleCompileRequest's
+	// t.TempDir()-derived Worktree.ID is otherwise a second, uncontrolled
+	// variable between two separate calls) -- reqAfter is a copy of
+	// reqBefore with ONLY Now changed, matching
+	// TestCompileGenerationID_DeterministicAcrossCalls's established
+	// "reqDiffering := req; reqDiffering.Now = ..." pattern exactly.
+	reqBefore := buildSimpleCompileRequest(t, "# instructions\n", profiles, domain.Activation{}, exceptions, beforeExpiry)
+	reqAfter := reqBefore
+	reqAfter.Now = afterExpiry
+
+	idBefore, err := CompileGenerationID(reqBefore)
+	if err != nil {
+		t.Fatalf("CompileGenerationID(before expiry): %v", err)
+	}
+	idAfter, err := CompileGenerationID(reqAfter)
+	if err != nil {
+		t.Fatalf("CompileGenerationID(after expiry): %v", err)
+	}
+	if idBefore == idAfter {
+		t.Fatalf("CompileGenerationID did not change when the Exception's live/expired status flipped: both %q", idBefore)
+	}
+}
+
+// TestCompileGenerationID_StableAcrossNowNotCrossingAnyExpiry is
+// TestCompileGenerationID_SensitiveToExceptionExpiry's negative control:
+// two different Now values that both land on the SAME side of every
+// Exception's expiry (here, no exceptions at all, matching
+// TestCompileGenerationID_DeterministicAcrossCalls's existing "Now doesn't
+// matter" case) must still produce the identical ID -- proving the fix
+// folds in each exception's live/expired *classification*, not raw Now
+// itself, which would have overcorrected into "the ID always changes when
+// Now changes" and broken reproducibility for no real content difference.
+func TestCompileGenerationID_StableAcrossNowNotCrossingAnyExpiry(t *testing.T) {
+	profiles := []domain.Profile{sandboxProfile("company:example", domain.IntentDefault, "workspace-write")}
+	exceptions := []domain.Exception{
+		{AssetID: "code-review", Scope: "company:example", Justification: "temporary", ExpiresAt: time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)},
+	}
+
+	now1 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	now2 := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC) // both still well before the exception's 2030 expiry
+
+	// One fixture/worktree, built once -- see
+	// TestCompileGenerationID_SensitiveToExceptionExpiry's identical note on
+	// why calling buildSimpleCompileRequest twice would confound the result
+	// with two different Worktree.IDs.
+	req1 := buildSimpleCompileRequest(t, "# instructions\n", profiles, domain.Activation{}, exceptions, now1)
+	req2 := req1
+	req2.Now = now2
+
+	id1, err := CompileGenerationID(req1)
+	if err != nil {
+		t.Fatalf("CompileGenerationID(now1): %v", err)
+	}
+	id2, err := CompileGenerationID(req2)
+	if err != nil {
+		t.Fatalf("CompileGenerationID(now2): %v", err)
+	}
+	if id1 != id2 {
+		t.Fatalf("CompileGenerationID changed even though no exception's live/expired status changed: %q != %q", id1, id2)
+	}
+}
+
 // TestCompile_RebuildingIntoFreshOutputDir_YieldsIdenticalID is the
 // end-to-end version of the determinism AC (matching bootstrap_test.go's
 // TestBootstrap_RebuildingIntoFreshOutputDir_YieldsIdenticalID): compiling
@@ -529,5 +610,51 @@ func TestCompile_BootstrapDesiredGraphDigest_DiffersFromCompile(t *testing.T) {
 	}
 	if !domain.IsCanonicalDigest(gen.Spec.DesiredGraphDigest) {
 		t.Errorf("desiredGraphDigest %q is not a canonical sha256 digest", gen.Spec.DesiredGraphDigest)
+	}
+}
+
+// TestSourceEntryFingerprint_DiffersOnScopeAndCapabilityGap is a regression
+// test for a real Copilot review finding on this PR: sourceEntryFingerprint
+// (and, through it, Generation.spec.sourceDigest) used to be computed from
+// only Concept/Source/Included/Reason, silently omitting Scope/
+// CapabilityGap/TrackingIssue -- two entries identical in the covered
+// fields but differing in an omitted one would have produced the same
+// fingerprint. This proves each omitted field, changed alone, changes the
+// fingerprint.
+func TestSourceEntryFingerprint_DiffersOnScopeAndCapabilityGap(t *testing.T) {
+	base := domain.GenerationSourceEntry{
+		Concept:  "mcp_server",
+		Source:   "/native/.claude.json",
+		Included: false,
+		Reason:   "excluded: native user-global source",
+	}
+
+	baseFP, err := sourceEntryFingerprint("claude-code", base)
+	if err != nil {
+		t.Fatalf("sourceEntryFingerprint(base): %v", err)
+	}
+
+	scopeChanged := base
+	scopeChanged.Scope = "user"
+	scopeFP, err := sourceEntryFingerprint("claude-code", scopeChanged)
+	if err != nil {
+		t.Fatalf("sourceEntryFingerprint(scopeChanged): %v", err)
+	}
+	if scopeFP == baseFP {
+		t.Error("sourceEntryFingerprint did not change when Scope changed (base has no Scope, scopeChanged sets it to \"user\")")
+	}
+
+	gapChanged := base
+	gapChanged.CapabilityGap = true
+	gapChanged.TrackingIssue = "https://github.com/wangzitian0/oh-my-code-agent/issues/47"
+	gapFP, err := sourceEntryFingerprint("claude-code", gapChanged)
+	if err != nil {
+		t.Fatalf("sourceEntryFingerprint(gapChanged): %v", err)
+	}
+	if gapFP == baseFP {
+		t.Error("sourceEntryFingerprint did not change when CapabilityGap/TrackingIssue changed")
+	}
+	if gapFP == scopeFP {
+		t.Error("sourceEntryFingerprint collided between a Scope-only change and a CapabilityGap-only change")
 	}
 }
