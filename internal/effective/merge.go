@@ -90,6 +90,29 @@ func ResolveGroup(group LogicalGroup, hk domain.HostKnowledge, capOps domain.Cap
 	distinct := distinctByContent(group.Candidates)
 	if len(distinct) == 1 {
 		winner := distinct[0]
+		// A denied lone candidate must never be trivially declared the
+		// active winner: opts.DeniedRefs/domain.DispositionDenied is
+		// caller-communicated ground truth about a policy exclusion,
+		// independent of whether this concept even has a qualified
+		// precedence program to "resolve" a real collision with — a denial
+		// is not a collision to adjudicate, it is a fact already decided.
+		// Mirrors resolveDenyWins's own "every candidate denied" outcome
+		// (Guarantee: HARD, nothing active) exactly, so a single-candidate
+		// group and a multi-candidate-all-denied group behave identically.
+		if isDenied(winner, opts.DeniedRefs) {
+			return &EffectiveEntry{
+				Concept:   group.Concept,
+				LogicalID: group.LogicalID,
+				Provenance: Provenance{
+					IgnoredSources: []string{winner.Ref},
+					Constraints:    []string{"DENY_WINS: the only candidate is denied"},
+				},
+				EvidenceLevel: highestEvidence(group.Candidates),
+				Guarantee:     domain.GuaranteeHard,
+				Confirmed:     highestEvidence(group.Candidates).Rank() >= domain.EvidenceLevelHostReported.Rank(),
+				Reason:        fmt.Sprintf("the only physical source for %q is denied; nothing active", group.LogicalID),
+			}, nil
+		}
 		refs := candidateRefs(group.Candidates)
 		reason := fmt.Sprintf("only one physical source for %q", group.LogicalID)
 		if len(group.Candidates) > 1 {
@@ -146,6 +169,16 @@ func ResolveGroup(group LogicalGroup, hk domain.HostKnowledge, capOps domain.Cap
 
 func capabilityQualified(capOps domain.CapabilityOps) bool {
 	return capOps.Resolve == domain.CapabilityExact || capOps.Resolve == domain.CapabilityCompatible
+}
+
+// isDenied reports whether c is excluded by an applicable deny policy:
+// either named explicitly in deniedRefs (a caller may know about a deny
+// policy c's own Disposition does not yet reflect) or already carrying
+// domain.DispositionDenied. Shared by ResolveGroup's single-candidate fast
+// path and resolveDenyWins so a denial is honored identically regardless of
+// how many other candidates happen to be in the group.
+func isDenied(c Candidate, deniedRefs map[string]bool) bool {
+	return deniedRefs[c.Ref] || c.Disposition == domain.DispositionDenied
 }
 
 // applyOperator applies operator's real merge semantics to group, once both
@@ -500,7 +533,7 @@ func resolveDenyWins(group LogicalGroup, program domain.PrecedenceProgram, denie
 	var survivors []Candidate
 	var deniedRefs []string
 	for _, c := range group.Candidates {
-		if denied[c.Ref] || c.Disposition == domain.DispositionDenied {
+		if isDenied(c, denied) {
 			deniedRefs = append(deniedRefs, c.Ref)
 			continue
 		}

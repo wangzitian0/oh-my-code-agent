@@ -252,40 +252,62 @@ func Observe(req Request) ([]domain.Observation, error) {
 				rules = claudeDirectoryChainRules()
 			}
 
-			for _, dir := range chain {
-				// os.Lstat, not os.Stat: a chain segment that is itself a
-				// symlink (e.g. a repo subdirectory symlinked to somewhere
-				// outside WorktreeRoot) must never be followed into
-				// observeRoot. os.Stat would resolve it and hand observeRoot
-				// a path whose later filepath.Join/os.Lstat calls treat the
-				// symlinked segment as an ordinary directory component — Go's
-				// Lstat only refuses to follow a symlink in the *final* path
-				// element, not an intermediate one — silently widening
-				// observation outside the declared scope root, the same
-				// scope-containment boundary observeFile enforces for
-				// symlinked files (see walk.go). A symlinked chain segment
-				// gets the same silent, non-error, non-record treatment as a
-				// chain segment that doesn't exist or isn't a directory: it
-				// is scaffolding for where to look, not itself an observed
-				// concept, so there is nothing to lose from "lossless
-				// inventory" by not walking through it.
-				info, err := os.Lstat(dir)
-				if err != nil {
-					if os.IsNotExist(err) {
+				// tainted latches once any chain segment is found to be a
+				// symlink, and every deeper segment is skipped unconditionally
+				// from then on — checking each segment's own os.Lstat result
+				// in isolation is not enough: os.Lstat only refuses to follow
+				// a symlink in the *final* path element of the path it is
+				// given, so a later segment built by filepath.Join'ing past an
+				// already-symlinked earlier segment (directory.go's
+				// directoryChain produces exactly this — "root/a" then
+				// "root/a/b") still resolves cleanly through the OS's normal
+				// intermediate-component symlink-following, lands on whatever
+				// real directory the earlier symlink actually points at, and
+				// would otherwise pass this loop's own per-segment check even
+				// though the whole path is outside WorktreeRoot. Once tainted,
+				// nothing under that prefix can be trusted to stay contained,
+				// so skip it and everything deeper, not just the segment that
+				// was directly a symlink.
+				tainted := false
+				for _, dir := range chain {
+					if tainted {
 						continue
 					}
-					return nil, fmt.Errorf("observe: Observe: stat directory %s: %w", dir, err)
-				}
-				if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-					continue
-				}
+					// os.Lstat, not os.Stat: a chain segment that is itself a
+					// symlink (e.g. a repo subdirectory symlinked to somewhere
+					// outside WorktreeRoot) must never be followed into
+					// observeRoot. os.Stat would resolve it and hand observeRoot
+					// a path whose later filepath.Join/os.Lstat calls treat the
+					// symlinked segment as an ordinary directory component —
+					// silently widening observation outside the declared scope
+					// root, the same scope-containment boundary observeFile
+					// enforces for symlinked files (see walk.go). A symlinked
+					// chain segment gets the same silent, non-error, non-record
+					// treatment as a chain segment that doesn't exist or isn't
+					// a directory: it is scaffolding for where to look, not
+					// itself an observed concept, so there is nothing to lose
+					// from "lossless inventory" by not walking through it.
+					info, err := os.Lstat(dir)
+					if err != nil {
+						if os.IsNotExist(err) {
+							continue
+						}
+						return nil, fmt.Errorf("observe: Observe: stat directory %s: %w", dir, err)
+					}
+					if info.Mode()&os.ModeSymlink != 0 {
+						tainted = true
+						continue
+					}
+					if !info.IsDir() {
+						continue
+					}
 
-				recs, err := observeRoot(host, hostVersion, surface, "directory", dir, rules)
-				if err != nil {
-					return nil, err
+					recs, err := observeRoot(host, hostVersion, surface, "directory", dir, rules)
+					if err != nil {
+						return nil, err
+					}
+					all = append(all, recs...)
 				}
-				all = append(all, recs...)
-			}
 		}
 	}
 

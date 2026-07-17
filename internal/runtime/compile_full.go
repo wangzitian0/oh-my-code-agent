@@ -547,7 +547,23 @@ func aggregateSources(perHost []hostSourceEntry) ([]domain.GenerationSourceEntry
 		if allSources[i].Source != allSources[j].Source {
 			return allSources[i].Source < allSources[j].Source
 		}
-		return allSources[i].Reason < allSources[j].Reason
+		if allSources[i].Reason != allSources[j].Reason {
+			return allSources[i].Reason < allSources[j].Reason
+		}
+		// Host as the final tiebreaker: a host-neutral asset (no `hosts:`
+		// selector) resolves to an identical (Concept, Source, Reason)
+		// tuple on every host in a multi-host generation, a guaranteed tie
+		// the comparator above never breaks. sort.Slice is not stable, so
+		// without this, that tie's relative order in the generation-wide
+		// Sources list depended on which host happened to appear first in
+		// req.Hosts — the manifest's human/audit-facing Sources list was
+		// not independent of caller-supplied input order, breaking this
+		// codebase's otherwise-universal "shuffle input order, get
+		// byte-identical output" determinism guarantee (SourceDigest itself
+		// was never affected: it folds a separately sort.Strings-sorted
+		// fingerprint list, where a duplicate/tied string is order-
+		// insensitive).
+		return allSources[i].Host < allSources[j].Host
 	})
 	sort.Strings(sourceFingerprints)
 	sourceDigest, err := domain.CanonicalDigest(sourceFingerprints)

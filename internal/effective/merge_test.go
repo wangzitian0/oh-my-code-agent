@@ -288,6 +288,38 @@ func TestResolveGroup_DenyWins_AllDenied(t *testing.T) {
 	}
 }
 
+// TestResolveGroup_SingleCandidate_Denied_NotTriviallyActive proves the
+// review-found fix: a LogicalGroup with exactly ONE physical source (the
+// common case ResolveGroup's fast path exists for) must still honor a
+// denial on that sole candidate, not declare it the trivially-resolved
+// active winner just because there is nothing else to adjudicate against.
+// Before the fix, the len(distinct)==1 fast path returned before ever
+// checking opts.DeniedRefs/Disposition, so a denied lone candidate came
+// back as SelectedSource/ActiveSources with Guarantee: OBSERVED — exactly
+// the outcome resolveDenyWins's own "every candidate denied" case
+// (Guarantee: HARD, nothing active) exists to prevent.
+func TestResolveGroup_SingleCandidate_Denied_NotTriviallyActive(t *testing.T) {
+	a := cand("a", "x", "user", "digest-a")
+	group := LogicalGroup{Concept: "mcp_server", LogicalID: "x", Candidates: []Candidate{a}}
+	// Deliberately no qualified precedence program at all: a denial must be
+	// honored on its own, independent of whether this concept even has an
+	// operator to "resolve" a collision with -- there is no collision here,
+	// just a single source that is denied.
+	entry, conflict := ResolveGroup(group, domain.HostKnowledge{}, domain.CapabilityOps{}, Options{DeniedRefs: map[string]bool{"a": true}})
+	if conflict != nil {
+		t.Fatalf("unexpected conflict: %+v", conflict)
+	}
+	if entry.Provenance.SelectedSource != "" {
+		t.Errorf("SelectedSource = %q, want empty: the only candidate is denied, nothing should be active", entry.Provenance.SelectedSource)
+	}
+	if len(entry.Provenance.ActiveSources) != 0 {
+		t.Errorf("ActiveSources = %v, want empty: the only candidate is denied", entry.Provenance.ActiveSources)
+	}
+	if entry.Guarantee != domain.GuaranteeHard {
+		t.Errorf("Guarantee = %q, want %q (a denial is a hard exclusion, not a merely-observed value)", entry.Guarantee, domain.GuaranteeHard)
+	}
+}
+
 func TestResolveGroup_ManagedGuardrail_ManagedSourceWins(t *testing.T) {
 	managed := cand("managed/policy.json", "x", "managed", "digest-managed")
 	user := cand("user/config.json", "x", "user", "digest-user")
