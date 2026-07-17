@@ -395,9 +395,25 @@ func TestRunDoctor_GenerationPointerCorrupt_ReportsFail(t *testing.T) {
 // what it actually was. This installs a fake "direnv" that sleeps well
 // past a (test-shrunk) direnvStatusTimeout and proves the finding now
 // names the timeout specifically.
+//
+// The shrunk timeout is deliberately generous (500ms, against a script that
+// blocks indefinitely) rather than tight (an earlier version of this test
+// used 50ms and was flaky on a loaded CI runner). The point under test is
+// "is ctx.Err() checked at all," not "exactly how fast is the timeout" — a
+// wide margin proves the same thing with no flake risk.
+//
+// The fake script busy-blocks using only the shell's own builtins
+// (`while :; do :; done`), never an external `sleep` binary: this test's
+// PATH (via setupManagedTestEnv) is deliberately a hermetic directory
+// containing only the fake host binaries, with no /bin or /usr/bin on it,
+// so a script that shelled out to `sleep` would fail immediately with
+// "sleep: not found" (exit 127) instead of blocking — exactly the false
+// failure an earlier version of this test hit, which looked identical to
+// the regression it was meant to catch (the same fallback message) until
+// traced down to this, not a real ctx.Err() problem.
 func TestRunDoctor_DirenvApproval_StatusTimesOut(t *testing.T) {
 	orig := direnvStatusTimeout
-	direnvStatusTimeout = 50 * time.Millisecond
+	direnvStatusTimeout = 500 * time.Millisecond
 	t.Cleanup(func() { direnvStatusTimeout = orig })
 
 	env := setupManagedTestEnv(t, false, false)
@@ -405,7 +421,7 @@ func TestRunDoctor_DirenvApproval_StatusTimesOut(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	direnvScript := "#!/bin/sh\nsleep 5\n"
+	direnvScript := "#!/bin/sh\nwhile :; do :; done\n"
 	if err := os.WriteFile(filepath.Join(env.BinDir, "direnv"), []byte(direnvScript), 0o755); err != nil {
 		t.Fatal(err)
 	}
