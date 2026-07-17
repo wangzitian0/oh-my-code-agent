@@ -74,6 +74,24 @@
           "type": "string",
           "description": "Not a closed protocol-wide enum: pending/current/superseded/rolledback are Reconciler/Ledger states (docs/architecture/README.md §9 Reconciler, §4 Ledger), tracked here for convenience only.",
           "enum": ["pending", "current", "superseded", "rolledback"]
+        },
+        "sources": {
+          "type": "array",
+          "description": "Additive v1alpha1 field (issue #13, PR-09): every observed source a compiler included or excluded when building this generation, and why (docs/architecture/runtime.md §12: 'native exclusions are explained rather than hidden'). A capabilityGap:true entry may omit source/scope (a class-level gap, not tied to one discovered path) but must carry a non-empty trackingIssue -- capability-gap shipping is allowed, hiding is not.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["concept", "included", "reason"],
+            "properties": {
+              "concept": { "type": "string", "minLength": 1 },
+              "source": { "type": "string" },
+              "scope": { "type": "string" },
+              "included": { "type": "boolean" },
+              "reason": { "type": "string", "minLength": 1 },
+              "capabilityGap": { "type": "boolean" },
+              "trackingIssue": { "type": "string" }
+            }
+          }
         }
       }
     }
