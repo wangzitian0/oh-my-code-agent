@@ -17,9 +17,9 @@ type generatedFile struct {
 	Content []byte
 }
 
-// nativeHomeDirName is the directory name this package uses, inside a
-// generation's per-host tree, for the directory a future launch shim points
-// the host's own native-home environment variable at
+// NativeHomeDirName is the directory name this package uses, inside a
+// generation's per-host tree, for the directory a launch shim points the
+// host's own native-home environment variable at
 // (docs/architecture/runtime.md §7.1's "CODEX_HOME=<generation>/codex-home",
 // §7.2's "a relocated configuration directory per generation"). This is
 // literally what issue #13 AC #1 means by "the generated CODEX_HOME":
@@ -28,14 +28,45 @@ type generatedFile struct {
 // "claude-config") for consistency across the codebase; not reused directly
 // (Sandbox is a fixture-harness type this production compiler should not
 // depend on).
-func nativeHomeDirName(host string) (string, error) {
+//
+// Exported (PR-09 had this unexported) because PR-10's non-recursive PATH
+// shim (internal/shim) and `omca run --mode isolated` both need to compute
+// the exact same path a compiled generation's manifest.json already implies
+// -- <generationDir>/hosts/<host>/<surface>/<NativeHomeDirName> -- and
+// re-declaring this two-entry switch a second time elsewhere would be
+// exactly the kind of driftable duplication this package's own AdapterID
+// doc comment warns against.
+func NativeHomeDirName(host string) (string, error) {
 	switch host {
 	case "codex":
 		return "codex-home", nil
 	case "claude-code":
 		return "claude-config", nil
 	default:
-		return "", fmt.Errorf("runtime: nativeHomeDirName: unsupported host %q (only codex, claude-code)", host)
+		return "", fmt.Errorf("runtime: NativeHomeDirName: unsupported host %q (only codex, claude-code)", host)
+	}
+}
+
+// NativeHomeEnvVar returns the environment variable name a launch shim must
+// set to point host's native config/state resolution at a generation's
+// NativeHomeDir: "CODEX_HOME" for codex, "CLAUDE_CONFIG_DIR" for
+// claude-code. These are the exact same variable names
+// internal/context/host.go's codexNativeHomes/claudeNativeHomes read to
+// compute HostDetection.NativeHomes in the first place
+// (docs/architecture/runtime.md §7.1/§7.2) -- this function is the
+// generation-compiler package's own record of that correspondence, kept
+// here (next to NativeHomeDirName, the other half of "where a shim points
+// this variable") rather than in internal/context, since internal/context
+// only ever reads these variables to observe the real installation and has
+// no reason to know what a shim would set them to.
+func NativeHomeEnvVar(host string) (string, error) {
+	switch host {
+	case "codex":
+		return "CODEX_HOME", nil
+	case "claude-code":
+		return "CLAUDE_CONFIG_DIR", nil
+	default:
+		return "", fmt.Errorf("runtime: NativeHomeEnvVar: unsupported host %q (only codex, claude-code)", host)
 	}
 }
 
@@ -159,7 +190,7 @@ func claudeConfigDirExclusionGapSources() []domain.GenerationSourceEntry {
 func compileHostTree(req BootstrapRequest) ([]generatedFile, []domain.GenerationSourceEntry, error) {
 	host := req.Detection.Host
 	surface := req.surface()
-	nativeHomeDir, err := nativeHomeDirName(host)
+	nativeHomeDir, err := NativeHomeDirName(host)
 	if err != nil {
 		return nil, nil, err
 	}

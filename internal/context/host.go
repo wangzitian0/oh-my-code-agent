@@ -130,6 +130,25 @@ func platformString() string {
 	return runtime.GOOS + "-" + runtime.GOARCH
 }
 
+// BinaryName returns the executable name DetectHost resolves on PATH for a
+// canonical host ID this package implements detection for (DetectedHostIDs)
+// -- the read-only half of the binaryNames table above. PR-10 (issue #14,
+// `omca env`/`omca run`/PATH shims) needs the exact same host-ID-to-binary-
+// name correspondence DetectHost already encodes internally, both to build
+// the PATH shim's two entry-point names (codex, claude) and to resolve a
+// target host's real binary name for `omca run <host>`; exporting this
+// tiny, static lookup avoids a second, driftable copy of binaryNames
+// elsewhere in the module (contrast lookPathIn below, which stays
+// unexported/duplicated on purpose because it is entangled with
+// per-package sandboxing concerns, not a bare data table).
+func BinaryName(host string) (string, error) {
+	name, ok := binaryNames[host]
+	if !ok {
+		return "", fmt.Errorf("context: BinaryName: host %q is a known canonical host ID but this package does not implement detection for it (only %v)", host, DetectedHostIDs)
+	}
+	return name, nil
+}
+
 // DetectHost detects one host's binary, exact version, surface, and native
 // home locations using env's PATH/HOME/CODEX_HOME/CLAUDE_CONFIG_DIR — never
 // read implicitly. host must be a canonical ID this package implements

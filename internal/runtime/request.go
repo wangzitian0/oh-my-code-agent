@@ -60,7 +60,7 @@ func (req BootstrapRequest) validate() error {
 	if err := domain.ValidateHostID(req.Detection.Host); err != nil {
 		return fmt.Errorf("runtime: BootstrapRequest: %w", err)
 	}
-	if _, err := nativeHomeDirName(req.Detection.Host); err != nil {
+	if _, err := NativeHomeDirName(req.Detection.Host); err != nil {
 		return fmt.Errorf("runtime: BootstrapRequest: %w", err)
 	}
 	if req.Worktree.ID == "" {
