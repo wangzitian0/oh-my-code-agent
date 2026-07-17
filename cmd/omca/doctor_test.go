@@ -9,6 +9,7 @@ import (
 	"time"
 
 	hostcontext "github.com/wangzitian0/oh-my-code-agent/internal/context"
+	"github.com/wangzitian0/oh-my-code-agent/internal/runtime"
 )
 
 // TestRunDoctor_UnmanagedSession_NoOMCAEnvVars is issue #14's "doctor
@@ -385,6 +386,101 @@ func TestRunDoctor_GenerationPointerCorrupt_ReportsFail(t *testing.T) {
 	if strings.Contains(stdout.String(), "has no compiled generation yet") {
 		t.Errorf("stdout downgraded real pointer corruption to the ordinary not-yet-managed WARN:\n%s", stdout.String())
 	}
+}
+
+// TestRunDoctor_RestartRequired_SupersededSession is issue #19's own AC
+// exercised through `omca doctor` end to end: a shell whose OMCA_RUN_ID
+// names a generation that is no longer codex's "current" (simulating a
+// session launched before some other activation moved current) gets a WARN
+// naming exactly that, without needing a real second host process.
+func TestRunDoctor_RestartRequired_SupersededSession(t *testing.T) {
+	setupManagedTestEnv(t, true, false)
+
+	var envOut, envErr bytes.Buffer
+	if code := runEnv(&envOut, &envErr, nil); code != 0 {
+		t.Fatalf("runEnv = %d; stderr:\n%s", code, envErr.String())
+	}
+
+	// A real managed launch sets CODEX_HOME to point into the generation
+	// directory (docs/architecture/runtime.md §7.1) before setting
+	// OMCA_RUN_ID; sessionHostFromEnv (mcp.go) reads exactly this signal to
+	// determine which host this shell's session belongs to. The literal
+	// target directory's content does not matter for this test.
+	t.Setenv("CODEX_HOME", filepath.Join(t.TempDir(), "codex-home"))
+	t.Setenv("OMCA_RUN_ID", "generation:sha256:"+strings.Repeat("0", 64))
+
+	var stdout, stderr bytes.Buffer
+	code := runDoctor(&stdout, &stderr)
+	if code != 1 {
+		// PATH is not routed through the shim in this fixture, so PATH
+		// bypass is independently, correctly a FAIL too.
+		t.Fatalf("runDoctor = %d, want 1; stdout:\n%s", code, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "restart-required:codex") {
+		t.Errorf("stdout does not contain a restart-required:codex finding:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "restart codex to pick up the activated change") {
+		t.Errorf("stdout does not explain that codex must be restarted:\n%s", stdout.String())
+	}
+}
+
+// TestRunDoctor_RestartNotRequired_SessionMatchesCurrent is the negative
+// control: an OMCA_RUN_ID equal to codex's actual current generation
+// reports OK, not a restart warning.
+func TestRunDoctor_RestartNotRequired_SessionMatchesCurrent(t *testing.T) {
+	setupManagedTestEnv(t, true, false)
+
+	var envOut, envErr bytes.Buffer
+	if code := runEnv(&envOut, &envErr, nil); code != 0 {
+		t.Fatalf("runEnv = %d; stderr:\n%s", code, envErr.String())
+	}
+
+	wt, err := hostcontext.DetectWorktree(mustGetwd(t))
+	if err != nil {
+		t.Fatalf("DetectWorktree: %v", err)
+	}
+	stateRoot, err := realStateRoot()
+	if err != nil {
+		t.Fatalf("realStateRoot: %v", err)
+	}
+	worktreeStateDir := worktreeStateDirPath(stateRoot, wt.ID)
+	genDir, err := runtime.CurrentGenerationDir(worktreeStateDir, "codex")
+	if err != nil {
+		t.Fatalf("CurrentGenerationDir: %v", err)
+	}
+	gen, err := runtime.ReadGenerationManifest(genDir)
+	if err != nil {
+		t.Fatalf("ReadGenerationManifest: %v", err)
+	}
+
+	t.Setenv("CODEX_HOME", filepath.Join(t.TempDir(), "codex-home"))
+	t.Setenv("OMCA_RUN_ID", gen.Metadata.ID)
+
+	var stdout, stderr bytes.Buffer
+	code := runDoctor(&stdout, &stderr)
+	if code != 1 {
+		// PATH is not routed through the shim in this fixture, so PATH
+		// bypass is independently, correctly a FAIL too.
+		t.Fatalf("runDoctor = %d, want 1; stdout:\n%s", code, stdout.String())
+	}
+	if strings.Contains(stdout.String(), "restart codex to pick up") {
+		t.Errorf("stdout reports a restart is required even though OMCA_RUN_ID matches current:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "restart-required:codex") {
+		t.Errorf("stdout does not contain a restart-required:codex finding at all:\n%s", stdout.String())
+	}
+}
+
+// mustGetwd is a tiny os.Getwd wrapper for tests that need the current
+// worktree root without threading it through setupManagedTestEnv's own
+// return value a second time.
+func mustGetwd(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return wd
 }
 
 // TestRunDoctor_DirenvApproval_StatusTimesOut is a regression test for a

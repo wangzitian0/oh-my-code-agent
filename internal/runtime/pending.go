@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"os"
 	"time"
 
 	hostcontext "github.com/wangzitian0/oh-my-code-agent/internal/context"
@@ -55,4 +56,20 @@ func PendingGenerationDir(worktreeStateDir, host string) (string, error) {
 // wrote for host under worktreeStateDir.
 func ReadPendingRecord(worktreeStateDir, host string) (CurrentRecord, error) {
 	return readPointerRecord(worktreeStateDir, "pending", host)
+}
+
+// clearPendingGeneration removes host's "pending" pointer (symlink and
+// CurrentRecord sidecar) under worktreeStateDir, if present -- the "clear/
+// replace the pending pointer" job pending.go's own doc comment named as
+// explicitly PR-15's to do, called by Activate (activate.go) once a pending
+// generation has successfully become "current": a pending pointer that still
+// names an already-activated generation would misleadingly suggest there is
+// still an uncompiled/unactivated change waiting. Best-effort and silent on
+// "nothing to remove" (os.IsNotExist) -- a caller that already has no
+// pending pointer (e.g. a second activation attempt after a first one's
+// Ledger-append step crashed, see activate.go's crash-injection doc
+// comment) must not fail just because there was nothing left to clear.
+func clearPendingGeneration(worktreeStateDir, host string) {
+	_ = os.Remove(pointerLinkPath(worktreeStateDir, "pending", host))
+	_ = os.Remove(pointerRecordPath(worktreeStateDir, "pending", host))
 }

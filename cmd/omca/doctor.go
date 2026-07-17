@@ -84,6 +84,9 @@ func runDoctor(stdout, stderr io.Writer) int {
 		findings = append(findings, checkPathBypass(host, binName, shimDir))
 		findings = append(findings, checkGenerationFreshness(host, wt, worktreeStateDir, realEnv, shimDir)...)
 	}
+	if f, ok := checkRestartRequired(realEnv, worktreeStateDir); ok {
+		findings = append(findings, f)
+	}
 	findings = append(findings, checkDirenvApproval(wt))
 
 	fmt.Fprintf(stdout, "omca doctor: worktree %s (%s)\n\n", wt.ID, wt.Root)
@@ -245,6 +248,48 @@ func checkBinaryMoved(host, worktreeStateDir string, hd hostcontext.HostDetectio
 		return doctorFinding{Check: check, Status: statusWarn, Detail: fmt.Sprintf("%s binary moved since its generation was recorded: was %s, now resolves to %s — run `omca env` to re-qualify", host, rec.HostBinaryPath, hd.BinaryPath)}
 	}
 	return doctorFinding{Check: check, Status: statusOK, Detail: fmt.Sprintf("%s binary path unchanged since qualification (%s)", host, hd.BinaryPath)}
+}
+
+// checkRestartRequired is issue #19's own "a session running on a
+// superseded generation is detected and reported" AC, applied to `omca
+// doctor`'s OWN invoking shell rather than a remote MCP session:
+// checkSessionManaged already reads OMCA_CONTEXT_ID/OMCA_WORKTREE_ID from
+// this process's real environment to answer "is the shell that ran `omca
+// doctor` itself managed"; this reuses that same "read this process's own
+// ambient environment" discipline for OMCA_RUN_ID (the generation ID
+// whatever managed launch produced this shell recorded, docs/architecture/
+// runtime.md §7.1) plus sessionHostFromEnv (mcp.go's own restart_required
+// signal: which host's native-home environment variable is actually set)
+// to determine whether THIS shell's own session is superseded.
+//
+// ok is false -- no finding at all, not a WARN -- when this shell carries no
+// OMCA_RUN_ID or no unambiguous sessionHost: a doctor invocation from a
+// shell that was never itself launched as a managed host session (the
+// overwhelmingly common case -- doctor is normally run directly by a human,
+// not exec'd by codex/claude) has nothing to report here, and reporting a
+// misleading WARN for a question that genuinely does not apply would be
+// exactly the kind of always-WARN, never-actually-checks-anything finding
+// this file's own "no false green" quality bar (doctorStatus's doc comment)
+// rejects for the opposite reason.
+func checkRestartRequired(env hostcontext.Environment, worktreeStateDir string) (doctorFinding, bool) {
+	runID := env.Get("OMCA_RUN_ID")
+	if runID == "" {
+		return doctorFinding{}, false
+	}
+	host := sessionHostFromEnv(env)
+	if host == "" {
+		return doctorFinding{}, false
+	}
+
+	check := "restart-required:" + host
+	status, err := runtime.DetectRestartRequired(worktreeStateDir, host, runID)
+	if err != nil {
+		return doctorFinding{Check: check, Status: statusWarn, Detail: err.Error()}, true
+	}
+	if status.RestartRequired {
+		return doctorFinding{Check: check, Status: statusWarn, Detail: status.Detail}, true
+	}
+	return doctorFinding{Check: check, Status: statusOK, Detail: status.Detail}, true
 }
 
 // checkDirenvApproval is issue #14's "missing direnv approval" AC. direnv's

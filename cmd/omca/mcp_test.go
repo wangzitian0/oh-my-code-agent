@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	hostcontext "github.com/wangzitian0/oh-my-code-agent/internal/context"
 )
 
 // TestRunMCP_RejectsMissingOrWrongSubcommand proves `omca mcp` requires
@@ -62,6 +64,42 @@ func TestRunMCP_Serve_RespondsToToolsCall_ReadingRealAmbientEnvironment(t *testi
 	}
 	if structured["worktreeId"] != "worktree:sha256:test-value" {
 		t.Errorf("structuredContent.worktreeId = %v, want the value read from OMCA_WORKTREE_ID", structured["worktreeId"])
+	}
+}
+
+// TestSessionHostFromEnv covers issue #19's restart_required wiring: which
+// host this `omca mcp serve` process is answering for is inferred from
+// whichever native-home environment variable (CODEX_HOME/CLAUDE_CONFIG_DIR)
+// is actually set in this process's own environment -- exactly what a real
+// managed launch path (cmd/omca/run.go's runIsolated, internal/shim.Plan.Exec)
+// sets before exec'ing the host binary that in turn spawns this subprocess.
+func TestSessionHostFromEnv(t *testing.T) {
+	cases := []struct {
+		name       string
+		codexHome  string
+		claudeHome string
+		want       string
+	}{
+		{name: "neither set", want: ""},
+		{name: "codex only", codexHome: "/gen/codex-home", want: "codex"},
+		{name: "claude only", claudeHome: "/gen/claude-config", want: "claude-code"},
+		{name: "both set is ambiguous", codexHome: "/gen/codex-home", claudeHome: "/gen/claude-config", want: ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var vars []string
+			if c.codexHome != "" {
+				vars = append(vars, "CODEX_HOME="+c.codexHome)
+			}
+			if c.claudeHome != "" {
+				vars = append(vars, "CLAUDE_CONFIG_DIR="+c.claudeHome)
+			}
+			env := hostcontext.Environment{Vars: vars}
+			got := sessionHostFromEnv(env)
+			if got != c.want {
+				t.Errorf("sessionHostFromEnv() = %q, want %q", got, c.want)
+			}
+		})
 	}
 }
 

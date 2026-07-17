@@ -472,6 +472,89 @@ func CompileGenerationID(req CompileRequest) (string, error) {
 	return "generation:" + digest, nil
 }
 
+// hostSourceEntry pairs one host's canonical ID with the sources list
+// hostSourcesFor computed for it -- aggregateSources' own input shape,
+// factored out only so both Compile and freshSourceDigest (activate.go) can
+// build the same list without either one hand-rolling a second (host,
+// sources) tuple type.
+type hostSourceEntry struct {
+	Host    string
+	Sources []domain.GenerationSourceEntry
+}
+
+// hostSourcesFor computes one host's rendered file content and full sources
+// list (Observation-derived, via compileHostTreeFn, plus resolved-asset-
+// derived, via resolvedAssetSources) -- WITHOUT writing anything to disk.
+// This is Compile's own per-host step, factored out so a second caller can
+// run exactly the same computation a second time against fresh inputs. See
+// this file's own top doc comment's "why Compile reuses Bootstrap's exact
+// Observation-classification policy" section for the sibling precedent this
+// follows: activate.go's CAS check (docs/architecture/runtime.md §5.4's
+// "ensure source digests still match" step) needs the identical sourceDigest
+// computation Compile performs, recomputed against a freshly re-observed/
+// re-resolved environment, and reusing this function -- rather than
+// re-deriving a parallel digest scheme -- is what actually guarantees "same
+// inputs, same digest" holds between the two call sites.
+func hostSourcesFor(req CompileRequest, h HostCompileInput, permissions map[string]domain.PermissionRef) ([]generatedFile, []domain.GenerationSourceEntry, error) {
+	resolved, resolveErr := resolve.Resolve(req.Profiles, req.Activation, req.Exceptions, h.Detection.Host, req.Now)
+	if resolveErr != nil {
+		return nil, nil, fmt.Errorf("runtime: hostSourcesFor: %w", resolveErr)
+	}
+
+	surface := surfaceOf(h.Detection)
+	files, sources, treeErr := compileHostTreeFn(hostTreeInput{
+		Host:           h.Detection.Host,
+		Surface:        surface,
+		WorktreeRoot:   req.Worktree.Root,
+		Observations:   h.Observations,
+		OMCABinaryPath: h.OMCABinaryPath,
+		Permissions:    permissions,
+		Classify:       classify,
+	})
+	if treeErr != nil {
+		return nil, nil, treeErr
+	}
+	sources = append(sources, resolvedAssetSources(resolved)...)
+	return files, sources, nil
+}
+
+// aggregateSources combines every host's sources list into one sorted,
+// generation-wide Sources slice plus the single sourceDigest Generation.spec.
+// sourceDigest records -- the exact fold Compile always performed inline
+// before this PR, factored out so freshSourceDigest (activate.go) can
+// recompute the identical digest from a second call to hostSourcesFor
+// without duplicating the sort/fingerprint/digest steps a second time.
+func aggregateSources(perHost []hostSourceEntry) ([]domain.GenerationSourceEntry, string, error) {
+	var allSources []domain.GenerationSourceEntry
+	var sourceFingerprints []string
+	for _, hs := range perHost {
+		allSources = append(allSources, hs.Sources...)
+		for _, s := range hs.Sources {
+			fp, fpErr := sourceEntryFingerprint(hs.Host, s)
+			if fpErr != nil {
+				return nil, "", fmt.Errorf("runtime: aggregateSources: %w", fpErr)
+			}
+			sourceFingerprints = append(sourceFingerprints, fp)
+		}
+	}
+
+	sort.Slice(allSources, func(i, j int) bool {
+		if allSources[i].Concept != allSources[j].Concept {
+			return allSources[i].Concept < allSources[j].Concept
+		}
+		if allSources[i].Source != allSources[j].Source {
+			return allSources[i].Source < allSources[j].Source
+		}
+		return allSources[i].Reason < allSources[j].Reason
+	})
+	sort.Strings(sourceFingerprints)
+	sourceDigest, err := domain.CanonicalDigest(sourceFingerprints)
+	if err != nil {
+		return nil, "", fmt.Errorf("runtime: aggregateSources: %w", err)
+	}
+	return allSources, sourceDigest, nil
+}
+
 // Compile compiles req into one immutable, multi-host generation and writes
 // it under outputDir: outputDir/manifest.json plus, for every host in
 // req.Hosts, outputDir/hosts/<host>/<surface>/... -- see this file's own top
@@ -511,29 +594,14 @@ func Compile(req CompileRequest, outputDir string) (domain.Generation, error) {
 	}
 
 	hosts := make(map[string]domain.GenerationHostEntry, len(req.Hosts))
-	var allSources []domain.GenerationSourceEntry
-	var sourceFingerprints []string
+	perHost := make([]hostSourceEntry, 0, len(req.Hosts))
 
 	for _, h := range req.Hosts {
-		resolved, resolveErr := resolve.Resolve(req.Profiles, req.Activation, req.Exceptions, h.Detection.Host, req.Now)
-		if resolveErr != nil {
-			return domain.Generation{}, fmt.Errorf("runtime: Compile: %w", resolveErr)
-		}
-
 		surface := surfaceOf(h.Detection)
-		files, sources, treeErr := compileHostTreeFn(hostTreeInput{
-			Host:           h.Detection.Host,
-			Surface:        surface,
-			WorktreeRoot:   req.Worktree.Root,
-			Observations:   h.Observations,
-			OMCABinaryPath: h.OMCABinaryPath,
-			Permissions:    permissions,
-			Classify:       classify,
-		})
-		if treeErr != nil {
-			return domain.Generation{}, treeErr
+		files, sources, srcErr := hostSourcesFor(req, h, permissions)
+		if srcErr != nil {
+			return domain.Generation{}, fmt.Errorf("runtime: Compile: %w", srcErr)
 		}
-		sources = append(sources, resolvedAssetSources(resolved)...)
 
 		artifacts := make([]domain.GenerationArtifact, 0, len(files))
 		for _, f := range files {
@@ -558,27 +626,10 @@ func Compile(req CompileRequest, outputDir string) (domain.Generation, error) {
 			Artifacts: artifacts,
 		}
 
-		allSources = append(allSources, sources...)
-		for _, s := range sources {
-			fp, fpErr := sourceEntryFingerprint(h.Detection.Host, s)
-			if fpErr != nil {
-				return domain.Generation{}, fmt.Errorf("runtime: Compile: %w", fpErr)
-			}
-			sourceFingerprints = append(sourceFingerprints, fp)
-		}
+		perHost = append(perHost, hostSourceEntry{Host: h.Detection.Host, Sources: sources})
 	}
 
-	sort.Slice(allSources, func(i, j int) bool {
-		if allSources[i].Concept != allSources[j].Concept {
-			return allSources[i].Concept < allSources[j].Concept
-		}
-		if allSources[i].Source != allSources[j].Source {
-			return allSources[i].Source < allSources[j].Source
-		}
-		return allSources[i].Reason < allSources[j].Reason
-	})
-	sort.Strings(sourceFingerprints)
-	sourceDigest, err := domain.CanonicalDigest(sourceFingerprints)
+	allSources, sourceDigest, err := aggregateSources(perHost)
 	if err != nil {
 		return domain.Generation{}, fmt.Errorf("runtime: Compile: %w", err)
 	}

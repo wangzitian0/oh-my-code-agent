@@ -156,4 +156,58 @@
 //     -- see compile_full.go's own doc comment for why that reading of
 //     docs/architecture/runtime.md §5.5 was chosen over "one Generation per
 //     host."
+//
+// # PR-15 (issue #19): the Activation transaction this doc.go anticipated
+//
+// PR-14 left "pending" and the Ledger existing and independently writable,
+// explicitly deferring "comparing pending against current, atomically
+// switching, verifying, and rolling back" to PR-15. This PR closes that gap
+// (and, with it, roadmap M2):
+//
+//   - activate.go's Activate runs docs/architecture/runtime.md §5.4's step
+//     list minus the two steps that are a caller's job (closing/detaching
+//     the old session, launching and verifying the new one): validate
+//     pending, CAS-check a freshly recomputed sourceDigest against pending's
+//     recorded one (freshSourceDigest, reusing compile_full.go's
+//     hostSourcesFor/aggregateSources -- the exact functions Compile itself
+//     calls, factored out by this PR so the CAS check and Compile can never
+//     silently drift into two different digest schemes over "the same"
+//     inputs), atomically switch "current" (SetCurrentGeneration's already-
+//     atomic rename), clear the now-redundant pending pointer, and append an
+//     "activated" Ledger entry. ActivateRequest.OnStep is a fault-injection
+//     hook at each of those four step boundaries -- activate_test.go's
+//     TestActivate_Atomic_CrashInjection_EveryStepBoundary is this PR's own
+//     crash-injection AC, proven exhaustively at every boundary rather than
+//     by one real, timing-dependent process kill (see that test's own doc
+//     comment for why).
+//   - rollback.go's Rollback restores a host's CURRENT generation's own
+//     Metadata.Parent as the new "current" (resolved back to an on-disk
+//     directory via the same generationsRoot/<DirSafeID(id)> convention
+//     EnsureGeneration already established) and ledgers a "rolledback"
+//     entry -- no separate parent-tracking mechanism, matching Metadata.
+//     Parent's own doc comment.
+//   - restart.go's DetectRestartRequired answers a different question than
+//     cmd/omca/doctor.go's pre-existing checkStaleGeneration ("is the
+//     compiled generation itself stale relative to fresh native inputs"):
+//     "is a SPECIFIC ALREADY-RUNNING session (identified by its own
+//     OMCA_RUN_ID) still pointed at whatever 'current' now names, after some
+//     OTHER activation moved it." Wired into internal/mcp's omca_status
+//     (HostStatus.RestartRequired) and cmd/omca/doctor.go's own
+//     checkRestartRequired, both keyed off which native-home environment
+//     variable (CODEX_HOME/CLAUDE_CONFIG_DIR) is actually set in the
+//     process's own environment -- a documented, not schema-guaranteed,
+//     signal (see cmd/omca/mcp.go's sessionHostFromEnv doc comment).
+//   - confirmation.go's ClassifyChange implements docs/product/
+//     requirements.md §7's risk-based confirmation table as a pure function
+//     over all eight rows; RequireConfirmation is the gate cmd/omca/
+//     activate.go's `omca activate` wires into the real Activate call.
+//     diffchanges.go's DiffProposedChanges turns a current/pending
+//     Generation.Spec.Sources diff into the ProposedChange list
+//     RequireConfirmation classifies -- the real, existing activation code
+//     path this PR's confirmation machinery is wired into. Three of the
+//     eight §7 rows (a model/display preference change, modifying a shared
+//     Profile, importing a native credential) are classified but marked
+//     Reachable: false, since no real code path in this repository produces
+//     them yet -- see ClassifyChange's own doc comment for the honest
+//     accounting of which is which.
 package runtime
