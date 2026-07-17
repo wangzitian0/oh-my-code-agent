@@ -288,3 +288,96 @@ func TestCountUserExclusions_ExcludesCapabilityGapPlaceholders(t *testing.T) {
 		t.Errorf("skills = %d, want 1 (one real exclusion; the capability-gap placeholder must not count)", skills)
 	}
 }
+
+// TestComputeStatus_RestartRequired_OnlyForSessionHost is issue #19's
+// restart_required wiring end to end: buildManagedCodexWorktree compiles and
+// activates a first codex generation, a second SetCurrentGeneration call
+// (standing in for a real second activation) supersedes it, and
+// ComputeStatus — told via SessionHost/SessionGenerationID that THIS
+// session's own codex process was launched with the FIRST generation —
+// reports RestartRequired:true for codex only, never for claude-code (no
+// SessionHost claim was ever made for it, so it stays false rather than
+// guessed).
+func TestComputeStatus_RestartRequired_OnlyForSessionHost(t *testing.T) {
+	worktreeStateDir := buildManagedCodexWorktree(t, false, 0)
+
+	firstStatus, err := ComputeStatus(ComputeStatusRequest{WorktreeStateDir: worktreeStateDir, Hosts: []string{"codex"}})
+	if err != nil {
+		t.Fatalf("ComputeStatus (before supersession): %v", err)
+	}
+	firstGenerationID := firstStatus.Hosts[0].GenerationID
+	if firstGenerationID == "" {
+		t.Fatal("first generation ID is empty")
+	}
+
+	// A second activation supersedes the first: reuse the same fixture
+	// helper's own on-disk shape by pointing "current" at a second,
+	// differently-built generation.
+	secondWorktreeStateDir := buildManagedCodexWorktree(t, true, 1)
+	secondGenDir, err := runtime.CurrentGenerationDir(secondWorktreeStateDir, "codex")
+	if err != nil {
+		t.Fatalf("CurrentGenerationDir (second fixture): %v", err)
+	}
+	secondGen, err := runtime.ReadGenerationManifest(secondGenDir)
+	if err != nil {
+		t.Fatalf("ReadGenerationManifest (second fixture): %v", err)
+	}
+	if secondGen.Metadata.ID == firstGenerationID {
+		t.Fatal("fixture setup did not actually vary content between the two generations")
+	}
+	if err := runtime.SetCurrentGeneration(worktreeStateDir, "codex", secondGenDir, secondGen, hostcontext.HostDetection{Host: "codex"}, time.Now()); err != nil {
+		t.Fatalf("SetCurrentGeneration (supersede): %v", err)
+	}
+
+	result, err := ComputeStatus(ComputeStatusRequest{
+		WorktreeStateDir:    worktreeStateDir,
+		Hosts:               []string{"codex", "claude-code"},
+		SessionHost:         "codex",
+		SessionGenerationID: firstGenerationID,
+	})
+	if err != nil {
+		t.Fatalf("ComputeStatus: %v", err)
+	}
+
+	codex := result.Hosts[0]
+	if !codex.RestartRequired {
+		t.Errorf("codex RestartRequired = false, want true (current was superseded after this session launched); detail: %s", codex.Detail)
+	}
+	if codex.SessionGenerationID != firstGenerationID {
+		t.Errorf("codex SessionGenerationID = %q, want %q", codex.SessionGenerationID, firstGenerationID)
+	}
+
+	claude := result.Hosts[1]
+	if claude.RestartRequired {
+		t.Error("claude-code RestartRequired = true, want false: no SessionHost claim was made for it")
+	}
+	if claude.SessionGenerationID != "" {
+		t.Errorf("claude-code SessionGenerationID = %q, want empty", claude.SessionGenerationID)
+	}
+}
+
+// TestComputeStatus_RestartNotRequired_WhenSessionMatchesCurrent is the
+// negative control: a session whose own generation IS still current reports
+// RestartRequired:false.
+func TestComputeStatus_RestartNotRequired_WhenSessionMatchesCurrent(t *testing.T) {
+	worktreeStateDir := buildManagedCodexWorktree(t, false, 0)
+
+	status, err := ComputeStatus(ComputeStatusRequest{WorktreeStateDir: worktreeStateDir, Hosts: []string{"codex"}})
+	if err != nil {
+		t.Fatalf("ComputeStatus: %v", err)
+	}
+	currentID := status.Hosts[0].GenerationID
+
+	result, err := ComputeStatus(ComputeStatusRequest{
+		WorktreeStateDir:    worktreeStateDir,
+		Hosts:               []string{"codex"},
+		SessionHost:         "codex",
+		SessionGenerationID: currentID,
+	})
+	if err != nil {
+		t.Fatalf("ComputeStatus: %v", err)
+	}
+	if result.Hosts[0].RestartRequired {
+		t.Error("RestartRequired = true, want false: the session's own generation is still current")
+	}
+}

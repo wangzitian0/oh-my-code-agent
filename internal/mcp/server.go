@@ -27,7 +27,7 @@ const toolNameStatus = "omca_status"
 // deliberately small (docs/architecture/runtime.md §6's M4 exit-gate design
 // goal, "tool schemas and default responses remain deliberately small",
 // already the standard this M1 stub holds itself to).
-const statusToolDescription = "Report the current OMCA-managed context: worktree/context identity, the current generation ID per managed host, and the count of native user-global MCP servers and Skills excluded from this managed session versus an unmanaged native launch, plus an estimated context-cost delta. Takes no arguments."
+const statusToolDescription = "Report the current OMCA-managed context: worktree/context identity, the current generation ID per managed host, the count of native user-global MCP servers and Skills excluded from this managed session versus an unmanaged native launch, an estimated context-cost delta, and whether this session's own host is running on a generation that has since been superseded by a newer activation (restartRequired). Takes no arguments."
 
 // StatusFunc computes the current omca_status result on demand. Serve calls
 // it fresh for every tools/call request (a status read is cheap — see

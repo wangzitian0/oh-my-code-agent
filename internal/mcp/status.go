@@ -100,6 +100,23 @@ type HostStatus struct {
 	// ContextCost is nil only when Managed is false (there is no generation
 	// to estimate a delta for yet).
 	ContextCost *ContextCostEstimate `json:"contextCost,omitempty"`
+	// RestartRequired reports whether THIS session (the one whose OMCA
+	// MCP server subprocess is answering this omca_status call) is running
+	// on a generation "current" has since superseded for Host -- issue #19's
+	// "a session running on a superseded generation is detected and
+	// reported; restart_required is per host" AC (docs/architecture/
+	// runtime.md §5.5). Only ever set for the ONE host
+	// ComputeStatusRequest.SessionHost names (the host whose native-home
+	// environment variable this process actually inherited -- see
+	// ComputeStatusRequest.SessionHost's own doc comment); every other
+	// host's HostStatus in the same response leaves this false, not because
+	// it is known to be false, but because this process has no session
+	// generation ID to compare for a host it was not itself launched by.
+	RestartRequired bool `json:"restartRequired"`
+	// SessionGenerationID is the generation this session was launched with,
+	// when known (ComputeStatusRequest.SessionGenerationID, for Host ==
+	// SessionHost only).
+	SessionGenerationID string `json:"sessionGenerationId,omitempty"`
 	// Detail is a human-readable note: why Managed is false, or (when
 	// Managed) a short confirmation string. Always non-empty.
 	Detail string `json:"detail"`
@@ -145,6 +162,25 @@ type ComputeStatusRequest struct {
 	// judgment internal/shim's doc.go documents for its own package), so the
 	// caller supplies the list directly.
 	Hosts []string
+	// SessionHost is the canonical host ID this specific `omca mcp serve`
+	// process was spawned by, when known -- issue #19's restart_required
+	// wiring. This process is always launched as a subprocess of exactly one
+	// host's session (internal/runtime/compile.go's hostConfigFiles
+	// registers it inside that host's own generated config), and therefore
+	// inherits that host's native-home environment variable (CODEX_HOME or
+	// CLAUDE_CONFIG_DIR, runtime.NativeHomeEnvVar) pointing into the
+	// generation directory it was launched with -- cmd/omca/mcp.go's runMCP
+	// determines SessionHost from exactly that signal (a documented
+	// judgment call: these variables are only ever set, in this project's
+	// own managed launch paths, to a value scoped to one host's generation).
+	// Empty when this server was started outside any managed session (e.g.
+	// `omca mcp serve` invoked directly for manual testing) -- restart_required
+	// is then left false for every host, honestly reflecting "unknown," not
+	// "confirmed fresh."
+	SessionHost string
+	// SessionGenerationID is the generation SessionHost's session was
+	// launched with (OMCA_RUN_ID), required whenever SessionHost is set.
+	SessionGenerationID string
 }
 
 // ComputeStatus builds one StatusResult from req, reading only the
@@ -161,7 +197,11 @@ func ComputeStatus(req ComputeStatusRequest) (StatusResult, error) {
 	}
 	out := StatusResult{WorktreeID: req.WorktreeID, ContextID: req.ContextID}
 	for _, host := range req.Hosts {
-		out.Hosts = append(out.Hosts, hostStatus(req.WorktreeStateDir, host))
+		hs := hostStatus(req.WorktreeStateDir, host)
+		if host == req.SessionHost && req.SessionGenerationID != "" {
+			hs = applyRestartStatus(req.WorktreeStateDir, hs, req.SessionGenerationID)
+		}
+		out.Hosts = append(out.Hosts, hs)
 	}
 	return out, nil
 }
@@ -195,6 +235,27 @@ func hostStatus(worktreeStateDir, host string) HostStatus {
 		ContextCost:        &cost,
 		Detail:             fmt.Sprintf("managed: current generation %s", gen.Metadata.ID),
 	}
+}
+
+// applyRestartStatus fills in hs.RestartRequired/SessionGenerationID for the
+// one host this session was actually launched by (ComputeStatusRequest.
+// SessionHost), via runtime.DetectRestartRequired -- issue #19's
+// restart_required wiring. A failure to determine restart status (e.g. hs
+// itself is not Managed, so there is no "current" to compare against) is
+// reported in Detail rather than failing the whole status call, matching
+// hostStatus's own degrade-honestly stance.
+func applyRestartStatus(worktreeStateDir string, hs HostStatus, sessionGenerationID string) HostStatus {
+	hs.SessionGenerationID = sessionGenerationID
+	status, err := runtime.DetectRestartRequired(worktreeStateDir, hs.Host, sessionGenerationID)
+	if err != nil {
+		hs.Detail = fmt.Sprintf("%s (restart status unknown: %v)", hs.Detail, err)
+		return hs
+	}
+	hs.RestartRequired = status.RestartRequired
+	if status.RestartRequired {
+		hs.Detail = status.Detail
+	}
+	return hs
 }
 
 // CountUserExclusions counts gen.Spec.Sources entries the M1 bootstrap

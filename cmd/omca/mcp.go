@@ -6,7 +6,43 @@ import (
 
 	hostcontext "github.com/wangzitian0/oh-my-code-agent/internal/context"
 	"github.com/wangzitian0/oh-my-code-agent/internal/mcp"
+	"github.com/wangzitian0/oh-my-code-agent/internal/runtime"
 )
+
+// sessionHostFromEnv determines which host actually launched this `omca mcp
+// serve` process, for mcp.ComputeStatusRequest.SessionHost (issue #19's
+// restart_required wiring) -- a documented judgment call, not a value this
+// project passes explicitly anywhere today: internal/runtime.
+// NativeHomeEnvVar names a distinct environment variable per host
+// (CODEX_HOME, CLAUDE_CONFIG_DIR), and every managed launch path this
+// project has (cmd/omca/run.go's runIsolated, internal/shim.Plan.Exec) sets
+// exactly one of them, pointing into the generation directory that host was
+// launched with, before exec'ing the host binary that in turn spawns this
+// process as its own MCP server subprocess (docs/architecture/runtime.md
+// §3/§7.1). Seeing one of these variables set is therefore a reliable-in-
+// practice (if not schema-guaranteed) signal of which host this session
+// belongs to; seeing none (or, defensively, both) means SessionHost stays
+// empty and restart_required is left unreported rather than guessed.
+func sessionHostFromEnv(env hostcontext.Environment) string {
+	var found string
+	for _, host := range hostcontext.DetectedHostIDs {
+		envVar, err := runtime.NativeHomeEnvVar(host)
+		if err != nil {
+			continue
+		}
+		if env.Get(envVar) == "" {
+			continue
+		}
+		if found != "" {
+			// Both native-home variables are set (should not happen through
+			// any managed launch path this project has) -- ambiguous,
+			// report unknown rather than guessing.
+			return ""
+		}
+		found = host
+	}
+	return found
+}
 
 // runMCP implements `omca mcp serve` (issue #15, docs/architecture/
 // runtime.md §6's OMCA MCP server): starts the stdio JSON-RPC 2.0 server
@@ -37,12 +73,15 @@ func runMCP(stdin io.Reader, stdout, stderr io.Writer, args []string) int {
 	}
 
 	env := hostcontext.RealEnvironment()
+	sessionHost := sessionHostFromEnv(env)
 	statusFn := func() (mcp.StatusResult, error) {
 		return mcp.ComputeStatus(mcp.ComputeStatusRequest{
-			WorktreeID:       env.Get("OMCA_WORKTREE_ID"),
-			ContextID:        env.Get("OMCA_CONTEXT_ID"),
-			WorktreeStateDir: env.Get("OMCA_STATE_DIR"),
-			Hosts:            hostcontext.DetectedHostIDs,
+			WorktreeID:          env.Get("OMCA_WORKTREE_ID"),
+			ContextID:           env.Get("OMCA_CONTEXT_ID"),
+			WorktreeStateDir:    env.Get("OMCA_STATE_DIR"),
+			Hosts:               hostcontext.DetectedHostIDs,
+			SessionHost:         sessionHost,
+			SessionGenerationID: env.Get("OMCA_RUN_ID"),
 		})
 	}
 
