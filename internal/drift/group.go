@@ -8,10 +8,13 @@ import (
 )
 
 // DefaultSampleLimit bounds how many representative rows Group prints under
-// each ActionCard's Samples, matching reporting.md §7's worked example
-// (DR-017 shows 2 illustrative rows for an card whose Impact spans 40
-// artifacts) — Samples is always illustrative, never the mechanism for
-// exposing the full matrix (Matrix and Query are).
+// each ActionCard's Samples. reporting.md §7's worked example (DR-017) shows
+// only 2 illustrative rows for a card whose Impact spans 40 artifacts, but
+// that is the example's own editorial choice, not a fixed count this package
+// must match — DefaultSampleLimit is deliberately higher so more distinct
+// outcome/exceptional buckets can surface a representative before truncating.
+// Samples is always illustrative, never the mechanism for exposing the full
+// matrix (Matrix and Query are).
 const DefaultSampleLimit = 5
 
 // groupKey is the root-cause aggregation key: every Assertion sharing the
@@ -36,9 +39,12 @@ func Group(assertions []Assertion) []ActionCard {
 // Group does, but bounds each card's Samples to at most sampleLimit entries
 // (sampleLimit <= 0 means unlimited — Samples equals the full, deterministic
 // Matrix order). Card order, Matrix order, and Samples selection never
-// depend on the input slice's order: assertions is sorted internally before
-// grouping, so feeding the same logical set of assertions in any order
-// produces byte-identical output (see determinism_test.go).
+// depend on the input slice's order: grouping itself is order-independent
+// (bucketing by groupKey), and every order-sensitive output is normalized
+// afterward — card order by sorted groupKey, each card's Matrix by
+// matrixLess, and Samples by walking that sorted Matrix — so feeding the
+// same logical set of assertions in any order produces byte-identical output
+// (see determinism_test.go).
 func GroupWithSampleLimit(assertions []Assertion, sampleLimit int) []ActionCard {
 	buckets := map[groupKey][]Assertion{}
 	var keys []groupKey
@@ -215,6 +221,25 @@ func selectSamples(matrix []Assertion, limit int) []Assertion {
 // excepted difference is a materially different outcome for a human reader
 // than the same transition reported as live drift, even though the
 // underlying values match).
+//
+// Expected/Observed are canonicalized via domain.CanonicalDigest rather than
+// fmt.Sprintf("%v", ...): Signal declares them as `any`, and %v on a map
+// value or a pointer-bearing struct is not a deterministic bucket key —
+// map key order is normalized by fmt itself, but a pointer field still
+// prints its runtime address, which differs run to run for logically
+// identical content and would silently break this package's determinism
+// guarantee (see determinism_test.go). CanonicalDigest instead round-trips
+// through JSON, so bucketing depends only on content, never on identity.
 func outcomeBucketKey(a Assertion) string {
-	return fmt.Sprintf("%v->%v|exception=%v", a.Expected, a.Observed, a.Category == domain.DriftException)
+	expected, expErr := domain.CanonicalDigest(a.Expected)
+	observed, obsErr := domain.CanonicalDigest(a.Observed)
+	if expErr != nil || obsErr != nil {
+		// Expected/Observed aren't JSON-marshalable — a caller bug, since
+		// this package's contract assumes JSON-shaped values throughout.
+		// Fall back to a key that is still deterministic (a type name, never
+		// an address) rather than letting a non-deterministic key through.
+		expected = fmt.Sprintf("undigestable:%T", a.Expected)
+		observed = fmt.Sprintf("undigestable:%T", a.Observed)
+	}
+	return fmt.Sprintf("%s->%s|exception=%v", expected, observed, a.Category == domain.DriftException)
 }

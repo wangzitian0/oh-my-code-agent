@@ -172,3 +172,30 @@ func TestGroup_DifferentRootCausesProduceSeparateCards(t *testing.T) {
 		t.Fatalf("got %d cards, want 2 (different root causes)", len(cards))
 	}
 }
+
+// TestOutcomeBucketKey_PointerValuedFieldsAreContentAddressed proves
+// outcomeBucketKey buckets by content, not by fmt.Sprintf("%v", ...)'s
+// pointer-address formatting: Go's fmt package only dereferences pointers to
+// struct/slice/array/map for %v (rendering "&{...}"); a pointer to a scalar
+// (e.g. *string, a realistic shape for an optional/nullable observed field)
+// instead prints its runtime address (e.g. "0xc0000140a0"), which differs
+// run to run for logically identical content. Build the key straight from
+// freshly, separately allocated *string values each iteration (so a
+// pointer-address-based key would almost certainly differ run to run) and
+// assert the key itself is stable.
+func TestOutcomeBucketKey_PointerValuedFieldsAreContentAddressed(t *testing.T) {
+	newAssertion := func() Assertion {
+		expected := "workspace-write" // a fresh, separately addressed allocation every call
+		observed := "danger-full-access"
+		return Assertion{DriftAssertion: domain.DriftAssertion{
+			Expected: &expected, Observed: &observed, Category: domain.DriftConfigDrift,
+		}}
+	}
+
+	first := outcomeBucketKey(newAssertion())
+	for i := 0; i < 20; i++ {
+		if got := outcomeBucketKey(newAssertion()); got != first {
+			t.Fatalf("iteration %d: outcomeBucketKey(%q) != outcomeBucketKey(%q) for logically identical pointer-valued Expected/Observed — the key is leaking pointer identity instead of content", i, got, first)
+		}
+	}
+}
