@@ -64,6 +64,20 @@ func Rollback(worktreeStateDir, generationsRoot, host string, detection hostcont
 		return RollbackResult{}, fmt.Errorf("runtime: Rollback: now is required (this package never reads the clock implicitly)")
 	}
 
+	// Same activation lock, same (worktreeStateDir, host) key Activate
+	// itself takes (activationlock.go's ActivationInProgressError doc
+	// comment) -- Rollback has the identical read-"current"-then-write-
+	// "current" shape Activate does, through the same race window, so it
+	// needs the identical serialization against a concurrent Activate or a
+	// second concurrent Rollback for this host.
+	lock, err := acquireActivationLock(worktreeStateDir, host)
+	if err != nil {
+		// Returned as-is, not wrapped -- see Activate's identical treatment
+		// of this same error type (activate.go) for why.
+		return RollbackResult{}, err
+	}
+	defer lock.release()
+
 	currentDir, err := CurrentGenerationDir(worktreeStateDir, host)
 	if err != nil {
 		// Distinguish "no current pointer yet" (os.IsNotExist -- there is

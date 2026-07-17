@@ -329,3 +329,151 @@ func TestActivate_Atomic_CrashInjection_EveryStepBoundary(t *testing.T) {
 		})
 	}
 }
+
+// TestActivate_ConcurrentActivations_LockPreventsSilentClobber is the
+// adversarial regression test for the TOCTOU bug activationlock.go's
+// ActivationInProgressError doc comment describes: Activate reads
+// "pending"/"current" once near its own start and later writes "current"
+// from that same stale in-memory snapshot, with no serialization against a
+// second concurrent Activate for the same host.
+//
+// It reproduces the race directly rather than merely asserting a lock is
+// called: goroutine A runs a real Activate call for a real pending
+// generation (fxA) and is paused, via OnStep, immediately BEFORE its own
+// StepSwitchCurrent -- i.e. after it has already read pendingDir/pendingGen
+// into memory (Step 1) and passed its own CAS check (Step 2), the exact
+// stale-snapshot state the bug exploits. While A is paused (still holding
+// its lock, post-fix), the test stages a SECOND, independent pending
+// generation (fxB) for the same host -- standing in for a second, fully
+// independent `omca activate` invocation racing the first -- and runs a
+// full Activate call (B) for it synchronously, to completion or failure.
+// Only THEN does the test release A, letting it finish using its now-stale
+// pendingDir/pendingGen (still naming fxA, even though the pending pointer
+// on disk has since moved to fxB).
+//
+// Before the fix (no lock at all), B has nothing to wait for: it runs to
+// completion in full while A is paused, itself switching current to fxB and
+// appending an "activated" Ledger entry for it -- and reports success. A is
+// then released and, using its stale Step-1 snapshot, unconditionally
+// overwrites current back to fxA and appends its OWN "activated" Ledger
+// entry -- also reporting success. Both calls report success even though
+// only one of their writes survives: B's completed, ledgered activation was
+// silently clobbered with no error and no conflict record, and the Ledger
+// now carries an entry for fxB that no longer describes reality. This test
+// asserts that can never happen: at most one of A/B may report success;
+// whichever loses must fail with a *ActivationInProgressError, never a
+// silent, misleading success.
+//
+// This test fails against the pre-fix code (verified by temporarily
+// removing the acquireActivationLock call from Activate and re-running: both
+// calls report success, and the "both calls succeeded" assertion below
+// fails with a concrete generation-ID pair) and passes once the lock is in
+// place.
+func TestActivate_ConcurrentActivations_LockPreventsSilentClobber(t *testing.T) {
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	worktreeStateDir := t.TempDir()
+
+	fxA := compileFixture(t, worktreeStateDir, []domain.Profile{requiredSkillProfile("company:example", "code-review")}, nil, now)
+	if err := SetPendingGeneration(worktreeStateDir, "codex", fxA.outputDir, fxA.gen, fxA.req.Hosts[0].Detection, now); err != nil {
+		t.Fatalf("SetPendingGeneration (A): %v", err)
+	}
+
+	reachedPause := make(chan struct{})
+	release := make(chan struct{})
+	hookA := func(step ActivationStep) error {
+		if step == StepSwitchCurrent {
+			close(reachedPause)
+			<-release
+		}
+		return nil
+	}
+
+	type outcome struct {
+		result ActivationResult
+		err    error
+	}
+	doneA := make(chan outcome, 1)
+	go func() {
+		result, err := Activate(ActivateRequest{WorktreeStateDir: worktreeStateDir, Host: "codex", Fresh: fxA.req, Now: now, OnStep: hookA})
+		doneA <- outcome{result, err}
+	}()
+
+	waitOrFatal(t, reachedPause, "A to reach StepSwitchCurrent") // A has read pending/current and passed its CAS check; it is now paused right before writing "current".
+
+	fxB := compileFixture(t, worktreeStateDir, []domain.Profile{requiredSkillProfile("company:example", "deep-refactor")}, nil, now.Add(time.Minute))
+	if fxB.gen.Metadata.ID == fxA.gen.Metadata.ID {
+		t.Fatal("fixture setup did not actually vary content between A and B")
+	}
+	if err := SetPendingGeneration(worktreeStateDir, "codex", fxB.outputDir, fxB.gen, fxB.req.Hosts[0].Detection, now.Add(time.Minute)); err != nil {
+		t.Fatalf("SetPendingGeneration (B): %v", err)
+	}
+	resultB, errB := Activate(ActivateRequest{WorktreeStateDir: worktreeStateDir, Host: "codex", Fresh: fxB.req, Now: now.Add(2 * time.Minute)})
+
+	close(release) // let A proceed to completion using its stale Step-1 snapshot.
+	outA := <-doneA
+
+	aOK := outA.err == nil
+	bOK := errB == nil
+	if aOK && bOK {
+		t.Fatalf("both concurrent Activate calls reported success (A activated %s, B activated %s) -- this is the silent-clobber race: current can only end up pointing at one of them, so the other's reported success is a lie", outA.result.ActivatedGenerationID, resultB.ActivatedGenerationID)
+	}
+	if !aOK && !bOK {
+		t.Fatalf("both concurrent Activate calls failed (A: %v, B: %v) -- want exactly one to succeed", outA.err, errB)
+	}
+
+	loserErr := outA.err
+	if aOK {
+		loserErr = errB
+	}
+	var inProgress *ActivationInProgressError
+	if !errors.As(loserErr, &inProgress) {
+		t.Fatalf("loser's error = %v (%T), want a *ActivationInProgressError", loserErr, loserErr)
+	}
+
+	wantCurrent, wantGenID := fxA.outputDir, fxA.gen.Metadata.ID
+	if bOK {
+		wantCurrent, wantGenID = fxB.outputDir, fxB.gen.Metadata.ID
+	}
+	gotCurrent, err := CurrentGenerationDir(worktreeStateDir, "codex")
+	if err != nil {
+		t.Fatalf("CurrentGenerationDir: %v", err)
+	}
+	if gotCurrent != wantCurrent {
+		t.Errorf("CurrentGenerationDir = %q, want the winner's generation dir %q", gotCurrent, wantCurrent)
+	}
+
+	entries, err := ReadLedger(worktreeStateDir, "codex")
+	if err != nil {
+		t.Fatalf("ReadLedger: %v", err)
+	}
+	activatedCount := 0
+	for _, e := range entries {
+		if e.Kind != "activated" {
+			continue
+		}
+		activatedCount++
+		if e.GenerationID != wantGenID {
+			t.Errorf("ledger has an 'activated' entry for %s, but %s is the only generation that ever actually became current -- a lying ledger entry", e.GenerationID, wantGenID)
+		}
+	}
+	if activatedCount != 1 {
+		t.Errorf("ledger has %d 'activated' entries, want exactly 1 (the loser must never have appended one)", activatedCount)
+	}
+}
+
+// waitOrFatal blocks on ch (a signal channel a test goroutine closes once it
+// reaches some pause point) with a bounded timeout, failing the test with a
+// clear message instead of hanging forever if the goroutine errors out or
+// otherwise never reaches that point -- a bare `<-ch` in an adversarial
+// concurrency test turns "the goroutine under test broke" into "the whole
+// test run hangs until the CI job's own outer timeout kills it," which is a
+// much worse failure mode to debug. what describes what ch signals, for the
+// timeout's own failure message.
+func waitOrFatal(t *testing.T, ch <-chan struct{}, what string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("timed out waiting for %s", what)
+	}
+}

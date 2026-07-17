@@ -172,6 +172,28 @@ func Activate(req ActivateRequest) (ActivationResult, error) {
 		return ActivationResult{}, fmt.Errorf("runtime: Activate: Now is required (this package never reads the clock implicitly)")
 	}
 
+	// Take host's activation lock BEFORE any step runs, and hold it through
+	// the entire transaction (including the Ledger append) -- see
+	// activationlock.go's ActivationInProgressError doc comment for the bug
+	// this closes: without it, a concurrent Activate/Rollback for the same
+	// (WorktreeStateDir, Host) could read "pending"/"current" into memory
+	// here, get preempted, and later unconditionally overwrite "current"
+	// with that now-stale snapshot, silently clobbering whatever a
+	// different, already-completed transaction wrote in between. Released
+	// via defer so every return path below -- success, CAS rejection, a
+	// step-hook abort, any other error -- releases it exactly once.
+	lock, err := acquireActivationLock(req.WorktreeStateDir, req.Host)
+	if err != nil {
+		// Returned as-is, not wrapped through fmt.Errorf, matching
+		// CASMismatchError's own precedent below: ActivationInProgressError's
+		// Error() message is already fully self-describing, and this same
+		// type is shared verbatim with Rollback (rollback.go), so it deliberately
+		// does not hardcode "Activate" into its own text the way
+		// CASMismatchError's message hardcodes "Activate" into its text.
+		return ActivationResult{}, err
+	}
+	defer lock.release()
+
 	// Step 1: validate pending.
 	if err := runHook(req.OnStep, StepValidatePending); err != nil {
 		return ActivationResult{}, fmt.Errorf("runtime: Activate: aborted at %s: %w", StepValidatePending, err)

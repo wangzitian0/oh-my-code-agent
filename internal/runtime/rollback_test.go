@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -168,5 +169,74 @@ func TestRollback_CorruptCurrentPointer_ReportsCorruptionNotMissing(t *testing.T
 	}
 	if strings.Contains(err.Error(), "no current generation") {
 		t.Errorf("error = %q, downgraded real pointer corruption to the ordinary not-yet-managed message", err.Error())
+	}
+}
+
+// TestRollback_BlockedByInProgressActivate proves Rollback takes the exact
+// same activation lock Activate does (activationlock.go's
+// ActivationInProgressError doc comment: "Rollback has the identical
+// read-then-write shape for the same 'current' pointer... an Activate racing
+// a Rollback" is one of the two race shapes the lock closes, alongside two
+// concurrent Activate calls -- activate_test.go's
+// TestActivate_ConcurrentActivations_LockPreventsSilentClobber already
+// covers that half). It pauses a real, in-flight Activate call right before
+// it writes "current" (still holding its lock) and proves a concurrent
+// Rollback call for the same host fails fast with a
+// *ActivationInProgressError -- never blocking forever, and never racing
+// Activate's own write to "current" -- then confirms Activate itself still
+// completes normally once released.
+func TestRollback_BlockedByInProgressActivate(t *testing.T) {
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	worktreeStateDir := t.TempDir()
+
+	parentFx := compileFixture(t, worktreeStateDir, []domain.Profile{requiredSkillProfile("company:example", "code-review")}, nil, now)
+	if err := SetCurrentGeneration(worktreeStateDir, "codex", parentFx.outputDir, parentFx.gen, parentFx.req.Hosts[0].Detection, now); err != nil {
+		t.Fatalf("SetCurrentGeneration: %v", err)
+	}
+	parentID := parentFx.gen.Metadata.ID
+	childFx := compileFixture(t, worktreeStateDir, []domain.Profile{requiredSkillProfile("company:example", "deep-refactor")}, &parentID, now.Add(time.Minute))
+	if err := SetPendingGeneration(worktreeStateDir, "codex", childFx.outputDir, childFx.gen, childFx.req.Hosts[0].Detection, now.Add(time.Minute)); err != nil {
+		t.Fatalf("SetPendingGeneration: %v", err)
+	}
+
+	reachedPause := make(chan struct{})
+	release := make(chan struct{})
+	hook := func(step ActivationStep) error {
+		if step == StepSwitchCurrent {
+			close(reachedPause)
+			<-release
+		}
+		return nil
+	}
+	doneActivate := make(chan error, 1)
+	go func() {
+		_, err := Activate(ActivateRequest{WorktreeStateDir: worktreeStateDir, Host: "codex", Fresh: childFx.req, Now: now.Add(2 * time.Minute), OnStep: hook})
+		doneActivate <- err
+	}()
+
+	waitOrFatal(t, reachedPause, "Activate to reach StepSwitchCurrent") // Activate holds the lock and is paused right before writing "current".
+
+	generationsRoot := filepath.Join(worktreeStateDir, "generations")
+	_, rollbackErr := Rollback(worktreeStateDir, generationsRoot, "codex", parentFx.req.Hosts[0].Detection, now.Add(3*time.Minute))
+	close(release)
+	activateErr := <-doneActivate
+
+	if rollbackErr == nil {
+		t.Fatal("Rollback concurrent with an in-flight Activate for the same host: want an error, got nil")
+	}
+	var inProgress *ActivationInProgressError
+	if !errors.As(rollbackErr, &inProgress) {
+		t.Fatalf("Rollback error = %v (%T), want a *ActivationInProgressError", rollbackErr, rollbackErr)
+	}
+	if activateErr != nil {
+		t.Fatalf("Activate (released after the blocked Rollback attempt): want success, got %v", activateErr)
+	}
+
+	gotCurrent, err := CurrentGenerationDir(worktreeStateDir, "codex")
+	if err != nil {
+		t.Fatalf("CurrentGenerationDir: %v", err)
+	}
+	if gotCurrent != childFx.outputDir {
+		t.Errorf("CurrentGenerationDir = %q, want Activate's own generation %q (Rollback must not have touched it)", gotCurrent, childFx.outputDir)
 	}
 }
