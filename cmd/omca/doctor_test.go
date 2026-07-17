@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	hostcontext "github.com/wangzitian0/oh-my-code-agent/internal/context"
 )
@@ -280,5 +281,141 @@ func TestRunDoctor_DirenvApproval_EnvrcMissingOmcaEnv(t *testing.T) {
 	_ = runDoctor(&stdout, &stderr)
 	if !strings.Contains(stdout.String(), "does not appear to invoke") {
 		t.Errorf("stdout does not flag the .envrc for missing `omca env`:\n%s", stdout.String())
+	}
+}
+
+// TestRunDoctor_PathBypass_ShimDirBehindSymlink_StillReportsManaged is a
+// regression test for a real Copilot review finding on this PR:
+// checkPathBypass used to compare filepath.Dir(exec.LookPath(...)) against
+// shimDir with plain filepath.Abs, not symlink-evaluated canonicalization.
+// On macOS, /tmp resolves through /private/tmp, so a shim directory that
+// itself lives under a symlinked path (t.TempDir() on macOS is exactly
+// this) compared against an OMCA_SHIM_DIR value spelled through the
+// symlink would false-positive as a bypass. This constructs the shim dir
+// through an explicit extra symlink hop (independent of whatever the test
+// machine's own /tmp happens to be) and proves doctor still reports
+// "managed", not a bypass.
+func TestRunDoctor_PathBypass_ShimDirBehindSymlink_StillReportsManaged(t *testing.T) {
+	env := setupManagedTestEnv(t, true, false)
+
+	var envOut, envErr bytes.Buffer
+	if code := runEnv(&envOut, &envErr, nil); code != 0 {
+		t.Fatalf("runEnv = %d; stderr:\n%s", code, envErr.String())
+	}
+	wt, err := hostcontext.DetectWorktree(env.WorktreeRoot)
+	if err != nil {
+		t.Fatalf("DetectWorktree: %v", err)
+	}
+	stateRoot, err := realStateRoot()
+	if err != nil {
+		t.Fatalf("realStateRoot: %v", err)
+	}
+	realShimDir := shimDirPath(worktreeStateDirPath(stateRoot, wt.ID))
+
+	// A second symlink hop, distinct from realShimDir's own literal path,
+	// resolving to the exact same directory.
+	symlinkedShimDir := filepath.Join(t.TempDir(), "shim-via-symlink")
+	if err := os.Symlink(realShimDir, symlinkedShimDir); err != nil {
+		t.Fatal(err)
+	}
+
+	// PATH is set through the symlinked spelling; OMCA_SHIM_DIR (what
+	// checkPathBypass compares against) is set through the OTHER,
+	// original spelling — exactly the "reaches the same directory through
+	// a different symlink chain" case CleanAbs exists to handle.
+	t.Setenv("PATH", symlinkedShimDir+string(os.PathListSeparator)+env.BinDir)
+	t.Setenv("OMCA_SHIM_DIR", realShimDir)
+
+	var stdout, stderr bytes.Buffer
+	code := runDoctor(&stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("runDoctor = %d, want 0 (shim reached via a different symlink spelling must still count as managed); stdout:\n%s", code, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "path-bypass:codex: codex resolves to the OMCA shim") {
+		t.Errorf("stdout does not report codex as resolving to the shim despite the symlink hop:\n%s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "PATH bypass") {
+		t.Errorf("stdout falsely reports a PATH bypass caused only by a symlink spelling difference:\n%s", stdout.String())
+	}
+}
+
+// TestRunDoctor_GenerationPointerCorrupt_ReportsFail is a regression test
+// for a real Copilot review finding on this PR: checkGenerationFreshness
+// used to treat every CurrentGenerationDir error, not just "no pointer
+// yet" (os.IsNotExist), as the same WARN-level "not managed yet" finding —
+// masking real corruption (e.g. the "current" entry existing as something
+// other than a readable symlink) as an expected, benign state. This
+// replaces the "current" pointer with a plain regular file (Readlink on a
+// non-symlink fails with a non-NotExist error) and proves doctor now
+// reports FAIL with a corruption-specific message, not the ordinary
+// not-yet-managed WARN.
+func TestRunDoctor_GenerationPointerCorrupt_ReportsFail(t *testing.T) {
+	env := setupManagedTestEnv(t, true, false)
+
+	var envOut, envErr bytes.Buffer
+	if code := runEnv(&envOut, &envErr, nil); code != 0 {
+		t.Fatalf("runEnv = %d; stderr:\n%s", code, envErr.String())
+	}
+	wt, err := hostcontext.DetectWorktree(env.WorktreeRoot)
+	if err != nil {
+		t.Fatalf("DetectWorktree: %v", err)
+	}
+	stateRoot, err := realStateRoot()
+	if err != nil {
+		t.Fatalf("realStateRoot: %v", err)
+	}
+	worktreeStateDir := worktreeStateDirPath(stateRoot, wt.ID)
+	linkPath := filepath.Join(worktreeStateDir, "current", "codex")
+
+	if err := os.Remove(linkPath); err != nil {
+		t.Fatalf("removing the real 'current' symlink: %v", err)
+	}
+	if err := os.WriteFile(linkPath, []byte("not a symlink"), 0o644); err != nil {
+		t.Fatalf("planting a corrupt (non-symlink) 'current' entry: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runDoctor(&stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("runDoctor = %d, want 1 (corrupt pointer is a FAIL); stdout:\n%s", code, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "generation:codex") || !strings.Contains(stdout.String(), "corrupt") {
+		t.Errorf("stdout does not report the corrupt generation pointer as such:\n%s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "has no compiled generation yet") {
+		t.Errorf("stdout downgraded real pointer corruption to the ordinary not-yet-managed WARN:\n%s", stdout.String())
+	}
+}
+
+// TestRunDoctor_DirenvApproval_StatusTimesOut is a regression test for a
+// real Copilot review finding on this PR: checkDirenvApproval used to
+// discard `direnv status`'s own error entirely (`out, _ := cmd.Output()`),
+// so a timeout or exec failure fell through to the generic "could not
+// determine approval state" default case instead of being reported as
+// what it actually was. This installs a fake "direnv" that sleeps well
+// past a (test-shrunk) direnvStatusTimeout and proves the finding now
+// names the timeout specifically.
+func TestRunDoctor_DirenvApproval_StatusTimesOut(t *testing.T) {
+	orig := direnvStatusTimeout
+	direnvStatusTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { direnvStatusTimeout = orig })
+
+	env := setupManagedTestEnv(t, false, false)
+	if err := os.WriteFile(filepath.Join(env.WorktreeRoot, ".envrc"), []byte(`eval "$(omca env --shell bash)"`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	direnvScript := "#!/bin/sh\nsleep 5\n"
+	if err := os.WriteFile(filepath.Join(env.BinDir, "direnv"), []byte(direnvScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	_ = runDoctor(&stdout, &stderr)
+	if !strings.Contains(stdout.String(), "did not complete within") {
+		t.Errorf("stdout does not report the direnv status timeout specifically:\n%s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "could not determine direnv approval state") {
+		t.Errorf("stdout fell back to the generic could-not-determine message instead of reporting the timeout:\n%s", stdout.String())
 	}
 }

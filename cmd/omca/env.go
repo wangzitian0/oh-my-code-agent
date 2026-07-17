@@ -160,7 +160,7 @@ func printExports(stdout io.Writer, v exportVars) {
 }
 
 // shellQuote wraps s in single quotes, escaping any embedded single quote
-// the POSIX-portable way ('\”): close the quote, emit an escaped quote,
+// the POSIX-portable way ('\''): close the quote, emit an escaped quote,
 // reopen. None of the values this command actually prints (worktree/
 // generation IDs, resolved filesystem paths) are expected to contain a
 // single quote, but eval'd shell output is exactly the place a defensive

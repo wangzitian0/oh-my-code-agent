@@ -6,12 +6,17 @@ import (
 	"path/filepath"
 )
 
-// cleanAbs resolves dir to its canonical, symlink-evaluated absolute form
+// CleanAbs resolves dir to its canonical, symlink-evaluated absolute form
 // for comparison purposes, falling back to a merely filepath.Clean'd form
 // when dir does not exist or cannot be resolved (e.g. a PATH entry naming a
 // directory that was removed after PATH was exported) — a lookup miss
-// there is not this function's problem to report.
-func cleanAbs(dir string) string {
+// there is not this function's problem to report. Exported so any other
+// package comparing two filesystem paths for "same location" (not "same
+// literal spelling") can reuse this exact canonicalization instead of
+// re-deriving it — e.g. cmd/omca/doctor.go's checkPathBypass, which needs
+// the identical macOS /tmp-vs-/private/tmp symlink-aware comparison this
+// package's own non-recursion guarantee already depends on.
+func CleanAbs(dir string) string {
 	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
 		if abs, err := filepath.Abs(resolved); err == nil {
 			return abs
@@ -31,7 +36,7 @@ func cleanAbs(dir string) string {
 // invoked outside any managed shell) can pass it through unconditionally
 // rather than branching themselves.
 //
-// Comparison is by resolved absolute path (cleanAbs), not string equality,
+// Comparison is by resolved absolute path (CleanAbs), not string equality,
 // so a PATH entry that reaches the same directory through a different
 // symlink chain than excludeDir's own literal spelling is still correctly
 // excluded — see doc.go's non-recursion design note for why this matters:
@@ -41,7 +46,7 @@ func FilterOutDir(pathEnv, excludeDir string) string {
 	if excludeDir == "" {
 		return pathEnv
 	}
-	excluded := cleanAbs(excludeDir)
+	excluded := CleanAbs(excludeDir)
 
 	var kept []string
 	for _, dir := range filepath.SplitList(pathEnv) {
@@ -49,7 +54,7 @@ func FilterOutDir(pathEnv, excludeDir string) string {
 			kept = append(kept, dir) // preserve an empty PATH entry (POSIX: means ".") verbatim
 			continue
 		}
-		if cleanAbs(dir) == excluded {
+		if CleanAbs(dir) == excluded {
 			continue
 		}
 		kept = append(kept, dir)

@@ -13,6 +13,7 @@ import (
 	hostcontext "github.com/wangzitian0/oh-my-code-agent/internal/context"
 	"github.com/wangzitian0/oh-my-code-agent/internal/observe"
 	"github.com/wangzitian0/oh-my-code-agent/internal/runtime"
+	"github.com/wangzitian0/oh-my-code-agent/internal/shim"
 )
 
 // doctorStatus is one finding's severity. "No false green" (this PR's
@@ -36,8 +37,11 @@ type doctorFinding struct {
 // direnvStatusTimeout hard-bounds the one subprocess `omca doctor` ever
 // runs (`direnv status`), matching internal/context/host.go's detectTimeout
 // and internal/qualify's invokeTimeout precedent: a hang must never be
-// mistaken for a slow but passing check.
-const direnvStatusTimeout = 10 * time.Second
+// mistaken for a slow but passing check. A var, not a const, solely so
+// TestRunDoctor_DirenvApproval_StatusTimesOut can shrink it and prove the
+// timeout-reporting branch with a fast, deterministic test instead of
+// either waiting out the real 10s or leaving that branch unverified.
+var direnvStatusTimeout = 10 * time.Second
 
 // runDoctor implements `omca doctor` (issue #14): PATH bypass, missing
 // direnv approval, stale generation, host binary moved since qualification,
@@ -120,20 +124,24 @@ func checkSessionManaged(env hostcontext.Environment, wt hostcontext.Worktree) d
 // resolve to right now") and reports whether that is the OMCA shim or a
 // native binary that bypasses management entirely (issue #14's "PATH
 // bypass" AC).
+//
+// Both the resolved binary's directory and shimDir are canonicalized via
+// shim.CleanAbs (symlink-evaluated, not just filepath.Abs) before
+// comparing: on macOS in particular, a shim/state directory that lives
+// under /tmp resolves through /private/tmp, so a bare filepath.Abs
+// comparison would falsely report a PATH bypass even when the shim is
+// genuinely being used (Copilot review finding on this PR).
 func checkPathBypass(host, binName, shimDir string) doctorFinding {
 	check := "path-bypass:" + host
 	resolved, err := exec.LookPath(binName)
 	if err != nil {
 		return doctorFinding{Check: check, Status: statusWarn, Detail: fmt.Sprintf("%s (%s) is not on PATH", host, binName)}
 	}
-	resolvedAbs, absErr := filepath.Abs(resolved)
-	if absErr != nil {
-		resolvedAbs = resolved
+	resolvedDir := shim.CleanAbs(filepath.Dir(resolved))
+	if resolvedDir == shim.CleanAbs(shimDir) {
+		return doctorFinding{Check: check, Status: statusOK, Detail: fmt.Sprintf("%s resolves to the OMCA shim (%s): managed", binName, resolved)}
 	}
-	if filepath.Dir(resolvedAbs) == shimDir {
-		return doctorFinding{Check: check, Status: statusOK, Detail: fmt.Sprintf("%s resolves to the OMCA shim (%s): managed", binName, resolvedAbs)}
-	}
-	return doctorFinding{Check: check, Status: statusFail, Detail: fmt.Sprintf("PATH bypass: %s resolves to %s, which is not the OMCA shim (%s) — direnv is not active, or the shim directory is not first on PATH; direct invocations of %s are UNMANAGED", binName, resolvedAbs, shimDir, binName)}
+	return doctorFinding{Check: check, Status: statusFail, Detail: fmt.Sprintf("PATH bypass: %s resolves to %s, which is not the OMCA shim (%s) — direnv is not active, or the shim directory is not first on PATH; direct invocations of %s are UNMANAGED", binName, resolved, shimDir, binName)}
 }
 
 // checkGenerationFreshness covers issue #14's remaining two AC checks for
@@ -156,7 +164,14 @@ func checkGenerationFreshness(host string, wt hostcontext.Worktree, worktreeStat
 
 	genDir, cgErr := runtime.CurrentGenerationDir(worktreeStateDir, host)
 	if cgErr != nil {
-		return []doctorFinding{{Check: "generation:" + host, Status: statusWarn, Detail: fmt.Sprintf("%s has no compiled generation yet in this worktree — run `omca env` or `omca run %s`", host, host)}}
+		if os.IsNotExist(cgErr) {
+			return []doctorFinding{{Check: "generation:" + host, Status: statusWarn, Detail: fmt.Sprintf("%s has no compiled generation yet in this worktree — run `omca env` or `omca run %s`", host, host)}}
+		}
+		// Anything other than "no current pointer yet" (e.g. the "current"
+		// entry exists but isn't a readable symlink) is real corruption,
+		// not an expected not-managed-yet state, and must not be
+		// downgraded to a WARN (Copilot review finding on this PR).
+		return []doctorFinding{{Check: "generation:" + host, Status: statusFail, Detail: fmt.Sprintf("%s's current-generation pointer in %s is corrupt: %v", host, worktreeStateDir, cgErr)}}
 	}
 
 	var findings []doctorFinding
@@ -229,8 +244,30 @@ func checkDirenvApproval(wt hostcontext.Worktree) doctorFinding {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, direnvPath, "status")
 	cmd.Dir = wt.Root
-	out, _ := cmd.Output() // direnv status's exit code varies by state; the output text is what this parses
+	out, runErr := cmd.Output() // direnv status's exit code varies by state, so a plain *ExitError below is expected and not itself reported
 	text := string(out)
+
+	// ctx.Err() is checked FIRST and independently of runErr's own type:
+	// exec.CommandContext kills the child on a timeout, and Wait/Output
+	// then reports that as an ordinary *exec.ExitError ("signal: killed"),
+	// indistinguishable from direnv's own varying-by-state exit codes by
+	// type alone — an earlier version of this check tried to key off
+	// "is runErr a plain *exec.ExitError" and, for exactly this reason,
+	// never actually reached the timeout branch (caught by this PR's own
+	// TestRunDoctor_DirenvApproval_StatusTimesOut). ctx.Err() is the only
+	// reliable signal. A non-nil runErr that is NOT an *exec.ExitError at
+	// all (binary vanished between LookPath and Run, a permission error,
+	// ...) is a second, distinct failure this must not silently fall
+	// through to the generic "could not determine approval state" text
+	// switch below for either (Copilot review finding on this PR).
+	if ctx.Err() != nil {
+		return doctorFinding{Check: check, Status: statusWarn, Detail: fmt.Sprintf("`direnv status` did not complete within %s: %v", direnvStatusTimeout, ctx.Err())}
+	}
+	if runErr != nil {
+		if _, isExitError := runErr.(*exec.ExitError); !isExitError {
+			return doctorFinding{Check: check, Status: statusWarn, Detail: fmt.Sprintf("`direnv status` failed to run: %v", runErr)}
+		}
+	}
 
 	switch {
 	case strings.Contains(text, "Found RC allowed true"):
