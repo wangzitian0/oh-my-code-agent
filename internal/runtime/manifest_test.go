@@ -31,8 +31,14 @@ func TestBootstrap_Manifest_EverySourceHasAReason(t *testing.T) {
 	if err != nil {
 		t.Fatalf("observe.Observe: %v", err)
 	}
-	if len(obs) != 6 {
-		t.Fatalf("sanity check: got %d observations, want 6", len(obs))
+	// 10, not 6: PR-16 (issue #20, "Deep observation") added Hooks/Policy
+	// concept tags on the SAME two config.toml files this fixture already
+	// populates (internal/observe/rules.go's codexUserRules/
+	// codexWorkspaceRules doc comments) -- each config.toml now yields 3
+	// Observations (mcp_server, hook, policy) instead of 1, adding 4 to the
+	// previous total of 6.
+	if len(obs) != 10 {
+		t.Fatalf("sanity check: got %d observations, want 10", len(obs))
 	}
 
 	req := BootstrapRequest{
@@ -69,13 +75,17 @@ func TestBootstrap_Manifest_EverySourceHasAReason(t *testing.T) {
 			excludedCount++
 		}
 	}
-	// Exactly the repository AGENTS.md should be included; the other five
-	// (3 native, repo MCP, repo Skill) are excluded per the M1 policy.
+	// Exactly the repository AGENTS.md should be included; the other nine
+	// (native instruction/mcp_server/hook/policy/skill, repo mcp_server/
+	// hook/policy/skill) are excluded per the M1 policy -- classify() only
+	// ever includes a workspace-scope `instruction` observation (compile.go),
+	// so PR-16's new hook/policy concept tags fall into the same "not yet
+	// activated" exclusion bucket repo MCP/Skill already did.
 	if includedCount != 1 {
 		t.Errorf("includedCount = %d, want 1 (only the repository Instructions chain)", includedCount)
 	}
-	if excludedCount != 5 {
-		t.Errorf("excludedCount = %d, want 5", excludedCount)
+	if excludedCount != 9 {
+		t.Errorf("excludedCount = %d, want 9", excludedCount)
 	}
 
 	// manifest.json on disk must equal what Bootstrap returned.

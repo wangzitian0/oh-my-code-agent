@@ -123,10 +123,17 @@ func TestObserve_Codex_FullLayout(t *testing.T) {
 		{conceptInstruction, filepath.Join(tr.CodexHome, "AGENTS.override.md"), "user", tr.CodexHome},
 		{conceptInstruction, filepath.Join(tr.CodexHome, "AGENTS.md"), "user", tr.CodexHome},
 		{conceptMCPServer, filepath.Join(tr.CodexHome, "config.toml"), "user", tr.CodexHome},
+		// PR-16: config.toml is also documented as Hooks/Policy's physical
+		// source (rules.go's codexUserRules doc comment) — same file, two
+		// additional concept-tagged records.
+		{conceptHook, filepath.Join(tr.CodexHome, "config.toml"), "user", tr.CodexHome},
+		{conceptPolicy, filepath.Join(tr.CodexHome, "config.toml"), "user", tr.CodexHome},
 		{conceptSkill, filepath.Join(tr.CodexHome, "skills", "deploy", "SKILL.md"), "user", tr.CodexHome},
 		{conceptSkill, filepath.Join(tr.HomeAgentsDir, "shared", "SKILL.md"), "user", tr.HomeAgentsDir},
 		{conceptInstruction, filepath.Join(tr.WorktreeRoot, "AGENTS.md"), "workspace", tr.WorktreeRoot},
 		{conceptMCPServer, filepath.Join(tr.WorktreeRoot, ".codex", "config.toml"), "workspace", tr.WorktreeRoot},
+		{conceptHook, filepath.Join(tr.WorktreeRoot, ".codex", "config.toml"), "workspace", tr.WorktreeRoot},
+		{conceptPolicy, filepath.Join(tr.WorktreeRoot, ".codex", "config.toml"), "workspace", tr.WorktreeRoot},
 		{conceptSkill, filepath.Join(tr.WorktreeRoot, ".agents", "skills", "proj-skill", "SKILL.md"), "workspace", tr.WorktreeRoot},
 	}
 	for _, w := range wants {
@@ -196,6 +203,10 @@ func TestObserve_ClaudeCode_FullLayout(t *testing.T) {
 		{conceptInstruction, filepath.Join(tr.ClaudeConfigDir, "rules", "style.md")},
 		{conceptInstruction, filepath.Join(tr.ClaudeConfigDir, "rules", "nested", "deep.md")},
 		{conceptMCPServer, filepath.Join(tr.ClaudeConfigDir, ".claude.json")},
+		// PR-16: .claude.json is also documented as carrying Policy/state's
+		// "OAuth, project trust, cache" (rules.go's claudeUserRules doc
+		// comment) — same file, one additional concept-tagged record.
+		{conceptPolicy, filepath.Join(tr.ClaudeConfigDir, ".claude.json")},
 		{conceptSkill, filepath.Join(tr.ClaudeConfigDir, "skills", "deploy", "SKILL.md")},
 		{conceptSkill, filepath.Join(tr.HomeAgentsDir, "shared", "SKILL.md")},
 		{conceptInstruction, filepath.Join(tr.WorktreeRoot, "CLAUDE.md")},

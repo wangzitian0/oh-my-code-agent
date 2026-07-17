@@ -46,15 +46,42 @@ type Request struct {
 	// observation entirely — not an error: observing only user-global
 	// sources, or running outside any worktree, is a legitimate call.
 	WorktreeRoot string
+
+	// SystemRoots are this host's machine/managed-scope locations (PR-16,
+	// issue #20; system.go's SystemRoot doc comment). Empty skips
+	// system-scope observation entirely — not an error, the same "caller
+	// simply did not supply this" stance WorktreeRoot itself takes.
+	SystemRoots []SystemRoot
+
+	// WorkingDirectory is the absolute directory (normally the real
+	// invocation's cwd) whose root-to-cwd nested "directory" scope chain
+	// (docs/ontology/README.md §2) should be inventoried in addition to
+	// WorktreeRoot itself (PR-16, issue #20; directory.go). Empty skips
+	// directory-chain observation entirely. Non-empty requires WorktreeRoot
+	// to also be set and WorkingDirectory to be WorktreeRoot itself or a
+	// descendant of it — anything else is a caller error (directory.go's
+	// directoryChain).
+	WorkingDirectory string
+
+	// SessionInputs are already-resolved session-scoped facts (CLI flags,
+	// explicit env overrides) a caller supplies for Observe to inventory
+	// alongside filesystem sources (PR-16, issue #20; session.go's
+	// SessionInput doc comment, which explains why Observe cannot discover
+	// these itself). Empty skips session-scope observation entirely.
+	SessionInputs []SessionInput
 }
 
-// Observe inventories Instructions, Skills, and MCP server registrations for
-// req.Detection.Host across its native homes and (if req.WorktreeRoot is
-// set) its repository root, per docs/ontology/README.md §6.1/§6.2's
-// physical mappings. It performs no writes and no subprocess execution (see
-// doc.go and zerowrite_test.go) and returns a stably-sorted, deterministic
-// slice: running Observe twice against an unchanged filesystem tree
-// produces byte-identical output (determinism_test.go).
+// Observe inventories Instructions, Skills, MCP server registrations, Hooks,
+// Policy/trust state, and Plugins/Extensions for req.Detection.Host across
+// its native homes (user scope), its repository root and directory-chain
+// (workspace/directory/local scope, if req.WorktreeRoot/WorkingDirectory are
+// set), its machine/managed locations (system scope, if req.SystemRoots is
+// set), and any caller-supplied session-scoped facts (req.SessionInputs),
+// per docs/ontology/README.md §6.1/§6.2's physical mappings. It performs no
+// writes and no subprocess execution (see doc.go and zerowrite_test.go) and
+// returns a stably-sorted, deterministic slice: running Observe twice
+// against an unchanged filesystem tree produces byte-identical output
+// (determinism_test.go).
 //
 // Every returned domain.Observation is already domain.ValidateObservation
 // -clean; buildObservation enforces this per-record, so a caller does not
@@ -124,6 +151,7 @@ func Observe(req Request) ([]domain.Observation, error) {
 		all = append(all, recs...)
 	}
 
+	worktreeExists := false
 	if req.WorktreeRoot != "" {
 		if !filepath.IsAbs(req.WorktreeRoot) {
 			return nil, fmt.Errorf("observe: Observe: WorktreeRoot %q is not absolute", req.WorktreeRoot)
@@ -135,6 +163,8 @@ func Observe(req Request) ([]domain.Observation, error) {
 				return nil, fmt.Errorf("observe: Observe: stat worktree root %s: %w", req.WorktreeRoot, err)
 			}
 		} else if info.IsDir() {
+			worktreeExists = true
+
 			var rules []sourceRule
 			switch host {
 			case "codex":
@@ -147,7 +177,110 @@ func Observe(req Request) ([]domain.Observation, error) {
 				return nil, err
 			}
 			all = append(all, recs...)
+
+			// `local` scope (PR-16, issue #20): Claude Code only, see
+			// claudeLocalRules's doc comment for why Codex has no
+			// counterpart.
+			if host == "claude-code" {
+				recs, err := observeRoot(host, hostVersion, surface, "local", req.WorktreeRoot, claudeLocalRules())
+				if err != nil {
+					return nil, err
+				}
+				all = append(all, recs...)
+			}
 		}
+	}
+
+	// `system`/`managed` scope (PR-16, issue #20).
+	for _, sysRoot := range req.SystemRoots {
+		if sysRoot.Path == "" {
+			continue
+		}
+		if !filepath.IsAbs(sysRoot.Path) {
+			return nil, fmt.Errorf("observe: Observe: system root %q path %q is not absolute", sysRoot.Name, sysRoot.Path)
+		}
+
+		var rules []sourceRule
+		switch host {
+		case "codex":
+			rules = codexSystemRules()
+		case "claude-code":
+			rules = claudeSystemRules()
+		}
+		if len(rules) == 0 {
+			continue
+		}
+
+		info, err := os.Stat(sysRoot.Path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("observe: Observe: stat system root %s (%s): %w", sysRoot.Name, sysRoot.Path, err)
+		}
+		if !info.IsDir() {
+			continue
+		}
+
+		recs, err := observeRoot(host, hostVersion, surface, "managed", sysRoot.Path, rules)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, recs...)
+	}
+
+	// `directory` scope chain (PR-16, issue #20).
+	if req.WorkingDirectory != "" {
+		if !filepath.IsAbs(req.WorkingDirectory) {
+			return nil, fmt.Errorf("observe: Observe: WorkingDirectory %q is not absolute", req.WorkingDirectory)
+		}
+		if req.WorktreeRoot == "" {
+			return nil, fmt.Errorf("observe: Observe: WorkingDirectory %q was set without WorktreeRoot", req.WorkingDirectory)
+		}
+
+		chain, err := directoryChain(req.WorktreeRoot, req.WorkingDirectory)
+		if err != nil {
+			return nil, fmt.Errorf("observe: Observe: %w", err)
+		}
+
+		if worktreeExists {
+			var rules []sourceRule
+			switch host {
+			case "codex":
+				rules = codexDirectoryChainRules()
+			case "claude-code":
+				rules = claudeDirectoryChainRules()
+			}
+
+			for _, dir := range chain {
+				info, err := os.Stat(dir)
+				if err != nil {
+					if os.IsNotExist(err) {
+						continue
+					}
+					return nil, fmt.Errorf("observe: Observe: stat directory %s: %w", dir, err)
+				}
+				if !info.IsDir() {
+					continue
+				}
+
+				recs, err := observeRoot(host, hostVersion, surface, "directory", dir, rules)
+				if err != nil {
+					return nil, err
+				}
+				all = append(all, recs...)
+			}
+		}
+	}
+
+	// `session` scope (PR-16, issue #20): caller-supplied facts, not a
+	// filesystem walk — see session.go's SessionInput doc comment.
+	for _, in := range req.SessionInputs {
+		obs, err := buildSessionObservation(host, hostVersion, surface, in)
+		if err != nil {
+			return nil, fmt.Errorf("observe: Observe: %w", err)
+		}
+		all = append(all, obs)
 	}
 
 	sort.Slice(all, func(i, j int) bool {

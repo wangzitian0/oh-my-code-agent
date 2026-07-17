@@ -1,20 +1,32 @@
 // Package observe discovers and inventories coding-agent sources without
-// executing them (issue #12, PR-08: "minimal observation").
+// executing them (issue #12, PR-08: "minimal observation"; issue #20,
+// PR-16: "Deep observation").
 //
-// Scope: this package covers exactly the user-global and repository
-// (workspace-scoped) physical sources for three concepts — Instructions,
-// Skills, and MCP server registrations — for the two first-party hosts,
-// codex and claude-code, per the physical mappings documented in
-// docs/ontology/README.md §6.1 (Claude Code) and §6.2 (Codex) and
-// docs/architecture/runtime.md §7.1/§7.2's "the adapter must inventory at
-// least" lists. System sources (/etc/codex, managed policy), the
-// root-to-cwd nested "directory" scope chain, session-scoped sources (CLI
-// flags, session state), and Hooks/Plugins/Agents are explicitly out of
-// scope here — issue #20 (PR-16, "Deep observation") covers those later.
-// This is a deliberate, documented scope cut, not an oversight: the issue's
-// own acceptance criteria ask for "just enough lossless inventory... to
-// explain every exclusion the bootstrap makes," not full precedence
-// resolution or the deep per-directory walk.
+// Scope: this package covers six concepts — Instructions, Skills, MCP
+// server registrations, Hooks, Policy/trust state, and Plugins/Extensions —
+// across every scope docs/ontology/README.md §2 names a physical source for
+// in §6.1 (Claude Code) and §6.2 (Codex): user-global native homes,
+// repository/workspace roots, the root-to-cwd nested `directory` scope
+// chain, machine/managed (`system`) locations, Claude Code's `local` scope
+// (CLAUDE.local.md), and caller-supplied `session`-scoped facts — for the
+// two first-party hosts, codex and claude-code. coverage.go's Coverage()
+// function is this package's own explicit, per-dimension self-report of
+// exactly how completely each of the resulting 12 (host, concept) cells is
+// covered, rather than a single blended claim.
+//
+// PR-08 originally deferred system/directory/session/local/Hooks/Plugins
+// scope, plus the Agents concept and connector/cloud-side MCP sources — see
+// git history for this file's PR-08-era wording. PR-16 closes every one of
+// those except Agents (never named in issue #20's required-concept list)
+// and connectors (not a filesystem-discoverable source at all; ontology
+// itself calls them out as a distinct control-plane concern). A few
+// narrower gaps remain, each a deliberate, documented choice rather than a
+// silent omission — see rules.go/system.go's per-cell doc comments for the
+// specifics (e.g. Codex's Plugin discovery root is this package's own
+// unconfirmed convention, not a vendor-documented path; Claude Code's
+// system-scope MCP and "enterprise" Skills have no independently confirmed
+// physical filename this pass could find) and coverage.go, which marks
+// every such cell UNKNOWN or PARTIAL rather than EXACT.
 //
 // # Pipeline position
 //
@@ -78,4 +90,27 @@
 //     error) or E1 (EvidenceLevelParsed: content was read and retained,
 //     parsed or opaque) — never a higher level, since this package proves
 //     nothing about precedence, host-reported state, or runtime behavior.
+//  6. Credential material is never read, structurally rather than by
+//     after-the-fact redaction (PR-16, issue #20's hard safety rule).
+//     rules.go's sourceRule.discoverOnly marks a source this package knows,
+//     from its physical location and documented purpose alone, may mix
+//     permission/trust state with credential material (e.g. Codex's
+//     $CODEX_HOME/auth.json) — walk.go's observeFile never calls
+//     os.ReadFile for such a source, regardless of whether the file is
+//     actually readable; the resulting record is always E0
+//     (discovered-but-unopened), the same conservative "treat it
+//     conservatively rather than guessing safe" outcome issue #20 asks for.
+//     A source this package DOES read in full (e.g. Claude Code's
+//     .claude.json/settings.json, which mix legitimate non-secret config
+//     with trust/permission fields) instead relies on safety property 4
+//     above (the internal/domain/redact boundary) — redact_test.go proves
+//     that path end-to-end for both.
+//  7. Session-scoped facts are caller-supplied, never self-read. Observe
+//     never reads the real process's argv or environment (see the Request
+//     doc comment); session.go's SessionInput lets a caller that DOES have
+//     legitimate access to those (e.g. a future CLI command) hand an
+//     already-resolved fact to Observe for inventory, keeping this
+//     package's own "every path/fact it processes comes from the Request
+//     struct, nothing ambient" invariant intact even for the `session`
+//     scope.
 package observe
