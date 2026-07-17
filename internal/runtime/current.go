@@ -120,62 +120,74 @@ type CurrentRecord struct {
 	RecordedAt     string `json:"recordedAt"`
 }
 
-// currentLinkPath / currentRecordPath compute the two files that together
-// make up one host's "current" pointer under worktreeStateDir (docs/
-// architecture/README.md §8's `current -> generations/<generation-id>`
-// layout, narrowed to one pointer per host per this PR's per-host
-// generation scope -- see internal/runtime/doc.go's "Per-host, not
-// per-worktree, generations in this PR").
-func currentLinkPath(worktreeStateDir, host string) string {
-	return filepath.Join(worktreeStateDir, "current", host)
+// pointerLinkPath / pointerRecordPath compute the two files that together
+// make up one host's named pointer ("current" or "pending") under
+// worktreeStateDir (docs/architecture/runtime.md §5's
+// `current -> generations/<generation-id>` / `pending -> generations/
+// <generation-id>` layout, narrowed to one pointer per host per this
+// package's per-host generation scope -- see internal/runtime/doc.go's
+// "Per-host, not per-worktree, generations in this PR"). Originally
+// "current"-specific (PR-09's currentLinkPath/currentRecordPath); factored
+// into a pointerName parameter so pending.go's identically-shaped "pending"
+// pointer (PR-14, issue #18) reuses the exact same path convention instead
+// of redefining it a second time.
+func pointerLinkPath(worktreeStateDir, pointerName, host string) string {
+	return filepath.Join(worktreeStateDir, pointerName, host)
 }
 
-func currentRecordPath(worktreeStateDir, host string) string {
-	return currentLinkPath(worktreeStateDir, host) + ".json"
+func pointerRecordPath(worktreeStateDir, pointerName, host string) string {
+	return pointerLinkPath(worktreeStateDir, pointerName, host) + ".json"
 }
 
-// SetCurrentGeneration makes generationDir the "current" generation for
-// host under worktreeStateDir: a symlink at
-// worktreeStateDir/current/<host> pointing at generationDir (relative, so
-// the whole worktree state tree stays relocatable), plus a CurrentRecord
+// setGenerationPointer makes generationDir the named pointer ("current" or
+// "pending") for host under worktreeStateDir: a symlink at
+// worktreeStateDir/<pointerName>/<host> pointing at generationDir (relative,
+// so the whole worktree state tree stays relocatable), plus a CurrentRecord
 // JSON sidecar recording generation/binary identity at the moment this ran.
+// Both files are written to a temporary sibling path first and then
+// os.Rename'd into place, which POSIX guarantees is atomic for a
+// same-filesystem rename -- not the compare-and-swap PR-15's Activation
+// transaction will eventually need for "current" specifically, but enough
+// that a concurrent reader (the PATH shim, doctor) never observes a
+// half-written pointer.
 //
-// This is the "lighter form of a current pointer" this PR's own scope note
-// explicitly allows without building the full M2 Activation/Ledger
-// machinery (docs/project/roadmap.md M2): there is no "pending" distinct
-// from "current" in M1, so SetCurrentGeneration is simply called right
-// after EnsureGeneration returns, unconditionally replacing whatever the
-// pointer previously named. Both files are written to a temporary sibling
-// path first and then os.Rename'd into place, which POSIX guarantees is
-// atomic for a same-filesystem rename -- not the compare-and-swap
-// M2/Reconciler will eventually need, but enough that a concurrent reader
-// (the PATH shim, doctor) never observes a half-written pointer.
-func SetCurrentGeneration(worktreeStateDir, host, generationDir string, gen domain.Generation, detection hostcontext.HostDetection, now time.Time) error {
+// This is the shared implementation behind SetCurrentGeneration (PR-09) and
+// SetPendingGeneration (PR-14, pending.go): "current" and "pending" record
+// exactly the same kind of fact -- which generation, compiled against which
+// host binary/version, at what time -- and differ only in which pointer
+// they update and when a caller chooses to call them. Neither function
+// compares against the other pointer or moves one into the other; that
+// comparison-and-atomic-switch is explicitly PR-15's job (docs/architecture/
+// runtime.md §5.4's Activation transaction: "validate pending -> ... ->
+// atomically switch current ... -> append Ledger entry"). This package's
+// scope is limited to making both pointers exist and be independently
+// writable/readable.
+func setGenerationPointer(worktreeStateDir, pointerName, host, generationDir string, gen domain.Generation, detection hostcontext.HostDetection, now time.Time) error {
 	if worktreeStateDir == "" {
-		return fmt.Errorf("runtime: SetCurrentGeneration: worktreeStateDir is required")
+		return fmt.Errorf("runtime: setGenerationPointer(%s): worktreeStateDir is required", pointerName)
 	}
 	if err := domain.ValidateHostID(host); err != nil {
-		return fmt.Errorf("runtime: SetCurrentGeneration: %w", err)
+		return fmt.Errorf("runtime: setGenerationPointer(%s): %w", pointerName, err)
 	}
-	currentDir := filepath.Join(worktreeStateDir, "current")
-	if err := os.MkdirAll(currentDir, 0o755); err != nil {
-		return fmt.Errorf("runtime: SetCurrentGeneration: %w", err)
+	pointerDir := filepath.Join(worktreeStateDir, pointerName)
+	if err := os.MkdirAll(pointerDir, 0o755); err != nil {
+		return fmt.Errorf("runtime: setGenerationPointer(%s): %w", pointerName, err)
 	}
 
-	linkPath := currentLinkPath(worktreeStateDir, host)
-	rel, err := filepath.Rel(currentDir, generationDir)
+	linkPath := pointerLinkPath(worktreeStateDir, pointerName, host)
+	rel, err := filepath.Rel(pointerDir, generationDir)
 	if err != nil {
-		return fmt.Errorf("runtime: SetCurrentGeneration: %w", err)
+		return fmt.Errorf("runtime: setGenerationPointer(%s): %w", pointerName, err)
 	}
 	suffix := fmt.Sprintf(".tmp-%d-%d", os.Getpid(), now.UnixNano())
 	tmpLink := linkPath + suffix
 	_ = os.Remove(tmpLink) // best-effort: clear any leftover from a prior failed attempt
 	if err := os.Symlink(rel, tmpLink); err != nil {
-		return fmt.Errorf("runtime: SetCurrentGeneration: %w", err)
+		return fmt.Errorf("runtime: setGenerationPointer(%s): %w", pointerName, err)
 	}
 	if err := os.Rename(tmpLink, linkPath); err != nil {
 		_ = os.Remove(tmpLink)
-		return fmt.Errorf("runtime: SetCurrentGeneration: %w", err)
+		return fmt.Errorf("runtime: setGenerationPointer(%s): %w", pointerName, err)
 	}
 
 	record := CurrentRecord{
@@ -186,30 +198,27 @@ func SetCurrentGeneration(worktreeStateDir, host, generationDir string, gen doma
 	}
 	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
-		return fmt.Errorf("runtime: SetCurrentGeneration: %w", err)
+		return fmt.Errorf("runtime: setGenerationPointer(%s): %w", pointerName, err)
 	}
-	recordPath := currentRecordPath(worktreeStateDir, host)
+	recordPath := pointerRecordPath(worktreeStateDir, pointerName, host)
 	tmpRecord := recordPath + suffix
 	_ = os.Remove(tmpRecord)
 	if err := os.WriteFile(tmpRecord, data, 0o644); err != nil {
-		return fmt.Errorf("runtime: SetCurrentGeneration: %w", err)
+		return fmt.Errorf("runtime: setGenerationPointer(%s): %w", pointerName, err)
 	}
 	if err := os.Rename(tmpRecord, recordPath); err != nil {
 		_ = os.Remove(tmpRecord)
-		return fmt.Errorf("runtime: SetCurrentGeneration: %w", err)
+		return fmt.Errorf("runtime: setGenerationPointer(%s): %w", pointerName, err)
 	}
 	return nil
 }
 
-// CurrentGenerationDir resolves host's "current" generation directory under
-// worktreeStateDir (SetCurrentGeneration's symlink target), returning an
-// absolute, cleaned path. A caller that finds no pointer at all (this host
-// has never had SetCurrentGeneration called for it in this worktree state
-// dir) gets an os.IsNotExist-satisfying error -- an expected, non-fatal
-// outcome (internal/shim.Build and doctor's staleness check both treat it
-// as "not yet managed," not a crash).
-func CurrentGenerationDir(worktreeStateDir, host string) (string, error) {
-	linkPath := currentLinkPath(worktreeStateDir, host)
+// generationPointerDir resolves the named pointer's ("current" or
+// "pending") generation directory for host under worktreeStateDir, returning
+// an absolute, cleaned path. A caller that finds no pointer at all gets an
+// os.IsNotExist-satisfying error -- an expected, non-fatal outcome.
+func generationPointerDir(worktreeStateDir, pointerName, host string) (string, error) {
+	linkPath := pointerLinkPath(worktreeStateDir, pointerName, host)
 	target, err := os.Readlink(linkPath)
 	if err != nil {
 		return "", err
@@ -220,16 +229,51 @@ func CurrentGenerationDir(worktreeStateDir, host string) (string, error) {
 	return filepath.Clean(target), nil
 }
 
-// ReadCurrentRecord reads the CurrentRecord sidecar SetCurrentGeneration
-// wrote for host under worktreeStateDir.
-func ReadCurrentRecord(worktreeStateDir, host string) (CurrentRecord, error) {
-	data, err := os.ReadFile(currentRecordPath(worktreeStateDir, host))
+// readPointerRecord reads the CurrentRecord sidecar setGenerationPointer
+// wrote for the named pointer ("current" or "pending") and host under
+// worktreeStateDir.
+func readPointerRecord(worktreeStateDir, pointerName, host string) (CurrentRecord, error) {
+	data, err := os.ReadFile(pointerRecordPath(worktreeStateDir, pointerName, host))
 	if err != nil {
 		return CurrentRecord{}, err
 	}
 	var rec CurrentRecord
 	if err := json.Unmarshal(data, &rec); err != nil {
-		return CurrentRecord{}, fmt.Errorf("runtime: ReadCurrentRecord: %w", err)
+		return CurrentRecord{}, fmt.Errorf("runtime: readPointerRecord(%s): %w", pointerName, err)
 	}
 	return rec, nil
+}
+
+// SetCurrentGeneration makes generationDir the "current" generation for
+// host under worktreeStateDir. See setGenerationPointer for the shared
+// implementation and PR-14's "pending" pointer (pending.go), which reuses
+// it.
+//
+// This is the "lighter form of a current pointer" PR-09's own scope note
+// explicitly allowed without building the full M2 Activation/Ledger
+// machinery (docs/project/roadmap.md M2): SetCurrentGeneration is simply
+// called right after EnsureGeneration returns, unconditionally replacing
+// whatever the pointer previously named -- there was, at that time, no
+// "pending" distinct from "current." PR-14 (issue #18) adds "pending" as a
+// genuinely separate pointer (pending.go); this function's own behavior is
+// unchanged.
+func SetCurrentGeneration(worktreeStateDir, host, generationDir string, gen domain.Generation, detection hostcontext.HostDetection, now time.Time) error {
+	return setGenerationPointer(worktreeStateDir, "current", host, generationDir, gen, detection, now)
+}
+
+// CurrentGenerationDir resolves host's "current" generation directory under
+// worktreeStateDir (SetCurrentGeneration's symlink target), returning an
+// absolute, cleaned path. A caller that finds no pointer at all (this host
+// has never had SetCurrentGeneration called for it in this worktree state
+// dir) gets an os.IsNotExist-satisfying error -- an expected, non-fatal
+// outcome (internal/shim.Build and doctor's staleness check both treat it
+// as "not yet managed," not a crash).
+func CurrentGenerationDir(worktreeStateDir, host string) (string, error) {
+	return generationPointerDir(worktreeStateDir, "current", host)
+}
+
+// ReadCurrentRecord reads the CurrentRecord sidecar SetCurrentGeneration
+// wrote for host under worktreeStateDir.
+func ReadCurrentRecord(worktreeStateDir, host string) (CurrentRecord, error) {
+	return readPointerRecord(worktreeStateDir, "current", host)
 }

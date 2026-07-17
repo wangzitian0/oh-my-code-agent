@@ -184,17 +184,130 @@ func claudeMCPRegistrationJSON(omcaBinaryPath string) ([]byte, error) {
 	return append(data, '\n'), nil
 }
 
+// sandboxPermissionValues names, per host, the native values this compiler
+// knows how to render for the one policy.permissions key
+// docs/product/requirements.md §4.1's own worked example documents
+// ("sandbox"), ordered starting with this compiler's existing hardcoded
+// conservative default (index 0 -- "read-only" for codex, "plan" for
+// claude-code, exactly the literals this file hardcoded before permission
+// compilation existed). A value not in this list, or a permission key other
+// than "sandbox", is a capability this compiler does not yet know how to
+// translate -- see resolveSandboxPermission, which reports that rather than
+// guessing.
+var sandboxPermissionValues = map[string][]string{
+	"codex":       {"read-only", "workspace-write", "danger-full-access"},
+	"claude-code": {"plan", "default", "acceptEdits", "bypassPermissions"},
+}
+
+// knownSandboxValue reports whether value is one this compiler recognizes as
+// a real native rendering for host's sandbox permission.
+func knownSandboxValue(host, value string) bool {
+	for _, v := range sandboxPermissionValues[host] {
+		if v == value {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveSandboxPermission decides the native "sandbox" value hostConfigFiles
+// renders for host, and the GenerationSourceEntry (nil for "no decision to
+// record") documenting why. permissions is a resolved
+// domain.ProfilePolicy.Permissions map -- nil/empty for Bootstrap (no real
+// Desired Graph, policy.go), non-empty for Compile's real resolved policy
+// (compile_full.go). A nil/empty permissions map, or one with no "sandbox"
+// key, returns exactly (conservative default, nil entry) -- this is what
+// keeps Bootstrap's existing generated content and Sources count completely
+// unchanged by this feature (every PR-09/10/11 test predates permission
+// compilation and asserts on the old hardcoded defaults).
+//
+// issue #18 round-2 AC: "policy.permissions values compile into host
+// artifacts where the capability level allows; DENY/lock intent is never
+// weakened by compilation." REQUIRED and DENIED are this project's two
+// "sticky" intents (internal/resolve/resolve.go's own vocabulary): a
+// REQUIRED value is always honored when recognized ("lock intent" -- never
+// silently dropped), a DENIED value is NEVER honored (honoring it would be
+// exactly the weakening the AC forbids) -- compilation instead keeps the
+// conservative default and records why, regardless of whether the denied
+// value happens to be one this compiler recognizes. DEFAULT/AVAILABLE honor
+// the requested value only "where the capability level allows": a
+// recognized value compiles in, an unrecognized one falls back to the
+// conservative default with an explained exclusion, exactly like any other
+// unrecognized/unproven source this package reports rather than silently
+// accepting or silently dropping.
+func resolveSandboxPermission(host string, permissions map[string]domain.PermissionRef) (value string, entry *domain.GenerationSourceEntry) {
+	defaults := sandboxPermissionValues[host]
+	conservative := ""
+	if len(defaults) > 0 {
+		conservative = defaults[0]
+	}
+	ref, ok := permissions["sandbox"]
+	if !ok {
+		return conservative, nil
+	}
+
+	known := knownSandboxValue(host, ref.Value)
+	switch ref.Intent {
+	case domain.IntentDenied:
+		return conservative, &domain.GenerationSourceEntry{
+			Concept:  "permission",
+			Source:   "sandbox",
+			Included: false,
+			Reason:   fmt.Sprintf("excluded: DENIED by profile policy -- value %q is denied; compiled artifact keeps the conservative default %q rather than weakening the deny (issue #18 round-2 AC)", ref.Value, conservative),
+		}
+	case domain.IntentRequired:
+		if !known {
+			return conservative, &domain.GenerationSourceEntry{
+				Concept:  "permission",
+				Source:   "sandbox",
+				Included: false,
+				Reason:   fmt.Sprintf("excluded: REQUIRED permission value %q is not a value this compiler recognizes for %s's sandbox permission; compiled artifact keeps the conservative default %q rather than guessing at an unverified native value", ref.Value, host, conservative),
+			}
+		}
+		return ref.Value, &domain.GenerationSourceEntry{
+			Concept:  "permission",
+			Source:   "sandbox",
+			Included: true,
+			Reason:   fmt.Sprintf("included: REQUIRED by profile policy, compiled value %q", ref.Value),
+		}
+	case domain.IntentDefault, domain.IntentAvailable:
+		if !known {
+			return conservative, &domain.GenerationSourceEntry{
+				Concept:  "permission",
+				Source:   "sandbox",
+				Included: false,
+				Reason:   fmt.Sprintf("excluded: %s permission value %q is not a value this compiler recognizes for %s's sandbox permission; compiled artifact keeps the conservative default %q", ref.Intent, ref.Value, host, conservative),
+			}
+		}
+		return ref.Value, &domain.GenerationSourceEntry{
+			Concept:  "permission",
+			Source:   "sandbox",
+			Included: true,
+			Reason:   fmt.Sprintf("included: %s by profile policy, compiled value %q", ref.Intent, ref.Value),
+		}
+	default:
+		return conservative, &domain.GenerationSourceEntry{
+			Concept:  "permission",
+			Source:   "sandbox",
+			Included: false,
+			Reason:   fmt.Sprintf("excluded: unrecognized intent %q for permission \"sandbox\"; compiled artifact keeps the conservative default %q", ref.Intent, conservative),
+		}
+	}
+}
+
 // hostConfigFiles returns every OMCA-authored config file this package
-// always emits inside nativeHomeDir: conservative default permissions
-// (docs/project/roadmap.md M1), plus -- when omcaBinaryPath is non-empty --
-// the OMCA MCP server registration (docs/architecture/runtime.md §3: "the
-// bootstrap generation contains... the OMCA MCP server"; FR-7). This is the
-// scope cut doc.go's "What is deliberately NOT in the generated tree yet"
-// section flagged as open ("internal/mcp... is still an empty doc.go stub
-// -- there is no real command or protocol handler this compiler could point
-// a generated config entry at yet"): issue #15 built internal/mcp and
-// `omca mcp serve`, so this function now closes that gap whenever a caller
-// supplies a real omcaBinaryPath.
+// always emits inside nativeHomeDir: permission defaults (docs/project/
+// roadmap.md M1's conservative values, or a resolved policy.permissions
+// value where resolveSandboxPermission's capability table allows it), plus
+// -- when omcaBinaryPath is non-empty -- the OMCA MCP server registration
+// (docs/architecture/runtime.md §3: "the bootstrap generation contains...
+// the OMCA MCP server"; FR-7). This is the scope cut doc.go's "What is
+// deliberately NOT in the generated tree yet" section flagged as open
+// ("internal/mcp... is still an empty doc.go stub -- there is no real
+// command or protocol handler this compiler could point a generated config
+// entry at yet"): issue #15 built internal/mcp and `omca mcp serve`, so this
+// function now closes that gap whenever a caller supplies a real
+// omcaBinaryPath.
 //
 // Permission defaults and the MCP registration are emitted together, not as
 // two separately-tracked files, because for both hosts today they land in
@@ -213,33 +326,54 @@ func claudeMCPRegistrationJSON(omcaBinaryPath string) ([]byte, error) {
 //
 // Returned RelPaths are relative to nativeHomeDir itself; compileHostTree
 // joins them under the full per-host prefix, exactly like the single-file
-// version this replaces.
-func hostConfigFiles(host, nativeHomeDir, omcaBinaryPath string) ([]generatedFile, error) {
+// version this replaces. The returned GenerationSourceEntry slice is
+// permission-compilation sources only (empty/nil when permissions is
+// empty/nil, exactly PR-09's behavior); compileHostTree appends it to the
+// Observation-derived sources list.
+func hostConfigFiles(host, nativeHomeDir, omcaBinaryPath string, permissions map[string]domain.PermissionRef) ([]generatedFile, []domain.GenerationSourceEntry, error) {
+	sandboxValue, permEntry := resolveSandboxPermission(host, permissions)
+	var permSources []domain.GenerationSourceEntry
+	if permEntry != nil {
+		permSources = append(permSources, *permEntry)
+	}
+
 	switch host {
 	case "codex":
 		content := "" +
-			"# OMCA bootstrap generation: conservative permission defaults (docs/project/roadmap.md M1).\n" +
-			"# This is a hardcoded M1 policy value, not a host-verified capability\n" +
-			"# resolution -- see knowledge/hosts/codex/cli/0.144/manifest.json.\n" +
+			"# OMCA generation: permission defaults (docs/project/roadmap.md M1 conservative\n" +
+			"# baseline, or a resolved policy.permissions value where recognized -- issue #18).\n" +
 			"approval_policy = \"untrusted\"\n" +
-			"sandbox_mode = \"read-only\"\n"
+			fmt.Sprintf("sandbox_mode = %s\n", tomlString(sandboxValue))
 		if omcaBinaryPath != "" {
 			content += codexMCPRegistrationTOML(omcaBinaryPath)
 		}
-		return []generatedFile{{RelPath: filepath.Join(nativeHomeDir, "config.toml"), Content: []byte(content)}}, nil
+		return []generatedFile{{RelPath: filepath.Join(nativeHomeDir, "config.toml"), Content: []byte(content)}}, permSources, nil
 	case "claude-code":
-		content := `{"permissions":{"defaultMode":"plan"}}` + "\n"
-		files := []generatedFile{{RelPath: filepath.Join(nativeHomeDir, "settings.json"), Content: []byte(content)}}
+		settingsDoc := struct {
+			Permissions struct {
+				DefaultMode string `json:"defaultMode"`
+			} `json:"permissions"`
+		}{}
+		settingsDoc.Permissions.DefaultMode = sandboxValue
+		// json.Marshal (not MarshalIndent) to keep the original compact
+		// single-line form this file has always emitted -- tests
+		// substring-match against `"defaultMode"` on one line.
+		compact, err := json.Marshal(settingsDoc)
+		if err != nil {
+			return nil, nil, fmt.Errorf("runtime: hostConfigFiles: %w", err)
+		}
+		content := append(compact, '\n')
+		files := []generatedFile{{RelPath: filepath.Join(nativeHomeDir, "settings.json"), Content: content}}
 		if omcaBinaryPath != "" {
 			claudeJSON, err := claudeMCPRegistrationJSON(omcaBinaryPath)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			files = append(files, generatedFile{RelPath: filepath.Join(nativeHomeDir, ".claude.json"), Content: claudeJSON})
 		}
-		return files, nil
+		return files, permSources, nil
 	default:
-		return nil, fmt.Errorf("runtime: hostConfigFiles: unsupported host %q", host)
+		return nil, nil, fmt.Errorf("runtime: hostConfigFiles: unsupported host %q", host)
 	}
 }
 
@@ -282,27 +416,68 @@ func claudeConfigDirExclusionGapSources() []domain.GenerationSourceEntry {
 	}
 }
 
-// compileHostTree applies the fixed M1 bootstrap policy to req, returning
-// every file to place in the generation's per-host artifact tree (path
-// relative to the generation directory root) and the full sources list
-// manifest.json.spec.sources records (issue #13 AC "The manifest lists
-// every included and excluded source with a reason"). req must already be
-// req.validate()-clean; callers (Bootstrap, GenerationID) are responsible
-// for that.
-func compileHostTree(req BootstrapRequest) ([]generatedFile, []domain.GenerationSourceEntry, error) {
-	host := req.Detection.Host
-	surface := req.surface()
-	nativeHomeDir, err := NativeHomeDirName(host)
+// classifyFunc decides whether one Observation belongs in a generation's
+// artifact tree, and why -- the one genuinely policy-specific (as opposed to
+// general/shared) decision compileHostTree needs from its caller (issue #18
+// round-2 MECE requirement: "the bootstrap path and full compilation share
+// one compiler core; bootstrap is the minimal-input case, not a second
+// implementation"). Bootstrap (PR-09) supplies classify, above -- the fixed,
+// hardcoded M1 policy. Compile (PR-14, compile_full.go) supplies the exact
+// same classify function today (see compile_full.go's doc comment for why:
+// there is no Identity Matcher yet to do anything more desired-state-aware
+// with a physically-discovered Observation), but the seam exists so that
+// changes independently.
+type classifyFunc func(domain.Observation) (included bool, reason string)
+
+// hostTreeInput is compileHostTree's one input shape: every value the
+// shared compiler core needs to walk one host's Observations and render its
+// native config artifacts, decoupled from BootstrapRequest so a second
+// caller (Compile, compile_full.go) does not need to construct a
+// BootstrapRequest just to reach this logic. This is the concrete seam the
+// round-2 MECE requirement asks for: everything compileHostTree does with a
+// hostTreeInput -- walking Observations, deciding file placement via
+// Classify, computing the config files hostConfigFiles renders, assembling
+// GenerationSourceEntry records -- is the single shared implementation
+// neither Bootstrap nor Compile forks; only Classify and Permissions differ
+// between the two callers, and both are passed in as plain data, not
+// branched on internally.
+type hostTreeInput struct {
+	Host           string
+	Surface        string
+	WorktreeRoot   string
+	Observations   []domain.Observation
+	OMCABinaryPath string
+	// Permissions is the resolved domain.ProfilePolicy.Permissions map this
+	// host's generation should compile permission defaults from. Bootstrap
+	// always passes nil (no real Desired Graph, policy.go) and gets exactly
+	// the old hardcoded conservative defaults with zero extra Sources
+	// entries; Compile passes the real resolved policy.
+	Permissions map[string]domain.PermissionRef
+	Classify    classifyFunc
+}
+
+// compileHostTree is the shared generation-compiler core (issue #18 round-2
+// MECE requirement): given one host's already-computed Observation
+// inventory and a caller-supplied policy (in.Classify, in.Permissions), it
+// returns every file to place in the generation's per-host artifact tree
+// (path relative to the generation directory root) and the full sources
+// list manifest.json.spec.sources records (issue #13 AC "The manifest lists
+// every included and excluded source with a reason"). Both Bootstrap
+// (bootstrap.go) and Compile (compile_full.go) call this exact function
+// through compileHostTreeFn -- see that variable's doc comment for how a
+// test proves neither one forked its own copy of this logic.
+func compileHostTree(in hostTreeInput) ([]generatedFile, []domain.GenerationSourceEntry, error) {
+	nativeHomeDir, err := NativeHomeDirName(in.Host)
 	if err != nil {
 		return nil, nil, err
 	}
-	hostPrefix := filepath.Join("hosts", host, surface)
+	hostPrefix := filepath.Join("hosts", in.Host, in.Surface)
 
 	var files []generatedFile
 	var sources []domain.GenerationSourceEntry
 
-	for _, o := range req.Observations {
-		included, reason := classify(o)
+	for _, o := range in.Observations {
+		included, reason := in.Classify(o)
 		entry := domain.GenerationSourceEntry{
 			Concept:  o.Spec.Concept,
 			Source:   o.Spec.Source.Path,
@@ -321,12 +496,12 @@ func compileHostTree(req BootstrapRequest) ([]generatedFile, []domain.Generation
 				entry.Included = false
 				entry.Reason = "excluded: repository Instructions source was discovered but its content could not be read (E0); a generation artifact cannot be produced without content"
 			} else {
-				rel, relErr := filepath.Rel(req.Worktree.Root, o.Spec.Source.Path)
+				rel, relErr := filepath.Rel(in.WorktreeRoot, o.Spec.Source.Path)
 				if relErr != nil {
 					return nil, nil, fmt.Errorf("runtime: compileHostTree: %w", relErr)
 				}
 				if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-					return nil, nil, fmt.Errorf("runtime: compileHostTree: repository Instructions source %s resolves outside the worktree root %s", o.Spec.Source.Path, req.Worktree.Root)
+					return nil, nil, fmt.Errorf("runtime: compileHostTree: repository Instructions source %s resolves outside the worktree root %s", o.Spec.Source.Path, in.WorktreeRoot)
 				}
 				files = append(files, generatedFile{
 					RelPath: filepath.Join(hostPrefix, "instructions", rel),
@@ -337,7 +512,7 @@ func compileHostTree(req BootstrapRequest) ([]generatedFile, []domain.Generation
 		sources = append(sources, entry)
 	}
 
-	configFiles, err := hostConfigFiles(host, nativeHomeDir, req.OMCABinaryPath)
+	configFiles, permSources, err := hostConfigFiles(in.Host, nativeHomeDir, in.OMCABinaryPath, in.Permissions)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -345,8 +520,9 @@ func compileHostTree(req BootstrapRequest) ([]generatedFile, []domain.Generation
 		configFiles[i].RelPath = filepath.Join(hostPrefix, configFiles[i].RelPath)
 	}
 	files = append(files, configFiles...)
+	sources = append(sources, permSources...)
 
-	if host == "claude-code" {
+	if in.Host == "claude-code" {
 		sources = append(sources, claudeConfigDirExclusionGapSources()...)
 	}
 
@@ -363,3 +539,18 @@ func compileHostTree(req BootstrapRequest) ([]generatedFile, []domain.Generation
 
 	return files, sources, nil
 }
+
+// compileHostTreeFn holds compileHostTree's function value in a package
+// variable that Bootstrap (bootstrap.go) and Compile (compile_full.go) both
+// call instead of calling compileHostTree directly. Production code never
+// reassigns it; it exists purely as a seam runtimesharedcore_test.go's
+// TestSharedCompilerCore_BootstrapAndCompileUseSameCore uses to prove, by
+// swapping in a counting wrapper for the duration of one test, that both
+// entry points really do route through the identical implementation --
+// issue #18's round-2 MECE requirement ("one compiler, two entry points")
+// made mechanically checkable rather than merely asserted in a comment: a
+// future change that forked this logic into two copies (e.g. a
+// Compile-specific reimplementation of Observation-walking) would make that
+// test's call count stop matching, whether or not anyone remembered to
+// update this doc comment.
+var compileHostTreeFn = compileHostTree

@@ -90,3 +90,55 @@ func TestGeneration_Invalid_CapabilityGapMissingTrackingIssue(t *testing.T) {
 		t.Errorf("error = %q, want it to mention the missing trackingIssue", err.Error())
 	}
 }
+
+// TestGeneration_Valid_WithDesiredState_Golden proves the additive PR-14
+// (issue #18) fields -- ontologyVersion, sourceDigest, desiredState,
+// expectedEvidence, riskConfirmations, metadata.invocation -- round-trip and
+// validate together, alongside every field PR-09 already established,
+// without disturbing any of them (the same "additive schema evolution"
+// discipline TestGeneration_Valid_WithSources_Golden already proved for
+// PR-09's own Sources field).
+func TestGeneration_Valid_WithDesiredState_Golden(t *testing.T) {
+	var g Generation
+	loadFixture(t, "generation-valid-with-desired-state.json", &g)
+
+	if err := ValidateGeneration(g); err != nil {
+		t.Fatalf("ValidateGeneration: %v", err)
+	}
+	if g.Metadata.Invocation != "omca run codex" {
+		t.Errorf("metadata.invocation = %q, want %q", g.Metadata.Invocation, "omca run codex")
+	}
+	if g.Spec.OntologyVersion != CurrentOntologyVersion {
+		t.Errorf("spec.ontologyVersion = %q, want %q", g.Spec.OntologyVersion, CurrentOntologyVersion)
+	}
+	if !IsCanonicalDigest(g.Spec.SourceDigest) {
+		t.Errorf("spec.sourceDigest %q is not a canonical digest", g.Spec.SourceDigest)
+	}
+	if g.Spec.DesiredState == nil {
+		t.Fatal("spec.desiredState is nil, want populated")
+	}
+	if len(g.Spec.DesiredState.Profiles) != 1 || g.Spec.DesiredState.Profiles[0].ID != "company:example" {
+		t.Errorf("spec.desiredState.profiles = %+v, want one entry naming company:example", g.Spec.DesiredState.Profiles)
+	}
+	if len(g.Spec.ExpectedEvidence) != 1 || g.Spec.ExpectedEvidence[0].Host != "codex" {
+		t.Errorf("spec.expectedEvidence = %+v, want one entry naming codex", g.Spec.ExpectedEvidence)
+	}
+}
+
+// TestGeneration_Invalid_BadDesiredStateProfileDigest proves
+// ValidateGeneration rejects a spec.desiredState.profiles entry whose digest
+// is not a canonical sha256 digest -- the same "fail closed on a malformed
+// digest reference" discipline every other digest field in this document
+// already has.
+func TestGeneration_Invalid_BadDesiredStateProfileDigest(t *testing.T) {
+	var g Generation
+	loadFixture(t, "generation-invalid-bad-desiredstate-digest.json", &g)
+
+	err := ValidateGeneration(g)
+	if err == nil {
+		t.Fatal("expected an error for a malformed spec.desiredState.profiles digest, got nil")
+	}
+	if !strings.Contains(err.Error(), "desiredState") {
+		t.Errorf("error = %q, want it to mention desiredState", err.Error())
+	}
+}
