@@ -329,3 +329,123 @@ func jsonRoundTrip(t *testing.T, obs []domain.Observation) string {
 	}
 	return string(raw)
 }
+
+// TestObserve_Symlink_NotFollowed_ContentNotLeaked is a regression test for
+// a real scope-escape: a symlink placed under an observed root can point
+// anywhere on disk, including outside the declared scope root entirely
+// (e.g. into a directory this package was never asked to read). Before this
+// test's corresponding fix, observeFile called os.ReadFile on any regular
+// (non-directory) Lstat result, which transparently follows a symlink and
+// would report the target's content as if it were part of the observed
+// scope. This plants a symlink under a Codex native home pointing at a
+// file OUTSIDE any root Observe was given, and asserts: (1) the outside
+// file's real content never appears anywhere in the result, and (2) the
+// symlink is still recorded (as E0 — discovered, not read), so it remains a
+// lossless inventory rather than a silently dropped source.
+func TestObserve_Symlink_NotFollowed_ContentNotLeaked(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on Windows")
+	}
+
+	tr := newCodexTree(t)
+
+	// outsideSecret lives outside every root this Request names (it is a
+	// sibling of tr's own root, not under CodexHome/HomeAgentsDir/
+	// WorktreeRoot) — exactly the "points outside the intended scope" case
+	// Copilot's review flagged.
+	outsideDir := t.TempDir()
+	outsideSecret := filepath.Join(outsideDir, "real-secret.md")
+	const secretContent = "this content must never appear in an Observation"
+	mustWriteFile(t, outsideSecret, secretContent)
+
+	linkPath := filepath.Join(tr.CodexHome, "AGENTS.md")
+	if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.Symlink(outsideSecret, linkPath); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	obs, err := Observe(tr.request("0.144.5"))
+	if err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+	assertValid(t, obs)
+
+	raw := jsonRoundTrip(t, obs)
+	if strings.Contains(raw, secretContent) {
+		t.Fatalf("Observe followed a symlink and leaked content from outside the observed scope:\n%s", raw)
+	}
+
+	o := findObservation(t, obs, conceptInstruction, linkPath)
+	if o.Spec.EvidenceLevel != domain.EvidenceLevelDiscovered {
+		t.Errorf("evidenceLevel = %s, want E0 (symlink discovered but not followed)", o.Spec.EvidenceLevel)
+	}
+}
+
+// TestObserve_E0_OpaqueVendorFieldsMatchesDigestedValue is a regression test
+// for a digest/content mismatch: buildObservation's E0 branch used to digest
+// discoveredOnlyPlaceholder ({"discovered":true,"readable":false}) but set
+// OpaqueVendorFields to a differently-shaped map ({"readable":false}), so a
+// caller could never actually reproduce ParsedDigest by recomputing
+// domain.CanonicalDigest over the emitted OpaqueVendorFields value — the
+// documented contract ("ParsedDigest is the canonical digest of that same
+// OpaqueVendorFields value") did not hold. This asserts they now agree.
+func TestObserve_E0_OpaqueVendorFieldsMatchesDigestedValue(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits only")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: permission bits do not block reads")
+	}
+
+	tr := newCodexTree(t)
+	path := filepath.Join(tr.CodexHome, "AGENTS.md")
+	mustWriteFile(t, path, "# unreadable\n")
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
+
+	obs, err := Observe(tr.request("0.144.5"))
+	if err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+	o := findObservation(t, obs, conceptInstruction, path)
+
+	recomputed, err := domain.CanonicalDigest(o.Spec.OpaqueVendorFields)
+	if err != nil {
+		t.Fatalf("CanonicalDigest(OpaqueVendorFields): %v", err)
+	}
+	if recomputed != o.Spec.ParsedDigest {
+		t.Errorf("ParsedDigest = %s, but CanonicalDigest(OpaqueVendorFields) = %s (must match)", o.Spec.ParsedDigest, recomputed)
+	}
+	if recomputed != o.Spec.RawDigest {
+		t.Errorf("an E0 record's RawDigest and ParsedDigest must both equal the digest of the same placeholder value, got RawDigest=%s recomputed=%s", o.Spec.RawDigest, recomputed)
+	}
+}
+
+// TestObserve_JSONLargeInteger_PrecisionPreserved is a regression test for
+// silent numeric precision loss: decoding a JSON MCP source into `any` via
+// plain json.Unmarshal coerces every number to float64, which cannot
+// represent an integer beyond 2^53 exactly. This plants an MCP server
+// registration with an 18-digit integer (e.g. the shape of a large PID or a
+// snowflake-style ID) and asserts the retained OpaqueVendorFields content
+// round-trips through JSON marshaling with that exact literal intact — not
+// a float64-rounded approximation.
+func TestObserve_JSONLargeInteger_PrecisionPreserved(t *testing.T) {
+	tr := newClaudeTree(t)
+	const bigInt = "123456789012345678" // exceeds float64's 2^53 exact-integer range
+	mustWriteFile(t, filepath.Join(tr.ClaudeConfigDir, ".claude.json"),
+		`{"mcpServers":{"demo":{"command":"npx","meta":{"pid":`+bigInt+`}}}}`)
+
+	obs, err := Observe(tr.request("2.1.211"))
+	if err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+
+	raw := jsonRoundTrip(t, obs)
+	if !strings.Contains(raw, bigInt) {
+		t.Fatalf("large integer %s did not survive round-trip unchanged; got:\n%s", bigInt, raw)
+	}
+}

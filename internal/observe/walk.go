@@ -1,6 +1,7 @@
 package observe
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -96,6 +97,16 @@ func observeRoot(host, hostVersion, surface, scopeKind, root string, rules []sou
 // right, and silently dropping a source this package can prove is there
 // would defeat the "lossless inventory" goal the PR-08 acceptance criteria
 // name. Only genuine non-existence (os.IsNotExist) is silent.
+//
+// A symlink is deliberately never followed: os.Lstat (not os.Stat) reports
+// on the link itself, and if the entry is a symlink this function stops
+// there rather than calling os.ReadFile (which transparently follows it).
+// A symlink under an observed scope root can point anywhere on disk,
+// including outside scopeRoot entirely (e.g. into the real, unisolated
+// home) — reading through it would silently widen this package's zero-exec-
+// adjacent "read only what the declared scope root actually contains"
+// boundary. The symlink's existence is still recorded, at E0, exactly like
+// any other unreadable-content case.
 func observeFile(host, hostVersion, surface, concept, scopeKind, scopeRoot, path string) (domain.Observation, bool, error) {
 	info, statErr := os.Lstat(path)
 	if statErr != nil {
@@ -108,7 +119,13 @@ func observeFile(host, hostVersion, surface, concept, scopeKind, scopeRoot, path
 		return domain.Observation{}, false, nil
 	}
 
-	data, readErr := os.ReadFile(path) // read-only: never write, never exec
+	var data []byte
+	readErr := error(nil)
+	if info.Mode()&os.ModeSymlink != 0 {
+		readErr = fmt.Errorf("observe: observeFile: %s is a symlink; not followed (scope-containment boundary)", path)
+	} else {
+		data, readErr = os.ReadFile(path) // read-only: never write, never exec
+	}
 	obs, err := buildObservation(host, hostVersion, surface, concept, scopeKind, scopeRoot, path, data, readErr)
 	if err != nil {
 		return domain.Observation{}, false, err
@@ -131,9 +148,10 @@ var discoveredOnlyPlaceholder = map[string]any{"discovered": true, "readable": f
 // content (there is none to digest). Otherwise the record is
 // EvidenceLevelParsed (E1): RawDigest is the canonical digest of the raw
 // file text, and OpaqueVendorFields carries the source's content —
-// losslessly parsed into a generic JSON value for a ".json"-suffixed source
-// (Claude Code's .claude.json/.mcp.json — every field survives because
-// nothing is cherry-picked into a hand-modeled struct) or else retained
+// field-completely parsed (numeric precision included, see parseContent)
+// into a generic JSON value for a ".json"-suffixed source (Claude Code's
+// .claude.json/.mcp.json — every field survives because nothing is
+// cherry-picked into a hand-modeled struct) or else retained
 // verbatim as opaque text (Instructions markdown, Codex's TOML config,
 // SKILL.md) — see doc.go's redaction-safety point for why both branches are
 // still safe once passed through internal/domain/redact at the output
@@ -155,7 +173,12 @@ func buildObservation(host, hostVersion, surface, concept, scopeKind, scopeRoot,
 		}
 		rawDigest = digest
 		parsedDigest = digest
-		opaque = map[string]any{"readable": false}
+		// opaque must be the exact value digested above (discoveredOnlyPlaceholder
+		// itself, not a differently-shaped map) — ParsedDigest is documented
+		// as "the canonical digest of that same OpaqueVendorFields value",
+		// and a caller re-deriving/verifying the digest from the emitted
+		// document must be able to reproduce it from what's actually there.
+		opaque = discoveredOnlyPlaceholder
 	} else {
 		evidenceLevel = domain.EvidenceLevelParsed
 		raw := string(data)
@@ -206,15 +229,25 @@ func buildObservation(host, hostVersion, surface, concept, scopeKind, scopeRoot,
 }
 
 // parseContent returns the value this package retains for path's content,
-// opaquely, inside OpaqueVendorFields["content"]: a generic, fully lossless
+// opaquely, inside OpaqueVendorFields["content"]: a generic, field-complete
 // JSON decode for a ".json"-suffixed path (both of this PR's JSON-shaped MCP
 // sources), or the raw text itself for everything else (Instructions
 // markdown, Codex's TOML config, SKILL.md's YAML-frontmatter-plus-markdown
-// body). A ".json" file whose content fails to parse (malformed JSON) falls
-// back to raw text rather than erroring the whole observation — this
-// package's job is lossless inventory, not validation, so a source that
-// exists but is not valid JSON is still fully retained, just not
-// structurally decoded.
+// body). The JSON decode uses json.Decoder.UseNumber so a large integer
+// (e.g. a port or PID in an MCP server's config) survives as an exact
+// json.Number rather than being silently coerced to float64 and losing
+// precision — encoding/json's Marshal special-cases json.Number to write it
+// back out as the original numeric literal, so this value round-trips
+// exactly. (domain.CanonicalDigest, reused unmodified here and by every
+// other caller since PR-04, does its own float64-normalizing round-trip
+// when computing ParsedDigest — that is pre-existing, shared digest
+// canonicalization behavior, not something this package's retained content
+// introduces; the value actually returned to a caller/report is what
+// preserves precision.) A ".json" file whose content fails to parse
+// (malformed JSON) falls back to raw text rather than erroring the whole
+// observation — this package's job is lossless inventory, not validation,
+// so a source that exists but is not valid JSON is still fully retained,
+// just not structurally decoded.
 //
 // TOML is deliberately never parsed: this project has no TOML dependency
 // (go.mod: only gopkg.in/yaml.v3), and Codex's config.toml is the one source
@@ -229,8 +262,10 @@ func buildObservation(host, hostVersion, surface, concept, scopeKind, scopeRoot,
 // never structurally parsed.
 func parseContent(path string, data []byte) any {
 	if strings.HasSuffix(path, ".json") {
+		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.UseNumber()
 		var generic any
-		if err := json.Unmarshal(data, &generic); err == nil {
+		if err := dec.Decode(&generic); err == nil {
 			return generic
 		}
 	}
