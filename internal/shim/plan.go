@@ -1,0 +1,158 @@
+package shim
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/wangzitian0/oh-my-code-agent/internal/runtime"
+)
+
+// hostForInvokedName maps the shim's own two entry-point basenames to the
+// canonical host ID docs/ontology/README.md's Host Registry uses. This is
+// the shim's own tiny dispatch table, deliberately not sourced from
+// internal/context.BinaryName's inverse: importing internal/context here
+// would pull host-detection/version-probing scope into this package for a
+// two-entry lookup (see doc.go's "why this is its own package" section).
+var hostForInvokedName = map[string]string{
+	"codex":  "codex",
+	"claude": "claude-code",
+}
+
+// surfaceCLI is the one surface every HostDetection this project produces
+// today reports (internal/context/host.go's DetectHost sets Surface: "cli"
+// unconditionally). The shim hardcodes it rather than threading a surface
+// value through another OMCA_* environment variable, because there is
+// currently no second surface for a generation directory to disambiguate
+// between; a future surface would need this constant promoted to an actual
+// input.
+const surfaceCLI = "cli"
+
+// IsShimInvocation reports whether invokedName — normally
+// filepath.Base(os.Args[0]) — names one of this package's two shim entry
+// points. cmd/omca's main() calls this before anything else, to decide
+// whether to dispatch into shim mode instead of the normal `omca <command>`
+// switch (the "multi-call binary" design issue #14 recommends: the same
+// compiled omca binary serves as both the management CLI and, invoked
+// through a symlink named codex/claude, the PATH shim for that host).
+func IsShimInvocation(invokedName string) bool {
+	_, ok := hostForInvokedName[invokedName]
+	return ok
+}
+
+// Plan is everything a shim invocation needs to launch the real host binary
+// with generation environment injected, computed once by Build and then
+// handed to Plan.Exec. Separating "decide what to run" (Build, pure aside
+// from the two filesystem lookups it needs) from "actually replace this
+// process" (Exec, which never returns on success) is what makes the
+// decision logic unit-testable without needing a subprocess for every case
+// — only Exec itself needs the subprocess-based tests
+// (cmd/omca/shim_test.go), because syscall.Exec cannot be safely called
+// from inside the `go test` process itself.
+type Plan struct {
+	// Host is the canonical host ID ("codex" or "claude-code").
+	Host string
+	// RealBinaryPath is the non-shim binary ResolveReal found.
+	RealBinaryPath string
+	// NativeHomeEnvVar is the environment variable Exec sets to
+	// NativeHomeDir before exec'ing RealBinaryPath (runtime.NativeHomeEnvVar).
+	NativeHomeEnvVar string
+	// NativeHomeDir is the current generation's native-home directory for
+	// Host (runtime.NativeHomeDirName, joined under GenerationDir).
+	NativeHomeDir string
+	// GenerationID is the compiled generation's metadata.id, best-effort —
+	// empty if the current generation's manifest could not be re-read (see
+	// Build's doc comment). When non-empty, Exec sets OMCA_RUN_ID to it
+	// (docs/architecture/runtime.md §7.1).
+	GenerationID string
+	// GenerationDir is the resolved "current" generation directory for Host
+	// under OMCA_STATE_DIR.
+	GenerationDir string
+}
+
+// getEnv returns the value of the last environ entry named key
+// ("KEY=VALUE" parsing; last-occurrence-wins, matching
+// internal/context.Environment.Get's identical semantics), or "" if absent.
+// Duplicated rather than imported from internal/context for the same
+// "keep this package's own dependency surface minimal" reason doc.go gives
+// for not importing internal/context at all.
+func getEnv(environ []string, key string) string {
+	prefix := key + "="
+	value := ""
+	for _, kv := range environ {
+		if rest, ok := strings.CutPrefix(kv, prefix); ok {
+			value = rest
+		}
+	}
+	return value
+}
+
+// Build resolves invokedName ("codex" or "claude") into a Plan using only
+// environ — the shim's own received environment, normally os.Environ() —
+// and two filesystem lookups: the real binary (ResolveReal, non-recursive
+// per doc.go) and the worktree's current generation directory for this host
+// (runtime.CurrentGenerationDir, reading the pointer `omca env`/`omca run`
+// already established under OMCA_STATE_DIR). It performs no host-version
+// detection and no observation of its own — by the time a shim invocation
+// happens, that work was already done once, when the generation was
+// compiled.
+//
+// Every failure mode here is a clear, actionable error (never a silent
+// fallback to an unmanaged launch): OMCA_STATE_DIR unset, no "current"
+// pointer for this host, or a pointer whose generation directory has no
+// native-home directory all mean "run `omca env` again," and Build says so.
+func Build(invokedName string, environ []string) (Plan, error) {
+	host, ok := hostForInvokedName[invokedName]
+	if !ok {
+		return Plan{}, fmt.Errorf("shim: Build: %q is not a recognized OMCA shim entry point (only codex, claude)", invokedName)
+	}
+
+	envVar, err := runtime.NativeHomeEnvVar(host)
+	if err != nil {
+		return Plan{}, fmt.Errorf("shim: Build: %w", err)
+	}
+	homeDirName, err := runtime.NativeHomeDirName(host)
+	if err != nil {
+		return Plan{}, fmt.Errorf("shim: Build: %w", err)
+	}
+
+	shimDir := getEnv(environ, "OMCA_SHIM_DIR")
+	realPath, err := ResolveReal(invokedName, getEnv(environ, "PATH"), shimDir)
+	if err != nil {
+		return Plan{}, fmt.Errorf("shim: Build: %w", err)
+	}
+
+	stateDir := getEnv(environ, "OMCA_STATE_DIR")
+	if stateDir == "" {
+		return Plan{}, fmt.Errorf("shim: Build: OMCA_STATE_DIR is not set in this shell's environment; run `eval \"$(omca env)\"` (usually via direnv's .envrc) before invoking %s", invokedName)
+	}
+	genDir, err := runtime.CurrentGenerationDir(stateDir, host)
+	if err != nil {
+		return Plan{}, fmt.Errorf("shim: Build: no managed generation found for %s under %s: %w (run `omca env` again)", host, stateDir, err)
+	}
+
+	// Best-effort: OMCA_RUN_ID is documentation/diagnostic value
+	// (docs/architecture/runtime.md §7.1), not a safety gate — the
+	// directory-existence check on nativeHomeDir below is what actually
+	// guards against launching against a broken generation, so a manifest
+	// this package cannot re-read does not block the launch.
+	genID := ""
+	if gen, readErr := runtime.ReadGenerationManifest(genDir); readErr == nil {
+		genID = gen.Metadata.ID
+	}
+
+	nativeHomeDir := filepath.Join(genDir, "hosts", host, surfaceCLI, homeDirName)
+	if info, statErr := os.Stat(nativeHomeDir); statErr != nil || !info.IsDir() {
+		return Plan{}, fmt.Errorf("shim: Build: current generation %s for %s has no %s directory at %s; run `omca env` again", genDir, host, homeDirName, nativeHomeDir)
+	}
+
+	return Plan{
+		Host:             host,
+		RealBinaryPath:   realPath,
+		NativeHomeEnvVar: envVar,
+		NativeHomeDir:    nativeHomeDir,
+		GenerationID:     genID,
+		GenerationDir:    genDir,
+	}, nil
+}
