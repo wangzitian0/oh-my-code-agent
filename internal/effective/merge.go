@@ -90,6 +90,66 @@ func ResolveGroup(group LogicalGroup, hk domain.HostKnowledge, capOps domain.Cap
 	distinct := distinctByContent(group.Candidates)
 	if len(distinct) == 1 {
 		winner := distinct[0]
+		// A denial must be applied per physical Candidate, not just to the
+		// arbitrary distinctByContent representative: several Candidates
+		// can share identical content (that is exactly why len(distinct)
+		// is 1), and opts.DeniedRefs/domain.DispositionDenied is
+		// caller-communicated ground truth about a policy exclusion,
+		// independent of whether this concept even has a qualified
+		// precedence program to "resolve" a real collision with — a denial
+		// is not a collision to adjudicate, it is a fact already decided.
+		// Checking only winner would either (a) declare "nothing active"
+		// when a non-denied duplicate-content survivor exists, or (b)
+		// leave a denied Ref sitting in ActiveSources when winner itself
+		// happens not to be denied. Mirrors resolveDenyWins's own survivor-
+		// filtering semantics exactly, so this trivial-content-agreement
+		// path and a real multi-candidate DENY_WINS resolution never
+		// diverge on how a denial is honored.
+		var survivors []Candidate
+		var deniedRefs []string
+		for _, c := range group.Candidates {
+			if isDenied(c, opts.DeniedRefs) {
+				deniedRefs = append(deniedRefs, c.Ref)
+				continue
+			}
+			survivors = append(survivors, c)
+		}
+		if len(deniedRefs) > 0 {
+			sort.Strings(deniedRefs)
+			if len(survivors) == 0 {
+				return &EffectiveEntry{
+					Concept:   group.Concept,
+					LogicalID: group.LogicalID,
+					Provenance: Provenance{
+						IgnoredSources: deniedRefs,
+						Constraints:    []string{"DENY_WINS: every candidate is denied"},
+					},
+					EvidenceLevel: highestEvidence(group.Candidates),
+					Guarantee:     domain.GuaranteeHard,
+					Confirmed:     highestEvidence(group.Candidates).Rank() >= domain.EvidenceLevelHostReported.Rank(),
+					Reason:        fmt.Sprintf("every physical source for %q is denied; nothing active", group.LogicalID),
+				}, nil
+			}
+			// Every survivor still agrees byte-for-byte (that invariant is
+			// what put this group in the len(distinct)==1 branch to begin
+			// with; removing denied candidates cannot introduce a new
+			// disagreement among the ones that remain).
+			survivorRefs := candidateRefs(survivors)
+			return &EffectiveEntry{
+				Concept:   group.Concept,
+				LogicalID: group.LogicalID,
+				Provenance: Provenance{
+					SelectedSource: survivors[0].Ref,
+					ActiveSources:  survivorRefs,
+					IgnoredSources: deniedRefs,
+					Constraints:    []string{"DENY_WINS: applicable denials removed the rest"},
+				},
+				EvidenceLevel: highestEvidence(group.Candidates),
+				Guarantee:     domain.GuaranteeHard,
+				Confirmed:     highestEvidence(group.Candidates).Rank() >= domain.EvidenceLevelHostReported.Rank(),
+				Reason:        fmt.Sprintf("%d of %d physical sources for %q are denied; the rest agree byte-for-byte", len(deniedRefs), len(group.Candidates), group.LogicalID),
+			}, nil
+		}
 		refs := candidateRefs(group.Candidates)
 		reason := fmt.Sprintf("only one physical source for %q", group.LogicalID)
 		if len(group.Candidates) > 1 {
@@ -146,6 +206,16 @@ func ResolveGroup(group LogicalGroup, hk domain.HostKnowledge, capOps domain.Cap
 
 func capabilityQualified(capOps domain.CapabilityOps) bool {
 	return capOps.Resolve == domain.CapabilityExact || capOps.Resolve == domain.CapabilityCompatible
+}
+
+// isDenied reports whether c is excluded by an applicable deny policy:
+// either named explicitly in deniedRefs (a caller may know about a deny
+// policy c's own Disposition does not yet reflect) or already carrying
+// domain.DispositionDenied. Shared by ResolveGroup's single-candidate fast
+// path and resolveDenyWins so a denial is honored identically regardless of
+// how many other candidates happen to be in the group.
+func isDenied(c Candidate, deniedRefs map[string]bool) bool {
+	return deniedRefs[c.Ref] || c.Disposition == domain.DispositionDenied
 }
 
 // applyOperator applies operator's real merge semantics to group, once both
@@ -500,7 +570,7 @@ func resolveDenyWins(group LogicalGroup, program domain.PrecedenceProgram, denie
 	var survivors []Candidate
 	var deniedRefs []string
 	for _, c := range group.Candidates {
-		if denied[c.Ref] || c.Disposition == domain.DispositionDenied {
+		if isDenied(c, denied) {
 			deniedRefs = append(deniedRefs, c.Ref)
 			continue
 		}

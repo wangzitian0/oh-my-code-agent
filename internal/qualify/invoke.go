@@ -100,7 +100,11 @@ func RunInvocation(ctx context.Context, sb *Sandbox, manifest InvocationManifest
 
 	cmd := exec.CommandContext(runCtx, binaryPath, manifest.Invoke.Args...)
 	cmd.Env = sb.Env(pathEnv)
-	cmd.Dir = sb.Home
+	dir, err := invocationDir(sb, manifest.Cwd)
+	if err != nil {
+		return InvocationResult{}, fmt.Errorf("qualify: RunInvocation: %w", err)
+	}
+	cmd.Dir = dir
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -118,6 +122,26 @@ func RunInvocation(ctx context.Context, sb *Sandbox, manifest InvocationManifest
 		Err:       runErr,
 	}
 	return result, nil
+}
+
+// invocationDir resolves cwd (InvocationManifest.Cwd, already validated
+// elsewhere to be exactly "project" or "home") to the sandbox directory
+// RunInvocation should actually launch the binary from. Previously this was
+// hardcoded to sb.Home regardless of cwd: a fixture case declaring
+// `cwd: project` (meant to probe cwd-dependent native behavior, e.g.
+// whether a host resolves root-to-cwd project config) was silently invoked
+// from sb.Home instead — masked so far only because allowedInvokeArgs
+// restricts real invocations to cwd-independent flags (--version/--help/
+// -v/-h), never because the field didn't matter.
+func invocationDir(sb *Sandbox, cwd string) (string, error) {
+	switch cwd {
+	case "project":
+		return sb.Project, nil
+	case "home":
+		return sb.Home, nil
+	default:
+		return "", fmt.Errorf("invocationDir: cwd must be %q or %q, got %q", "project", "home", cwd)
+	}
 }
 
 // lookPathIn resolves name to an executable path using pathEnv (a

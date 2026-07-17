@@ -164,6 +164,53 @@ func TestObserve_Directory_SymlinkedChainSegment_NotFollowed(t *testing.T) {
 	}
 }
 
+// TestObserve_Directory_SymlinkedChainSegment_TwoLevelsDeep_NotFollowed
+// proves the containment fix propagates past the symlinked segment itself:
+// checking each chain segment's os.Lstat result in isolation is not
+// enough, because os.Lstat only refuses to follow a symlink in the *final*
+// path element it is given — a segment built by joining past an already-
+// symlinked earlier segment (WorktreeRoot/a/b, where "a" is the symlink)
+// still resolves cleanly through the OS's normal intermediate-component
+// symlink-following and would pass a per-segment-only check even though the
+// whole path sits outside WorktreeRoot.
+func TestObserve_Directory_SymlinkedChainSegment_TwoLevelsDeep_NotFollowed(t *testing.T) {
+	tr := newCodexTree(t)
+
+	outside := filepath.Join(filepath.Dir(tr.WorktreeRoot), "outside-worktree-nested")
+	mustWriteFile(t, filepath.Join(outside, "b", "AGENTS.md"), "# canary: must never be observed (two levels deep)\n")
+
+	if err := os.MkdirAll(tr.WorktreeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir worktree root: %v", err)
+	}
+	symlinkPath := filepath.Join(tr.WorktreeRoot, "a")
+	if err := os.Symlink(outside, symlinkPath); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	req := tr.request("0.144.5")
+	// WorkingDirectory = WorktreeRoot/a/b: directoryChain produces both
+	// "WorktreeRoot/a" (the symlink itself, caught directly) and
+	// "WorktreeRoot/a/b" (the segment this test exists to prove is also
+	// blocked, even though os.Lstat("WorktreeRoot/a/b") alone would resolve
+	// cleanly to the real, non-symlink outside/b directory).
+	req.WorkingDirectory = filepath.Join(symlinkPath, "b")
+
+	obs, err := Observe(req)
+	if err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+	assertValid(t, obs)
+
+	if got := filterByScope(obs, "directory"); len(got) != 0 {
+		t.Fatalf("directory-scope observations two levels past a symlinked chain segment: got %d, want 0: %+v", len(got), got)
+	}
+	for _, o := range obs {
+		if o.Spec.Source.Path == filepath.Join(outside, "b", "AGENTS.md") {
+			t.Fatalf("found an observation for %s: the outside-worktree canary leaked through two levels past a symlinked directory-chain segment", o.Spec.Source.Path)
+		}
+	}
+}
+
 func TestObserve_Directory_WorkingDirectoryWithoutWorktreeRoot_Errors(t *testing.T) {
 	req := Request{
 		Detection:        hostcontext.HostDetection{Host: "codex", Surface: "cli", Version: "0.144.5"},

@@ -658,3 +658,64 @@ func TestSourceEntryFingerprint_DiffersOnScopeAndCapabilityGap(t *testing.T) {
 		t.Error("sourceEntryFingerprint collided between a Scope-only change and a CapabilityGap-only change")
 	}
 }
+
+// TestAggregateSources_HostNeutralTie_OrderIndependentOfCallerHostOrder
+// proves the review-found fix: a host-neutral asset (no `hosts:` selector)
+// produces an identical (Concept, Source, Reason) tuple on every host in a
+// multi-host generation -- a guaranteed tie the comparator's first three
+// keys never break. sort.Slice is not stable, so without Host as a final
+// tiebreaker, that tie's relative position in the generation-wide Sources
+// list depended on which host happened to appear first in the caller's
+// perHost slice, breaking this codebase's otherwise-universal "shuffle
+// input order, get byte-identical output" determinism guarantee for the
+// human/audit-facing manifest (SourceDigest itself was never affected --
+// see sourceEntryFingerprint, folded through a separately sorted list).
+func TestAggregateSources_HostNeutralTie_OrderIndependentOfCallerHostOrder(t *testing.T) {
+	tied := domain.GenerationSourceEntry{
+		Concept: "instruction", Source: "company:example/security-default",
+		Included: true, Reason: "included: company baseline",
+	}
+	codexOnly := domain.GenerationSourceEntry{
+		Concept: "mcp_server", Source: "codex-only-server", Included: true, Reason: "included",
+	}
+
+	codexFirst := []hostSourceEntry{
+		{Host: "codex", Sources: []domain.GenerationSourceEntry{withHost(codexOnly, "codex"), withHost(tied, "codex")}},
+		{Host: "claude-code", Sources: []domain.GenerationSourceEntry{withHost(tied, "claude-code")}},
+	}
+	claudeFirst := []hostSourceEntry{
+		{Host: "claude-code", Sources: []domain.GenerationSourceEntry{withHost(tied, "claude-code")}},
+		{Host: "codex", Sources: []domain.GenerationSourceEntry{withHost(codexOnly, "codex"), withHost(tied, "codex")}},
+	}
+
+	sourcesA, digestA, err := aggregateSources(codexFirst)
+	if err != nil {
+		t.Fatalf("aggregateSources(codex-first): %v", err)
+	}
+	sourcesB, digestB, err := aggregateSources(claudeFirst)
+	if err != nil {
+		t.Fatalf("aggregateSources(claude-first): %v", err)
+	}
+
+	if digestA != digestB {
+		t.Errorf("sourceDigest differs by caller host order: %q vs %q (should be order-independent regardless of this fix)", digestA, digestB)
+	}
+	if len(sourcesA) != len(sourcesB) {
+		t.Fatalf("got %d vs %d sources", len(sourcesA), len(sourcesB))
+	}
+	for i := range sourcesA {
+		// Compare the whole struct, not just Host/Source: GenerationSourceEntry
+		// is entirely comparable (string/bool fields only), and limiting the
+		// assertion to two fields would miss an ordering-instability bug that
+		// happened to leave Concept/Reason/Included/Scope/CapabilityGap/
+		// TrackingIssue mismatched while Host/Source coincidentally matched.
+		if sourcesA[i] != sourcesB[i] {
+			t.Errorf("Sources[%d] differs by caller host order:\n  %+v\nvs\n  %+v", i, sourcesA[i], sourcesB[i])
+		}
+	}
+}
+
+func withHost(e domain.GenerationSourceEntry, host string) domain.GenerationSourceEntry {
+	e.Host = host
+	return e
+}
