@@ -91,6 +91,20 @@ func Bootstrap(req BootstrapRequest, outputDir string) (domain.Generation, error
 		artifacts = append(artifacts, domain.GenerationArtifact{Path: f.RelPath, Digest: digest})
 	}
 
+	// The virtual-home directory (VirtualHomeDirName, compile.go) is always
+	// created, empty, alongside the native-home directory -- unlike
+	// nativeHomeDir, nothing is ever written inside it (files above never
+	// target it), so it needs its own explicit MkdirAll rather than coming
+	// into existence as a side effect of writing a file into it. This is
+	// what internal/shim/exec.go's Plan.Exec and cmd/omca/run.go's
+	// runIsolated point HOME at (docs/architecture/runtime.md §7.1), closing
+	// the real $HOME/.agents/skills leak both hosts share -- see
+	// VirtualHomeDirName's doc comment.
+	virtualHomeDir := filepath.Join(outputDir, "hosts", req.Detection.Host, req.surface(), VirtualHomeDirName)
+	if err := os.MkdirAll(virtualHomeDir, 0o755); err != nil {
+		return domain.Generation{}, fmt.Errorf("runtime: Bootstrap: %w", err)
+	}
+
 	gen := domain.Generation{
 		APIVersion: domain.SupportedAPIVersion,
 		Kind:       "Generation",

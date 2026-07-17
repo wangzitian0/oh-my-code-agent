@@ -216,6 +216,7 @@ func MeasureSynthetic(baseDir string, cfg MeasureConfig) (Result, error) {
 	// this measurement has no separate shim directory of its own to exclude
 	// from fakeBinDir.
 	shimEnviron := []string{
+		"HOME=" + filepath.Join(steadyRoot, "home"),
 		"PATH=" + fakeBinDir,
 		"OMCA_SHIM_DIR=" + filepath.Join(baseDir, "nonexistent-shim-dir"),
 		"OMCA_STATE_DIR=" + steadyCfg.WorktreeStateDir,

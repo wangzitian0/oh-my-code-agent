@@ -167,6 +167,18 @@ func runNative(stderr io.Writer, host, binName string, env hostcontext.Environme
 // detecting every DetectedHostIDs entry, not just the one host `omca run`
 // targets, and StatusResult.ContextID is documented as optional/best-effort
 // for exactly this reason.
+//
+// The exec'd environment also carries HOME (set to the compiled
+// generation's virtual-home directory) and OMCA_REAL_HOME (set to the
+// caller's real HOME) — docs/architecture/runtime.md §7.1's full documented
+// env set. This closes a real isolation gap this project had until this
+// fix: the native-home variable alone (CODEX_HOME/CLAUDE_CONFIG_DIR) never
+// stopped a host from resolving its own "$HOME/.agents/skills" native Skill
+// directory (internal/context/host.go's codexNativeHomes/claudeNativeHomes
+// both append that entry independent of either override), so a real,
+// unmanaged, unselected Skill source still loaded on every `omca run`
+// launch — see TestRunIsolated_EndToEnd_VirtualizesHome (run_exec_test.go)
+// for the regression proof.
 func runIsolated(stderr io.Writer, host string, realEnv hostcontext.Environment, passthrough []string) int {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -244,9 +256,25 @@ func runIsolated(stderr io.Writer, host string, realEnv hostcontext.Environment,
 		surface = "cli"
 	}
 	nativeHomeDir := filepath.Join(outputDir, "hosts", host, surface, homeDirName)
+	// virtualHomeDir mirrors nativeHomeDir's own construction, pointing
+	// instead at the empty, compiler-created directory (runtime.
+	// VirtualHomeDirName, internal/runtime/compile.go) this generation's
+	// EnsureGeneration call above already ensured exists. Setting HOME to it
+	// (docs/architecture/runtime.md §7.1) is what actually stops a real host
+	// binary from resolving its own native, unmanaged $HOME/.agents/skills
+	// (internal/context/host.go's codexNativeHomes/claudeNativeHomes) --
+	// nativeHomeDir/envVar alone (CODEX_HOME/CLAUDE_CONFIG_DIR) never
+	// covered that path, since both host adapters compute it directly from
+	// HOME regardless of either override. realEnv.Get("HOME") is guaranteed
+	// non-empty and absolute here: hostcontext.DetectHost (called above, via
+	// detectEnv which is realEnv with the shim dir filtered out of PATH)
+	// already rejects a request whose Environment has no absolute HOME.
+	virtualHomeDir := filepath.Join(outputDir, "hosts", host, surface, runtime.VirtualHomeDirName)
 
 	overrides := map[string]string{
 		envVar:             nativeHomeDir,
+		"HOME":             virtualHomeDir,
+		"OMCA_REAL_HOME":   realEnv.Get("HOME"),
 		"OMCA_RUN_ID":      gen.Metadata.ID,
 		"OMCA_STATE_DIR":   worktreeStateDir,
 		"OMCA_WORKTREE_ID": wt.ID,

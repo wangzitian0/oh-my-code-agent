@@ -168,6 +168,7 @@ func measureRealEnvironmentHost(baseDir, host string, realEnv hostcontext.Enviro
 		return RealEnvironmentHostResult{}, fmt.Errorf("perf: MeasureRealEnvironment: %w", err)
 	}
 	shimEnviron := []string{
+		"HOME=" + realEnv.Get("HOME"),
 		"PATH=" + filepath.Dir(hd.BinaryPath),
 		"OMCA_SHIM_DIR=" + filepath.Join(baseDir, "nonexistent-shim-dir-"+host),
 		"OMCA_STATE_DIR=" + steadyCfg.WorktreeStateDir,

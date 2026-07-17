@@ -83,6 +83,20 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// containsExactLine reports whether output (fakehost's newline-delimited
+// "KEY=VALUE" environment dump) contains a line exactly equal to line --
+// unlike strings.Contains(output, line), this does not false-positive when
+// line is itself a substring of a different, longer dumped variable (e.g.
+// "HOME=<value>" is a literal substring of "OMCA_REAL_HOME=<value>").
+func containsExactLine(output, line string) bool {
+	for _, l := range strings.Split(output, "\n") {
+		if l == line {
+			return true
+		}
+	}
+	return false
+}
+
 // packageDir locates cmd/omca's own source directory via runtime.Caller,
 // the same technique internal/observe/helpers_test.go's repoFixturesDir and
 // internal/qualify/fixtures_test.go use, so `go build` below resolves
@@ -196,8 +210,10 @@ func TestShim_EndToEnd_NonRecursionAndEnvInjection(t *testing.T) {
 	}
 
 	markerFile := filepath.Join(t.TempDir(), "invocations.log")
+	realHome := t.TempDir()
 
 	environ := []string{
+		"HOME=" + realHome,
 		"PATH=" + shimDir + string(os.PathListSeparator) + realDir,
 		"OMCA_SHIM_DIR=" + shimDir,
 		"OMCA_STATE_DIR=" + worktreeStateDir,
@@ -230,6 +246,32 @@ func TestShim_EndToEnd_NonRecursionAndEnvInjection(t *testing.T) {
 	wantLine := "CODEX_HOME=" + wantHomeDir
 	if !strings.Contains(stdout.String(), wantLine) {
 		t.Errorf("fakehost's dumped environment did not contain %q; stdout:\n%s", wantLine, stdout.String())
+	}
+
+	// docs/architecture/runtime.md §7.1's other half: HOME itself must also
+	// be redirected to the generation's virtual-home directory (never
+	// realHome, the scratch $HOME this test's environ actually set), and
+	// OMCA_REAL_HOME must carry realHome forward so the exec'd process (or
+	// anything it spawns) can still recover the caller's real home. Before
+	// this fix, neither line was ever present -- HOME passed through
+	// unmodified, so a real host binary launched this way still resolved its
+	// own native, unmanaged $HOME/.agents/skills.
+	wantVirtualHomeDir := filepath.Join(generationDir, "hosts", "codex", "cli", "virtual-home")
+	wantHomeLine := "HOME=" + wantVirtualHomeDir
+	if !containsExactLine(stdout.String(), wantHomeLine) {
+		t.Errorf("fakehost's dumped environment did not contain the exact line %q (HOME was not virtualized); stdout:\n%s", wantHomeLine, stdout.String())
+	}
+	// A plain substring check for "HOME="+realHome would also match inside
+	// the separate "OMCA_REAL_HOME=<realHome>" line below (it contains
+	// "HOME=<realHome>" as a substring of its own name) -- this must compare
+	// a whole dumped-environment line, not a substring, to actually prove
+	// the "HOME" variable itself was not left at realHome.
+	if containsExactLine(stdout.String(), "HOME="+realHome) {
+		t.Errorf("fakehost's dumped environment still contains the real scratch HOME (%s) as HOME; isolation was not applied; stdout:\n%s", realHome, stdout.String())
+	}
+	wantRealHomeLine := "OMCA_REAL_HOME=" + realHome
+	if !containsExactLine(stdout.String(), wantRealHomeLine) {
+		t.Errorf("fakehost's dumped environment did not contain the exact line %q; stdout:\n%s", wantRealHomeLine, stdout.String())
 	}
 
 	markerData, err := os.ReadFile(markerFile)
@@ -270,6 +312,7 @@ func TestShim_SIGINT_ExitCodePassthrough(t *testing.T) {
 	}
 
 	environ := []string{
+		"HOME=" + t.TempDir(),
 		"PATH=" + shimDir + string(os.PathListSeparator) + realDir,
 		"OMCA_SHIM_DIR=" + shimDir,
 		"OMCA_STATE_DIR=" + worktreeStateDir,

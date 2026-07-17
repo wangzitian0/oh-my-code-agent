@@ -107,11 +107,13 @@ func TestBuild_ResolvesRealBinaryAndInjectsGenerationEnv(t *testing.T) {
 	writeFakeExecutable(t, shimDir, "codex")
 	realDir := t.TempDir()
 	wantReal := writeFakeExecutable(t, realDir, "codex")
+	realHome := t.TempDir()
 
 	environ := []string{
 		"PATH=" + shimDir + string(os.PathListSeparator) + realDir,
 		"OMCA_SHIM_DIR=" + shimDir,
 		"OMCA_STATE_DIR=" + stateDir,
+		"HOME=" + realHome,
 	}
 
 	plan, err := Build("codex", environ)
@@ -133,6 +135,35 @@ func TestBuild_ResolvesRealBinaryAndInjectsGenerationEnv(t *testing.T) {
 	}
 	if plan.GenerationID != gen.Metadata.ID {
 		t.Errorf("GenerationID = %q, want %q", plan.GenerationID, gen.Metadata.ID)
+	}
+	wantVirtualHomeDir := filepath.Join(outputDir, "hosts", "codex", "cli", "virtual-home")
+	if plan.VirtualHomeDir != wantVirtualHomeDir {
+		t.Errorf("VirtualHomeDir = %q, want %q", plan.VirtualHomeDir, wantVirtualHomeDir)
+	}
+	if plan.RealHomeDir != realHome {
+		t.Errorf("RealHomeDir = %q, want %q", plan.RealHomeDir, realHome)
+	}
+}
+
+// TestBuild_MissingHOME proves Build fails closed, with a clear actionable
+// error, when the shim's own received environment has no HOME at all --
+// mirroring TestBuild_MissingStateDir's identical fail-closed treatment of
+// OMCA_STATE_DIR. Without this check, Exec (exec.go) would silently set
+// OMCA_REAL_HOME="" on the exec'd process: indistinguishable from "this
+// really is empty" rather than "the real value was never known."
+func TestBuild_MissingHOME(t *testing.T) {
+	shimDir := t.TempDir()
+	writeFakeExecutable(t, shimDir, "codex")
+	realDir := t.TempDir()
+	writeFakeExecutable(t, realDir, "codex")
+
+	environ := []string{
+		"PATH=" + shimDir + string(os.PathListSeparator) + realDir,
+		"OMCA_SHIM_DIR=" + shimDir,
+		"OMCA_STATE_DIR=" + t.TempDir(),
+	}
+	if _, err := Build("codex", environ); err == nil {
+		t.Fatal("Build with no HOME: want error, got nil")
 	}
 }
 
@@ -157,6 +188,7 @@ func TestBuild_MissingStateDir(t *testing.T) {
 	environ := []string{
 		"PATH=" + shimDir + string(os.PathListSeparator) + realDir,
 		"OMCA_SHIM_DIR=" + shimDir,
+		"HOME=" + t.TempDir(),
 	}
 	if _, err := Build("codex", environ); err == nil {
 		t.Fatal("Build with no OMCA_STATE_DIR: want error, got nil")
@@ -177,6 +209,7 @@ func TestBuild_NoCurrentGeneration(t *testing.T) {
 		"PATH=" + shimDir + string(os.PathListSeparator) + realDir,
 		"OMCA_SHIM_DIR=" + shimDir,
 		"OMCA_STATE_DIR=" + stateDir,
+		"HOME=" + t.TempDir(),
 	}
 	if _, err := Build("codex", environ); err == nil {
 		t.Fatal("Build with no compiled generation: want error, got nil")
