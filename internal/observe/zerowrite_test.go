@@ -119,10 +119,28 @@ func TestObserve_ZeroWriteZeroExec_SandboxedRealisticHome(t *testing.T) {
 				t.Fatalf("NewSandbox: %v", err)
 			}
 
+			// PR-16 (issue #20): a synthetic system/managed root, exercising
+			// the same new code paths as the rest of this test — never the
+			// real machine's /etc/codex or managed policy directory (see
+			// system.go's SystemRoot doc comment).
+			systemRoot := filepath.Join(sb.Root, "system-root")
+			workingDir := filepath.Join(sb.Project, "nested", "dir")
+
 			var req Request
 			switch host {
 			case "codex":
 				realisticSandboxedCodexHome(t, sb)
+				// New PR-16 source-reading code paths: multiplexed hook/
+				// policy tags on config.toml (already populated by
+				// realisticSandboxedCodexHome's mcp-merge fixture), a
+				// discoverOnly credential file, a plugin.json marker, a
+				// system root, and a nested directory-chain level.
+				mustWriteFile(t, filepath.Join(sb.CodexHome, "auth.json"), `{"OPENAI_API_KEY":"sandboxed-not-a-real-secret"}`)
+				mustWriteFile(t, filepath.Join(sb.CodexHome, "plugins", "demo", ".codex-plugin", "plugin.json"), `{"name":"demo"}`)
+				mustWriteFile(t, filepath.Join(systemRoot, "config.toml"), "approval_policy = \"never\"\n")
+				mustWriteFile(t, filepath.Join(systemRoot, "skills", "audited", "SKILL.md"), "---\nname: audited\n---\n")
+				mustWriteFile(t, filepath.Join(workingDir, "AGENTS.md"), "# nested\n")
+
 				req = Request{
 					Detection: hostcontext.HostDetection{
 						Host:    "codex",
@@ -133,10 +151,21 @@ func TestObserve_ZeroWriteZeroExec_SandboxedRealisticHome(t *testing.T) {
 							{Name: "HOME/.agents/skills", Path: filepath.Join(sb.Home, ".agents", "skills")},
 						},
 					},
-					WorktreeRoot: sb.Project,
+					WorktreeRoot:     sb.Project,
+					SystemRoots:      []SystemRoot{{Name: "ETC_CODEX", Path: systemRoot}},
+					WorkingDirectory: workingDir,
+					SessionInputs: []SessionInput{
+						{Concept: conceptMCPServer, Kind: "flag", Name: "-c mcp_servers.x.command", Value: "./x"},
+					},
 				}
 			case "claude-code":
 				realisticSandboxedClaudeHome(t, sb)
+				mustWriteFile(t, filepath.Join(sb.ClaudeConfigDir, "settings.json"), `{"hooks":{"PreToolUse":[]},"permissions":{"deny":[]},"enabledPlugins":[]}`)
+				mustWriteFile(t, filepath.Join(sb.Project, "CLAUDE.local.md"), "# local, gitignored\n")
+				mustWriteFile(t, filepath.Join(systemRoot, "CLAUDE.md"), "# managed\n")
+				mustWriteFile(t, filepath.Join(systemRoot, "managed-settings.json"), `{"permissions":{"deny":[]}}`)
+				mustWriteFile(t, filepath.Join(workingDir, "CLAUDE.md"), "# nested\n")
+
 				req = Request{
 					Detection: hostcontext.HostDetection{
 						Host:    "claude-code",
@@ -147,7 +176,12 @@ func TestObserve_ZeroWriteZeroExec_SandboxedRealisticHome(t *testing.T) {
 							{Name: "HOME/.agents/skills", Path: filepath.Join(sb.Home, ".agents", "skills")},
 						},
 					},
-					WorktreeRoot: sb.Project,
+					WorktreeRoot:     sb.Project,
+					SystemRoots:      []SystemRoot{{Name: "CLAUDE_MANAGED", Path: systemRoot}},
+					WorkingDirectory: workingDir,
+					SessionInputs: []SessionInput{
+						{Concept: conceptMCPServer, Kind: "flag", Name: "--mcp-config", Value: "extra.json"},
+					},
 				}
 			}
 
@@ -157,7 +191,7 @@ func TestObserve_ZeroWriteZeroExec_SandboxedRealisticHome(t *testing.T) {
 			}
 
 			var watched []string
-			for _, p := range []string{sb.Home, sb.CodexHome, sb.ClaudeConfigDir, sb.Project, sb.Outside} {
+			for _, p := range []string{sb.Home, sb.CodexHome, sb.ClaudeConfigDir, sb.Project, sb.Outside, systemRoot} {
 				if p != "" {
 					watched = append(watched, p)
 				}

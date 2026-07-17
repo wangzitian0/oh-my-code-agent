@@ -73,7 +73,7 @@ func observeRoot(host, hostVersion, surface, scopeKind, root string, rules []sou
 
 		sort.Strings(candidates)
 		for _, path := range candidates {
-			obs, present, err := observeFile(host, hostVersion, surface, rule.concept, scopeKind, root, path)
+			obs, present, err := observeFile(host, hostVersion, surface, rule.concept, scopeKind, root, path, rule.discoverOnly)
 			if err != nil {
 				return nil, err
 			}
@@ -107,7 +107,18 @@ func observeRoot(host, hostVersion, surface, scopeKind, root string, rules []sou
 // adjacent "read only what the declared scope root actually contains"
 // boundary. The symlink's existence is still recorded, at E0, exactly like
 // any other unreadable-content case.
-func observeFile(host, hostVersion, surface, concept, scopeKind, scopeRoot, path string) (domain.Observation, bool, error) {
+//
+// discoverOnly (PR-16, issue #20) forces the same E0-only outcome for a
+// source this package knows, from its physical location and documented
+// purpose alone, may mix permission/trust state with credential material
+// (rules.go's sourceRule.discoverOnly doc comment, e.g. Codex's
+// $CODEX_HOME/auth.json): os.ReadFile is never even called, regardless of
+// whether the file is actually readable by this process, so its content can
+// never enter OpaqueVendorFields or any digest computed from real content —
+// the PR-16 hard safety rule "inventory permission/trust state WITHOUT
+// reading credential material," satisfied structurally rather than by
+// after-the-fact redaction.
+func observeFile(host, hostVersion, surface, concept, scopeKind, scopeRoot, path string, discoverOnly bool) (domain.Observation, bool, error) {
 	info, statErr := os.Lstat(path)
 	if statErr != nil {
 		if os.IsNotExist(statErr) {
@@ -121,9 +132,12 @@ func observeFile(host, hostVersion, surface, concept, scopeKind, scopeRoot, path
 
 	var data []byte
 	readErr := error(nil)
-	if info.Mode()&os.ModeSymlink != 0 {
+	switch {
+	case discoverOnly:
+		readErr = fmt.Errorf("observe: observeFile: %s is a credential-shaped source; content intentionally never read (see rules.go's sourceRule.discoverOnly)", path)
+	case info.Mode()&os.ModeSymlink != 0:
 		readErr = fmt.Errorf("observe: observeFile: %s is a symlink; not followed (scope-containment boundary)", path)
-	} else {
+	default:
 		data, readErr = os.ReadFile(path) // read-only: never write, never exec
 	}
 	obs, err := buildObservation(host, hostVersion, surface, concept, scopeKind, scopeRoot, path, data, readErr)

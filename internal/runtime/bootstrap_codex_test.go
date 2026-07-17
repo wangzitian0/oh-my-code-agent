@@ -56,9 +56,12 @@ func TestBootstrap_Codex_30MCPServersAnd20Skills_NoneLeak(t *testing.T) {
 	if err != nil {
 		t.Fatalf("observe.Observe: %v", err)
 	}
-	if len(obs) != 1+1+skillCount {
-		// config.toml (1) + AGENTS.md (1) + skillCount skills.
-		t.Fatalf("Observe returned %d observations, want %d (sanity check on fixture construction)", len(obs), 2+skillCount)
+	// config.toml (3: mcp_server + hook + policy, see
+	// internal/observe/rules.go's codexUserRules doc comment for why PR-16
+	// multiplexes all three concepts onto this one physical file) +
+	// AGENTS.md (1) + skillCount skills.
+	if len(obs) != 3+1+skillCount {
+		t.Fatalf("Observe returned %d observations, want %d (sanity check on fixture construction)", len(obs), 3+1+skillCount)
 	}
 
 	req := BootstrapRequest{
