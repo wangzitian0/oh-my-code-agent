@@ -52,7 +52,21 @@ func Bootstrap(req BootstrapRequest, outputDir string) (domain.Generation, error
 		return domain.Generation{}, fmt.Errorf("runtime: Bootstrap: %w", err)
 	}
 
-	files, sources, err := compileHostTree(req)
+	files, sources, err := compileHostTreeFn(hostTreeInput{
+		Host:           req.Detection.Host,
+		Surface:        req.surface(),
+		WorktreeRoot:   req.Worktree.Root,
+		Observations:   req.Observations,
+		OMCABinaryPath: req.OMCABinaryPath,
+		// Permissions intentionally left nil: PR-09's fixed M1 bootstrap
+		// policy has no real Desired Graph to resolve a permission policy
+		// from (doc.go), so hostConfigFiles falls back to the same hardcoded
+		// conservative defaults it always has, with zero extra Sources
+		// entries -- every test in this package predating issue #18's
+		// permission-compilation feature keeps passing unchanged.
+		Permissions: nil,
+		Classify:    classify,
+	})
 	if err != nil {
 		return domain.Generation{}, err
 	}
@@ -88,6 +102,12 @@ func Bootstrap(req BootstrapRequest, outputDir string) (domain.Generation, error
 		},
 		Spec: domain.GenerationSpec{
 			DesiredGraphDigest: policyDigest,
+			// OntologyVersion is genuinely general (issue #18, PR-14): it
+			// names the vocabulary revision this build's Concept/Scope/
+			// Intent values were compiled under, independent of whether a
+			// real Desired Graph exists -- a bootstrap generation's
+			// Observations and Sources still use that vocabulary.
+			OntologyVersion: domain.CurrentOntologyVersion,
 			// Knowledge Pack propagation (docs/architecture/runtime.md
 			// §5.3's pending-manifest field list: "Knowledge Pack IDs and
 			// digests") is out of this PR's scope -- no AC requires it, and

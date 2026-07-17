@@ -108,16 +108,8 @@ func (req BootstrapRequest) validate() error {
 	if req.OMCABinaryPath != "" && !filepath.IsAbs(req.OMCABinaryPath) {
 		return fmt.Errorf("runtime: BootstrapRequest: OMCABinaryPath %q is not absolute", req.OMCABinaryPath)
 	}
-	for i, o := range req.Observations {
-		if o.Spec.Host.ID != req.Detection.Host {
-			return fmt.Errorf("runtime: BootstrapRequest: Observations[%d] is for host %q, want %q (every observation must belong to the host this generation is being compiled for)", i, o.Spec.Host.ID, req.Detection.Host)
-		}
-		if o.Spec.Host.Version != req.Detection.Version {
-			return fmt.Errorf("runtime: BootstrapRequest: Observations[%d] was gathered under host version %q, want %q (every observation must match the version this generation is being compiled for)", i, o.Spec.Host.Version, req.Detection.Version)
-		}
-		if o.Spec.Surface != req.surface() {
-			return fmt.Errorf("runtime: BootstrapRequest: Observations[%d] is for surface %q, want %q (every observation must match the surface this generation is being compiled for)", i, o.Spec.Surface, req.surface())
-		}
+	if err := validateObservationsBelongToHost(req.Observations, req.Detection.Host, req.Detection.Version, req.surface()); err != nil {
+		return fmt.Errorf("runtime: BootstrapRequest: %w", err)
 	}
 	return nil
 }
@@ -125,8 +117,48 @@ func (req BootstrapRequest) validate() error {
 // surface returns req.Detection.Surface, defaulting to "cli" exactly like
 // internal/observe.Observe does for the same field.
 func (req BootstrapRequest) surface() string {
-	if req.Detection.Surface != "" {
-		return req.Detection.Surface
+	return surfaceOf(req.Detection)
+}
+
+// surfaceOf returns detection.Surface, defaulting to "cli" exactly like
+// internal/observe.Observe does for the same field. This is the general
+// half of what used to be BootstrapRequest.surface() alone -- factored out
+// so compile_full.go's CompileRequest (one hostcontext.HostDetection per
+// host, no single "the" Detection field to hang a method off) computes the
+// identical default without redefining it.
+func surfaceOf(detection hostcontext.HostDetection) string {
+	if detection.Surface != "" {
+		return detection.Surface
 	}
 	return defaultSurface
+}
+
+// validateObservationsBelongToHost rejects an Observation that does not
+// actually belong to the host/version/surface a generation is being
+// compiled for -- the composition-bug check BootstrapRequest.validate()
+// originally ran inline. Factored out so CompileRequest's per-host
+// validation (compile_full.go) can run the exact same check for each of its
+// several hosts without redefining it: both entry points have a "some
+// Observations were computed for the wrong host" caller-composition bug to
+// catch, and it is exactly the same bug either way (e.g. accidentally
+// passing both hosts' Observe output into one host's slot, or observations
+// gathered under a stale host version after an upgrade -- either would
+// otherwise silently leak one host's sources into another host's
+// generation, or let a generation ID digest a Detection.Version while the
+// actual observed sources came from a different version, producing a
+// manifest that cannot be reproduced or verified from its own stated
+// inputs).
+func validateObservationsBelongToHost(observations []domain.Observation, host, version, surface string) error {
+	for i, o := range observations {
+		if o.Spec.Host.ID != host {
+			return fmt.Errorf("Observations[%d] is for host %q, want %q (every observation must belong to the host this generation is being compiled for)", i, o.Spec.Host.ID, host)
+		}
+		if o.Spec.Host.Version != version {
+			return fmt.Errorf("Observations[%d] was gathered under host version %q, want %q (every observation must match the version this generation is being compiled for)", i, o.Spec.Host.Version, version)
+		}
+		if o.Spec.Surface != surface {
+			return fmt.Errorf("Observations[%d] is for surface %q, want %q (every observation must match the surface this generation is being compiled for)", i, o.Spec.Surface, surface)
+		}
+	}
+	return nil
 }

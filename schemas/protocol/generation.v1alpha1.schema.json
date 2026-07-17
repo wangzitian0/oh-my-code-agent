@@ -16,6 +16,10 @@
       "properties": {
         "id": { "type": "string", "minLength": 1 },
         "worktree": { "type": "string", "minLength": 1 },
+        "invocation": {
+          "type": "string",
+          "description": "Additive v1alpha1 field (issue #18, PR-14): free-text description of what triggered this generation to be compiled, e.g. 'omca run codex'. Optional; a bootstrap generation (PR-09) always omits it."
+        },
         "parent": {
           "type": ["string", "null"],
           "description": "Previous generation ID this one supersedes, or null for the bootstrap generation."
@@ -97,6 +101,68 @@
             },
             "if": { "properties": { "capabilityGap": { "const": true } } },
             "then": { "required": ["capabilityGap", "trackingIssue"] }
+          }
+        },
+        "ontologyVersion": {
+          "type": "string",
+          "description": "Additive v1alpha1 field (issue #18, PR-14): the docs/ontology/README.md vocabulary revision this generation's Concept/Scope/Intent values were compiled under (internal/domain.CurrentOntologyVersion)."
+        },
+        "sourceDigest": {
+          "description": "Additive v1alpha1 field (issue #18, PR-14): canonical digest over spec.sources, the 'source... digest' half of docs/architecture/runtime.md §5.3's 'source and desired-state digests' pending-manifest line.",
+          "oneOf": [{ "$ref": "common.v1alpha1.schema.json#/$defs/digest" }, { "const": "" }]
+        },
+        "desiredState": {
+          "type": "object",
+          "description": "Additive v1alpha1 field (issue #18, PR-14): names the exact Profile/Activation/Exception documents desiredGraphDigest was computed from -- §5.3's 'selected Profiles and Activation'. Nil/omitted on a bootstrap generation (PR-09), which has no real Desired Graph.",
+          "additionalProperties": false,
+          "properties": {
+            "profiles": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id", "digest"],
+                "properties": {
+                  "id": { "type": "string", "minLength": 1 },
+                  "digest": { "$ref": "common.v1alpha1.schema.json#/$defs/digest" }
+                }
+              }
+            },
+            "activation": {
+              "oneOf": [{ "$ref": "common.v1alpha1.schema.json#/$defs/digest" }, { "const": "" }]
+            },
+            "exceptions": {
+              "type": "array",
+              "items": { "$ref": "common.v1alpha1.schema.json#/$defs/digest" }
+            }
+          }
+        },
+        "diff": {
+          "type": "object",
+          "description": "Reserved for §5.3's 'native/current/pending diff' line. Always omitted in this PR (issue #18, PR-14) -- a real diff requires the Activation transaction, PR-15 scope.",
+          "additionalProperties": false,
+          "properties": {
+            "nativeChanged": { "type": "array", "items": { "type": "string" } },
+            "currentChanged": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "riskConfirmations": {
+          "type": "array",
+          "description": "Reserved for §5.3's 'risk confirmations' line. Always empty in this PR (issue #18, PR-14) -- no risk-confirmation workflow exists yet to source real values from.",
+          "items": { "type": "string" }
+        },
+        "expectedEvidence": {
+          "type": "array",
+          "description": "Reserved for §5.3's 'expected evidence and guarantee' line. Always empty in this PR (issue #18, PR-14) -- a real expectation needs the Verify step and its evidence taxonomy, PR-22 scope.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["host"],
+            "properties": {
+              "host": { "$ref": "common.v1alpha1.schema.json#/$defs/hostId" },
+              "evidence": { "type": "string" },
+              "guarantee": { "type": "string" }
+            }
           }
         }
       }

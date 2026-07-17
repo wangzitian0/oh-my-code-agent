@@ -1,0 +1,26 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "Generation",
+  "metadata": {
+    "id": "generation:sha256:fce460264c3d6cedd37ec0cd28eedf86aed8dd7e97bf85bb90672404960648be",
+    "worktree": "worktree:sha256:abc",
+    "createdAt": "2026-07-17T00:00:00Z"
+  },
+  "spec": {
+    "desiredGraphDigest": "sha256:fce460264c3d6cedd37ec0cd28eedf86aed8dd7e97bf85bb90672404960648be",
+    "desiredState": {
+      "profiles": [
+        { "id": "company:example", "digest": "not-a-real-digest" }
+      ]
+    },
+    "knowledgePacks": [],
+    "hosts": {
+      "codex": {
+        "surface": "cli",
+        "adapterId": "adapter:codex",
+        "ownership": "managed"
+      }
+    },
+    "status": "pending"
+  }
+}
