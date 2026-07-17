@@ -15,15 +15,38 @@ import (
 	"github.com/wangzitian0/oh-my-code-agent/internal/runtime"
 )
 
-// shimEntryNames are the two PATH entry points this project installs into
-// every worktree's shim directory (docs/architecture/runtime.md §4: "codex
-// # managed current generation", "claude # managed current generation").
-// Both are always installed, regardless of whether that host is actually
-// installed on this machine — an uninstalled host's shim entry simply fails
-// informatively at invocation time (internal/shim.ResolveReal's "not found"
-// error) rather than being silently absent, which would make "is codex
-// managed" depend on install order.
-var shimEntryNames = []string{"codex", "claude"}
+// shimEntryNames are the PATH entry points this project installs into every
+// worktree's shim directory: the two host shims docs/architecture/
+// runtime.md §4 documents ("codex # managed current generation", "claude
+// # managed current generation"), plus "omca" itself (PR-11, issue #15) —
+// a stable, worktree-scoped command a compiled generation's own MCP
+// registration (internal/runtime/compile.go's hostConfigFiles) can point
+// at, refreshed to the currently-running omca binary on every `omca env`/
+// `omca run` call exactly like the host entries. "omca" is deliberately
+// NOT a shim in the codex/claude sense: main.go's shim.IsShimInvocation
+// only recognizes "codex"/"claude" as shim entry points, so invoking this
+// symlink dispatches into the ordinary `omca <command>` CLI surface, not
+// shim.Build/Plan.Exec — it exists purely to give a spawned `omca mcp
+// serve` subprocess (docs/architecture/runtime.md §3's "the bootstrap
+// generation contains... the OMCA MCP server") a command path that never
+// changes across an OMCA rebuild, unlike os.Executable()'s own resolved
+// path (see internal/runtime/request.go's OMCABinaryPath doc comment for
+// why that distinction matters for GenerationID stability).
+//
+// Every entry is always installed, regardless of whether that host is
+// actually installed on this machine — an uninstalled host's shim entry
+// simply fails informatively at invocation time (internal/shim.ResolveReal's
+// "not found" error) rather than being silently absent, which would make
+// "is codex managed" depend on install order.
+var shimEntryNames = []string{"codex", "claude", "omca"}
+
+// omcaCommandPath is the stable, worktree-scoped path a compiled
+// generation's MCP registration should invoke — shimDir/omca, refreshed by
+// installShims to point at whatever omca binary is currently running. See
+// shimEntryNames' doc comment for why this is not simply os.Executable().
+func omcaCommandPath(shimDir string) string {
+	return filepath.Join(shimDir, "omca")
+}
 
 // runEnv implements `omca env [--shell bash]`: the direnv integration point
 // (docs/architecture/runtime.md §4, `eval "$(omca env --shell bash)"`).
@@ -108,7 +131,7 @@ func runEnv(stdout, stderr io.Writer, args []string) int {
 			return 1
 		}
 
-		req := runtime.BootstrapRequest{Detection: hd, Worktree: wt, Observations: obs, Now: now}
+		req := runtime.BootstrapRequest{Detection: hd, Worktree: wt, Observations: obs, Now: now, OMCABinaryPath: omcaCommandPath(shimDir)}
 		gen, outputDir, err := runtime.EnsureGeneration(req, generationsDir)
 		if err != nil {
 			fmt.Fprintf(stderr, "omca: env: compiling %s generation: %v\n", host, err)
@@ -119,6 +142,7 @@ func runEnv(stdout, stderr io.Writer, args []string) int {
 			return 1
 		}
 		fmt.Fprintf(stderr, "omca: env: %s -> generation %s (%s)\n", host, gen.Metadata.ID, outputDir)
+		fmt.Fprintf(stderr, "omca: env: %s\n", contextCostSummaryLine(host, gen))
 	}
 
 	contextID, err := computeContextID(wt, hostDetections)
@@ -160,8 +184,9 @@ func printExports(stdout io.Writer, v exportVars) {
 }
 
 // shellQuote wraps s in single quotes, escaping any embedded single quote
-// the POSIX-portable way ('\''): close the quote, emit an escaped quote,
-// reopen. None of the values this command actually prints (worktree/
+// the POSIX-portable way: close the quote, emit a backslash-escaped single
+// quote, reopen — see the implementation below for the literal replacement
+// sequence. None of the values this command actually prints (worktree/
 // generation IDs, resolved filesystem paths) are expected to contain a
 // single quote, but eval'd shell output is exactly the place a defensive
 // habit costs nothing and an unquoted or naively-quoted path containing a
@@ -230,12 +255,9 @@ func installShims(shimDir string) error {
 	if err := os.MkdirAll(shimDir, 0o755); err != nil {
 		return fmt.Errorf("omca: installShims: %w", err)
 	}
-	exe, err := os.Executable()
+	exe, err := resolveOMCABinaryPath()
 	if err != nil {
-		return fmt.Errorf("omca: installShims: resolving the running omca binary: %w", err)
-	}
-	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-		exe = resolved
+		return fmt.Errorf("omca: installShims: %w", err)
 	}
 
 	for _, name := range shimEntryNames {

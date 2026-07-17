@@ -22,6 +22,20 @@ jobs:
           pct=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | tr -d '%')
           echo "coverage: ${pct}%"
           awk -v p="$pct" 'BEGIN { if (p+0 < 67) { print "coverage " p "% below 67% floor"; exit 1 } }'
+      # Perf regression gate (PR-11, issue #15): `go test ./...` above
+      # already ran TestPerf_Synthetic_* as part of the full suite, so this
+      # step is redundant with `make test` by design — it exists to give
+      # the perf gate its own named, visible CI step (matching this
+      # project's stated convention that "the measured numbers are part of
+      # the report, not a hidden benchmark") and to print the -v Stats
+      # output for this specific runner into its own log section. Only the
+      # generous, documented-safe ceilings are asserted here
+      # (steady-state <= 300ms, first bootstrap <= 5s) — never the strict
+      # reference-machine targets, which live only in the committed
+      # docs/evidence/perf-v0.1.0.md, reviewed per release, so this gate
+      # can never be disabled for flakiness.
+      - name: Perf regression gate
+        run: make perf
 
   lint:
     runs-on: ubuntu-latest

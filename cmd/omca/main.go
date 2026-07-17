@@ -35,7 +35,7 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-const usage = "usage: omca <version|context|env|run|doctor> ..."
+const usage = "usage: omca <version|context|env|run|doctor|mcp> ..."
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
@@ -55,6 +55,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runRun(stdout, stderr, args[1:])
 	case "doctor":
 		return runDoctor(stdout, stderr)
+	case "mcp":
+		return runMCP(os.Stdin, stdout, stderr, args[1:])
 	default:
 		fmt.Fprintf(stderr, "omca: unknown command %q\n%s\n", args[0], usage)
 		return 2
