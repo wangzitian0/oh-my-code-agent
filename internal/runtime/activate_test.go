@@ -398,7 +398,7 @@ func TestActivate_ConcurrentActivations_LockPreventsSilentClobber(t *testing.T) 
 		doneA <- outcome{result, err}
 	}()
 
-	<-reachedPause // A has read pending/current and passed its CAS check; it is now paused right before writing "current".
+	waitOrFatal(t, reachedPause, "A to reach StepSwitchCurrent") // A has read pending/current and passed its CAS check; it is now paused right before writing "current".
 
 	fxB := compileFixture(t, worktreeStateDir, []domain.Profile{requiredSkillProfile("company:example", "deep-refactor")}, nil, now.Add(time.Minute))
 	if fxB.gen.Metadata.ID == fxA.gen.Metadata.ID {
@@ -458,5 +458,22 @@ func TestActivate_ConcurrentActivations_LockPreventsSilentClobber(t *testing.T) 
 	}
 	if activatedCount != 1 {
 		t.Errorf("ledger has %d 'activated' entries, want exactly 1 (the loser must never have appended one)", activatedCount)
+	}
+}
+
+// waitOrFatal blocks on ch (a signal channel a test goroutine closes once it
+// reaches some pause point) with a bounded timeout, failing the test with a
+// clear message instead of hanging forever if the goroutine errors out or
+// otherwise never reaches that point -- a bare `<-ch` in an adversarial
+// concurrency test turns "the goroutine under test broke" into "the whole
+// test run hangs until the CI job's own outer timeout kills it," which is a
+// much worse failure mode to debug. what describes what ch signals, for the
+// timeout's own failure message.
+func waitOrFatal(t *testing.T, ch <-chan struct{}, what string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("timed out waiting for %s", what)
 	}
 }

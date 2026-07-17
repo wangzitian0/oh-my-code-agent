@@ -214,7 +214,7 @@ func TestRollback_BlockedByInProgressActivate(t *testing.T) {
 		doneActivate <- err
 	}()
 
-	<-reachedPause // Activate holds the lock and is paused right before writing "current".
+	waitOrFatal(t, reachedPause, "Activate to reach StepSwitchCurrent") // Activate holds the lock and is paused right before writing "current".
 
 	generationsRoot := filepath.Join(worktreeStateDir, "generations")
 	_, rollbackErr := Rollback(worktreeStateDir, generationsRoot, "codex", parentFx.req.Hosts[0].Detection, now.Add(3*time.Minute))
