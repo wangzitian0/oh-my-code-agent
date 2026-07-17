@@ -323,6 +323,33 @@ func resolvedAssetSources(resolved resolve.ResolvedState) []domain.GenerationSou
 	return entries
 }
 
+// sourceEntryFingerprint returns a deterministic per-entry digest for one
+// host's GenerationSourceEntry, folded into sourceFingerprints and, through
+// it, Generation.spec.sourceDigest.
+//
+// It digests the WHOLE entry struct (every GenerationSourceEntry field via
+// domain.CanonicalDigest), not a hand-picked subset: an earlier version of
+// this fingerprint used fmt.Sprintf over only Concept/Source/Included/
+// Reason, silently omitting Scope/CapabilityGap/TrackingIssue -- two Sources
+// lists differing only in one of those omitted fields (e.g. the same asset
+// excluded for a mundane reason vs. flagged as an unproven capability gap)
+// would have collided to the identical sourceDigest (Copilot review finding
+// on this PR, proven non-colliding by
+// TestSourceEntryFingerprint_DiffersOnScopeAndCapabilityGap).
+// Digesting the struct itself is also forward-safe: a future field added to
+// GenerationSourceEntry is automatically covered without anyone needing to
+// remember to update a hand-rolled format string.
+func sourceEntryFingerprint(host string, entry domain.GenerationSourceEntry) (string, error) {
+	digest, err := domain.CanonicalDigest(struct {
+		Host  string                       `json:"host"`
+		Entry domain.GenerationSourceEntry `json:"entry"`
+	}{Host: host, Entry: entry})
+	if err != nil {
+		return "", fmt.Errorf("runtime: sourceEntryFingerprint: %w", err)
+	}
+	return digest, nil
+}
+
 // compileHostIDInputs is one host's deterministic slice of
 // compileGenerationIDInputs.
 type compileHostIDInputs struct {
@@ -331,17 +358,49 @@ type compileHostIDInputs struct {
 	Observations []string `json:"observations"`
 }
 
+// exceptionLivenessFingerprints returns one sorted "assetId|scope|live"
+// string per exception, classifying each as live or expired against now
+// using the EXACT boundary comparison internal/resolve.Resolve itself uses
+// (resolve.go's findException: `now.Before(ex.ExpiresAt)`, strict -- an
+// Exception whose ExpiresAt is now or earlier is expired). This is a
+// regression fix (Copilot review finding on this PR): CompileGenerationID
+// used to exclude Now entirely, but Resolve's actual output (which
+// Sources/artifacts end up compiled) depends on Now through exactly this
+// comparison -- two Compile calls with identical Profiles/Activation/
+// Exceptions but Now on either side of an Exception's expiry boundary could
+// produce different compiled content under the SAME generation ID, breaking
+// the one invariant a content-addressed ID exists to guarantee ("same ID
+// implies same content"). Folding in each exception's raw ExpiresAt or the
+// raw Now value would overcorrect: it would make the ID change on every
+// call even when no exception's live/expired classification actually
+// changed, which is not "different desired state" in any sense
+// resolve.Resolve's output cares about. Folding in only the classification
+// itself is the minimal, precise fix: the ID changes if and only if the
+// compiled content actually could.
+func exceptionLivenessFingerprints(exceptions []domain.Exception, now time.Time) []string {
+	out := make([]string, 0, len(exceptions))
+	for _, ex := range exceptions {
+		out = append(out, fmt.Sprintf("%s|%s|%v", ex.AssetID, ex.Scope, now.Before(ex.ExpiresAt)))
+	}
+	sort.Strings(out)
+	return out
+}
+
 // compileGenerationIDInputs is the deterministic subset of CompileRequest
 // that actually determines what Compile produces -- the full-compilation
 // analogue of generationid.go's generationIDInputs. It deliberately excludes
-// Now, Parent, Invocation, and every host's OMCABinaryPath, for the same
-// reasons generationid.go's own doc comment gives (none of them changes the
-// compiled artifact tree's content; OMCABinaryPath in particular is always
-// the worktree's own stable PATH-shim path, never a build-specific
-// snapshot -- request.go's OMCABinaryPath doc comment).
+// Now itself, Parent, Invocation, and every host's OMCABinaryPath, for the
+// same reasons generationid.go's own doc comment gives (none of them
+// changes the compiled artifact tree's content on its own; OMCABinaryPath in
+// particular is always the worktree's own stable PATH-shim path, never a
+// build-specific snapshot -- request.go's OMCABinaryPath doc comment).
+// ExceptionLiveness is the one Now-derived value that DOES belong here --
+// see exceptionLivenessFingerprints's doc comment for why raw Now itself
+// still must not be folded in directly.
 type compileGenerationIDInputs struct {
 	Worktree           string                `json:"worktree"`
 	DesiredGraphDigest string                `json:"desiredGraphDigest"`
+	ExceptionLiveness  []string              `json:"exceptionLiveness"`
 	PermissionsDigest  string                `json:"permissionsDigest"`
 	KnowledgePacks     []string              `json:"knowledgePacks"`
 	Hosts              []compileHostIDInputs `json:"hosts"`
@@ -349,13 +408,20 @@ type compileGenerationIDInputs struct {
 
 // CompileGenerationID computes the content-addressed ID for the full
 // generation req describes: two CompileRequests naming the same desired
-// state (Profiles/Activation/Exceptions, folded through DesiredGraphDigest
-// and the merged permissions digest), the same Knowledge Pack digests, and
-// the same per-host Observations produce the identical ID regardless of
-// Now, Parent, Invocation, or any host's OMCABinaryPath -- issue #18's
-// determinism AC ("Same desired state + same Knowledge digests produce the
-// identical generation digest"), proven by compile_full_test.go's
-// determinism and sensitivity tests.
+// state (Profiles/Activation/Exceptions, folded through DesiredGraphDigest,
+// the merged permissions digest, and each Exception's live/expired
+// classification as of Now -- see exceptionLivenessFingerprints), the same
+// Knowledge Pack digests, and the same per-host Observations produce the
+// identical ID regardless of Parent, Invocation, or any host's
+// OMCABinaryPath -- issue #18's determinism AC ("Same desired state + same
+// Knowledge digests produce the identical generation digest"), proven by
+// compile_full_test.go's determinism and sensitivity tests. Now itself is
+// NOT excluded unconditionally the way Parent/Invocation/OMCABinaryPath
+// are: two calls with different Now values produce the same ID only when
+// every Exception's live/expired status is unchanged between them (a real,
+// content-relevant difference otherwise -- see
+// exceptionLivenessFingerprints's doc comment; this was a Copilot review
+// finding on this PR).
 func CompileGenerationID(req CompileRequest) (string, error) {
 	if err := req.validate(); err != nil {
 		return "", err
@@ -394,6 +460,7 @@ func CompileGenerationID(req CompileRequest) (string, error) {
 	digest, err := domain.CanonicalDigest(compileGenerationIDInputs{
 		Worktree:           req.Worktree.ID,
 		DesiredGraphDigest: desiredGraphDigest,
+		ExceptionLiveness:  exceptionLivenessFingerprints(req.Exceptions, req.Now),
 		PermissionsDigest:  permissionsDigest,
 		KnowledgePacks:     packs,
 		Hosts:              hostInputs,
@@ -493,7 +560,11 @@ func Compile(req CompileRequest, outputDir string) (domain.Generation, error) {
 
 		allSources = append(allSources, sources...)
 		for _, s := range sources {
-			sourceFingerprints = append(sourceFingerprints, fmt.Sprintf("%s|%s|%s|%v|%s", h.Detection.Host, s.Concept, s.Source, s.Included, s.Reason))
+			fp, fpErr := sourceEntryFingerprint(h.Detection.Host, s)
+			if fpErr != nil {
+				return domain.Generation{}, fmt.Errorf("runtime: Compile: %w", fpErr)
+			}
+			sourceFingerprints = append(sourceFingerprints, fp)
 		}
 	}
 
