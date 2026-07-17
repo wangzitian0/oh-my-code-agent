@@ -79,8 +79,28 @@
       "verificationMethods": ["official-doc-review"]
     }
   },
+  "precedencePrograms": [
+    {
+      "id": "instruction.concat-ordered",
+      "identity": "scope-root-plus-source-path",
+      "operator": "CONCAT_ORDERED",
+      "fixture": "codex-instructions-collision-fixture"
+    },
+    {
+      "id": "mcp_server.union-by-id",
+      "identity": "transport-plus-server-id",
+      "operator": "UNION_BY_ID",
+      "fixture": "codex-mcp-merge-fixture"
+    },
+    {
+      "id": "skill.namespace-by-source",
+      "identity": "name-plus-source-kind",
+      "operator": "NAMESPACE",
+      "fixture": "codex-skill-collision-fixture"
+    }
+  ],
   "knownUnknowns": [
     "whether $CODEX_HOME/skills is a real, additional skill discovery root beyond the four documented in docs/ontology/README.md §6.2 (repo .agents/skills discovered from cwd/ancestors/root, $HOME/.agents/skills, /etc/codex/skills, bundled/extra configured paths), and how it ranks against them if so -- discovered only by static, read-only `strings` inspection of the installed 0.144.5 binary, never behaviorally confirmed (see fixtures/README.md and fixtures/codex/0.144.5/skill-collision/expected-effective.json)",
-    "same-name precedence across Instructions, Skill, and MCP sources for this version -- no safe, non-interactive, no-network, no-model-call introspection path was found that dumps effective/merged configuration without starting a real session (see fixtures/README.md); every PR-06 fixture case for this host records selectedSource: UNKNOWN, including the documented claim 'closer instructions appear later' for Instructions, which remains a documentedClaim rather than a confirmed fact"
+    "same-name precedence across Instructions, Skill, and MCP sources for this version -- no safe, non-interactive, no-network, no-model-call introspection path was found that dumps effective/merged configuration without starting a real session (see fixtures/README.md); every PR-06 fixture case for this host records selectedSource: UNKNOWN, including the documented claim 'closer instructions appear later' for Instructions, which remains a documentedClaim rather than a confirmed fact. The three precedencePrograms above name each concept's best-fit documented operator (docs/ontology/README.md §6.2) so PR-17's resolver has something concrete to consult, but capabilities.*.resolve stays UNKNOWN exactly because none of them is behaviorally confirmed: PR-17's resolver treats a declared-but-unqualified operator the same as an undeclared one for any genuine multi-source collision -- it still refuses to guess a winner (see internal/effective's doc.go)."
   ]
 }
