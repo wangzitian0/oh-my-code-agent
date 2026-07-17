@@ -704,9 +704,13 @@ func TestAggregateSources_HostNeutralTie_OrderIndependentOfCallerHostOrder(t *te
 		t.Fatalf("got %d vs %d sources", len(sourcesA), len(sourcesB))
 	}
 	for i := range sourcesA {
-		if sourcesA[i].Host != sourcesB[i].Host || sourcesA[i].Source != sourcesB[i].Source {
-			t.Errorf("Sources[%d] differs by caller host order: {Host:%q Source:%q} vs {Host:%q Source:%q}",
-				i, sourcesA[i].Host, sourcesA[i].Source, sourcesB[i].Host, sourcesB[i].Source)
+		// Compare the whole struct, not just Host/Source: GenerationSourceEntry
+		// is entirely comparable (string/bool fields only), and limiting the
+		// assertion to two fields would miss an ordering-instability bug that
+		// happened to leave Concept/Reason/Included/Scope/CapabilityGap/
+		// TrackingIssue mismatched while Host/Source coincidentally matched.
+		if sourcesA[i] != sourcesB[i] {
+			t.Errorf("Sources[%d] differs by caller host order:\n  %+v\nvs\n  %+v", i, sourcesA[i], sourcesB[i])
 		}
 	}
 }

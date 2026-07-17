@@ -145,9 +145,19 @@ func TestRunInvocationHonorsCwd(t *testing.T) {
 			}
 			// pwd's output may resolve symlinks (e.g. macOS's /tmp ->
 			// /private/tmp); compare via filepath.EvalSymlinks on both
-			// sides so the assertion isn't sensitive to that.
-			gotResolved, _ := filepath.EvalSymlinks(strings.TrimSpace(result.Stdout))
-			wantResolved, _ := filepath.EvalSymlinks(want)
+			// sides so the assertion isn't sensitive to that. Both errors
+			// are checked explicitly (not discarded) — a silently-empty
+			// gotResolved/wantResolved on failure could make a genuinely
+			// wrong cwd compare equal to an equally-broken expectation and
+			// pass the test for the wrong reason.
+			gotResolved, err := filepath.EvalSymlinks(strings.TrimSpace(result.Stdout))
+			if err != nil {
+				t.Fatalf("EvalSymlinks(%q): %v", strings.TrimSpace(result.Stdout), err)
+			}
+			wantResolved, err := filepath.EvalSymlinks(want)
+			if err != nil {
+				t.Fatalf("EvalSymlinks(%q): %v", want, err)
+			}
 			if gotResolved != wantResolved {
 				t.Errorf("cwd=%q: ran from %q, want %q", cwd, strings.TrimSpace(result.Stdout), want)
 			}

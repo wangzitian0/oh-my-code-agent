@@ -320,6 +320,45 @@ func TestResolveGroup_SingleCandidate_Denied_NotTriviallyActive(t *testing.T) {
 	}
 }
 
+// TestResolveGroup_MultipleDuplicateContentCandidates_PartialDenial proves
+// the Copilot-review follow-up: the len(distinct)==1 fast path must apply a
+// denial per physical Candidate, not just to distinctByContent's arbitrary
+// representative. Three candidates share byte-identical content (so
+// len(distinct)==1); only one is denied. Checking only the representative
+// could either wrongly declare "nothing active" (if the representative
+// happened to be the denied one) or leave the denied Ref sitting in
+// ActiveSources (if it happened not to be) -- neither survivor-filtering
+// nor exclusion should depend on which of the three happened to be
+// distinctByContent's pick.
+func TestResolveGroup_MultipleDuplicateContentCandidates_PartialDenial(t *testing.T) {
+	a := cand("a", "x", "user", "same-digest")
+	b := cand("b", "x", "workspace", "same-digest")
+	c := cand("c", "x", "system", "same-digest")
+	group := LogicalGroup{Concept: "mcp_server", LogicalID: "x", Candidates: []Candidate{a, b, c}}
+
+	entry, conflict := ResolveGroup(group, domain.HostKnowledge{}, domain.CapabilityOps{}, Options{DeniedRefs: map[string]bool{"b": true}})
+	if conflict != nil {
+		t.Fatalf("unexpected conflict: %+v", conflict)
+	}
+	if entry.Provenance.SelectedSource == "" {
+		t.Error("SelectedSource is empty, want one of the two non-denied survivors (a or c)")
+	}
+	for _, ref := range entry.Provenance.ActiveSources {
+		if ref == "b" {
+			t.Errorf("ActiveSources = %v, want the denied ref \"b\" excluded", entry.Provenance.ActiveSources)
+		}
+	}
+	if len(entry.Provenance.ActiveSources) != 2 {
+		t.Errorf("ActiveSources = %v, want exactly the 2 non-denied survivors", entry.Provenance.ActiveSources)
+	}
+	if len(entry.Provenance.IgnoredSources) != 1 || entry.Provenance.IgnoredSources[0] != "b" {
+		t.Errorf("IgnoredSources = %v, want [\"b\"]", entry.Provenance.IgnoredSources)
+	}
+	if entry.Guarantee != domain.GuaranteeHard {
+		t.Errorf("Guarantee = %q, want %q", entry.Guarantee, domain.GuaranteeHard)
+	}
+}
+
 func TestResolveGroup_ManagedGuardrail_ManagedSourceWins(t *testing.T) {
 	managed := cand("managed/policy.json", "x", "managed", "digest-managed")
 	user := cand("user/config.json", "x", "user", "digest-user")
