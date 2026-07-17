@@ -193,3 +193,31 @@ func cardCategories(cards []DriftCard) []domain.DriftCategory {
 	}
 	return out
 }
+
+// TestSourcesForHost_FiltersOutOtherHosts proves the Copilot-review fix:
+// domain.GenerationSourceEntry's own doc comment establishes that a
+// Generation can share multiple hosts' artifact trees, so
+// Generation.Spec.Sources is one flat list across all of them, each entry
+// stamped with its own Host. Before the fix, generationSources returned
+// this list unfiltered, so a multi-host generation's CURRENT/PENDING plane
+// counts and compare/diff output for one host would incorrectly include
+// another host's sources too.
+func TestSourcesForHost_FiltersOutOtherHosts(t *testing.T) {
+	sources := []domain.GenerationSourceEntry{
+		{Concept: "instruction", Source: "codex/AGENTS.md", Host: "codex", Included: true},
+		{Concept: "instruction", Source: "claude/CLAUDE.md", Host: "claude-code", Included: true},
+		{Concept: "mcpServer", Source: "codex/config.toml", Host: "codex", Included: true},
+	}
+	got := sourcesForHost(sources, "codex")
+	if len(got) != 2 {
+		t.Fatalf("sourcesForHost(codex) = %d entries, want 2 (codex-only): %+v", len(got), got)
+	}
+	for _, s := range got {
+		if s.Host != "codex" {
+			t.Errorf("sourcesForHost(codex) leaked a %q-host entry: %+v", s.Host, s)
+		}
+	}
+	if got := sourcesForHost(sources, "claude-code"); len(got) != 1 || got[0].Host != "claude-code" {
+		t.Errorf("sourcesForHost(claude-code) = %+v, want exactly the one claude-code entry", got)
+	}
+}

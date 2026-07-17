@@ -47,11 +47,14 @@ func normalizePlaneArg(s string) string {
 // planeKey is one entity's identity within a plane row map: (concept, id).
 type planeKey struct{ concept, id string }
 
-// planeRows extracts one host's plane view from a's Debug data. ok is false
-// when host has no Debug entry at all (never observed/built) — a plane that
-// simply has zero entities (a genuinely empty CURRENT generation, for
-// instance) still returns ok == true with an empty map, which
-// ComparePlanes' caller distinguishes from "this host was never built."
+// planeRows extracts one host's plane view from hd, an already-resolved
+// HostDebug — the "host has no Debug entry at all" case is ComparePlanes'
+// own concern (its ok return value), decided before planeRows is ever
+// called; by the time hd reaches here, the host is known to have been
+// built. A plane with zero entities (a genuinely empty CURRENT generation,
+// for instance) is simply an empty map, indistinguishable at this layer
+// from "this plane kind doesn't apply" — that distinction, if needed,
+// belongs to the caller too.
 //
 // NATIVE and OBSERVED project identically: this package's Debug data has no
 // separate raw-vs-parsed representation (see types.go's Plane doc comment) —

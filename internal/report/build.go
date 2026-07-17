@@ -234,13 +234,22 @@ func findPack(repo knowledge.Repository, packID string) (knowledge.Pack, bool) {
 // reporting.md §8's "unknown ... reported as unknown, not a fake token
 // count" applies here just as much as to the estimate's own Method/
 // Confidence fields).
+//
+// Both returned Sources lists are filtered to host: a Generation can share
+// multiple hosts' artifact trees, so Spec.Sources is a flat list across all
+// of them (domain.GenerationSourceEntry's doc comment), and host's
+// current/pending pointer can legitimately reference a multi-host
+// generation dir. Without filtering, CURRENT/PENDING plane counts and
+// compare/diff output would incorrectly include another host's sources —
+// the same host-scoping bug class internal/runtime.DiffProposedChanges
+// already guards against (its `s.Host != host` filter), applied here too.
 func generationSources(worktreeStateDir, host, hostVersion string) (currentSources, pendingSources []domain.GenerationSourceEntry, costEntry *ContextCostEntry) {
 	if worktreeStateDir == "" {
 		return nil, nil, nil
 	}
 	if dir, err := runtime.CurrentGenerationDir(worktreeStateDir, host); err == nil {
 		if gen, err := runtime.ReadGenerationManifest(dir); err == nil {
-			currentSources = gen.Spec.Sources
+			currentSources = sourcesForHost(gen.Spec.Sources, host)
 			excludedMCP, excludedSkills := mcp.CountUserExclusions(gen)
 			cost := mcp.EstimateContextCost(excludedMCP, excludedSkills)
 			costEntry = &ContextCostEntry{ContextCostEstimate: cost, HostVersion: hostVersion}
@@ -248,10 +257,23 @@ func generationSources(worktreeStateDir, host, hostVersion string) (currentSourc
 	}
 	if dir, err := runtime.PendingGenerationDir(worktreeStateDir, host); err == nil {
 		if gen, err := runtime.ReadGenerationManifest(dir); err == nil {
-			pendingSources = gen.Spec.Sources
+			pendingSources = sourcesForHost(gen.Spec.Sources, host)
 		}
 	}
 	return currentSources, pendingSources, costEntry
+}
+
+// sourcesForHost filters a Generation's flat, multi-host Spec.Sources list
+// down to the entries stamped with host, mirroring
+// internal/runtime.DiffProposedChanges's identical `s.Host != host` filter.
+func sourcesForHost(sources []domain.GenerationSourceEntry, host string) []domain.GenerationSourceEntry {
+	var out []domain.GenerationSourceEntry
+	for _, s := range sources {
+		if s.Host == host {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // buildDuplicateCapabilityEntries attaches a ContextCostAttribution to every
