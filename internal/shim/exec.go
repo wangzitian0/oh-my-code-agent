@@ -39,9 +39,9 @@ func ExecReplace(binaryPath string, argv, envp []string) error {
 // overrides in a stable (sorted-by-key) order. Removing the old entry
 // first — rather than merely appending the override and relying on
 // "last occurrence wins" — matters because not every consumer of an
-// environment slice honors that convention the same way env.Environment.Get
-// does; producing a clean, single-occurrence slice is the only
-// representation that behaves identically everywhere.
+// environment slice honors that convention the same way
+// internal/context.Environment.Get does; producing a clean, single-occurrence
+// slice is the only representation that behaves identically everywhere.
 func InjectEnv(environ []string, overrides map[string]string) []string {
 	keys := make([]string, 0, len(overrides))
 	for k := range overrides {
