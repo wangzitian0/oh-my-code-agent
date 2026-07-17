@@ -253,14 +253,30 @@ func Observe(req Request) ([]domain.Observation, error) {
 			}
 
 			for _, dir := range chain {
-				info, err := os.Stat(dir)
+				// os.Lstat, not os.Stat: a chain segment that is itself a
+				// symlink (e.g. a repo subdirectory symlinked to somewhere
+				// outside WorktreeRoot) must never be followed into
+				// observeRoot. os.Stat would resolve it and hand observeRoot
+				// a path whose later filepath.Join/os.Lstat calls treat the
+				// symlinked segment as an ordinary directory component — Go's
+				// Lstat only refuses to follow a symlink in the *final* path
+				// element, not an intermediate one — silently widening
+				// observation outside the declared scope root, the same
+				// scope-containment boundary observeFile enforces for
+				// symlinked files (see walk.go). A symlinked chain segment
+				// gets the same silent, non-error, non-record treatment as a
+				// chain segment that doesn't exist or isn't a directory: it
+				// is scaffolding for where to look, not itself an observed
+				// concept, so there is nothing to lose from "lossless
+				// inventory" by not walking through it.
+				info, err := os.Lstat(dir)
 				if err != nil {
 					if os.IsNotExist(err) {
 						continue
 					}
 					return nil, fmt.Errorf("observe: Observe: stat directory %s: %w", dir, err)
 				}
-				if !info.IsDir() {
+				if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 					continue
 				}
 

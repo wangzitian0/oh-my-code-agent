@@ -1,6 +1,7 @@
 package observe
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -115,6 +116,51 @@ func TestObserve_Directory_ClaudeCode_Golden(t *testing.T) {
 	// documented.
 	if hasObservation(obs, conceptMCPServer, filepath.Join(tr.WorktreeRoot, "svc", ".mcp.json")) {
 		t.Error("svc/.mcp.json must not be observed: Claude Code's directory chain covers Instructions only")
+	}
+}
+
+// TestObserve_Directory_SymlinkedChainSegment_NotFollowed proves the
+// scope-containment fix: a directory-chain segment that is itself a symlink
+// pointing outside WorktreeRoot must never be walked into. Before the fix,
+// the chain loop used os.Stat (which resolves the symlink) instead of
+// os.Lstat, so a symlinked chain segment was treated as an ordinary
+// directory and observeRoot walked straight through it — reading sources
+// from wherever the symlink actually pointed, outside the declared scope
+// root, the same boundary violation observeFile already guards against for
+// individual symlinked files (see walk.go).
+func TestObserve_Directory_SymlinkedChainSegment_NotFollowed(t *testing.T) {
+	tr := newCodexTree(t)
+
+	// outside is a real directory that is NOT under WorktreeRoot at all —
+	// planting a canary here and proving it never appears in Observe's
+	// output is the actual proof of containment, not just "no error."
+	outside := filepath.Join(filepath.Dir(tr.WorktreeRoot), "outside-worktree")
+	mustWriteFile(t, filepath.Join(outside, "AGENTS.md"), "# canary: must never be observed\n")
+
+	if err := os.MkdirAll(tr.WorktreeRoot, 0o755); err != nil {
+		t.Fatalf("mkdir worktree root: %v", err)
+	}
+	symlinkPath := filepath.Join(tr.WorktreeRoot, "a")
+	if err := os.Symlink(outside, symlinkPath); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	req := tr.request("0.144.5")
+	req.WorkingDirectory = symlinkPath
+
+	obs, err := Observe(req)
+	if err != nil {
+		t.Fatalf("Observe: %v", err)
+	}
+	assertValid(t, obs)
+
+	if got := filterByScope(obs, "directory"); len(got) != 0 {
+		t.Fatalf("directory-scope observations for a symlinked chain segment: got %d, want 0 (symlink must not be followed): %+v", len(got), got)
+	}
+	for _, o := range obs {
+		if o.Spec.Source.Path == filepath.Join(outside, "AGENTS.md") {
+			t.Fatalf("found an observation for %s: the outside-worktree canary leaked through a symlinked directory-chain segment", o.Spec.Source.Path)
+		}
 	}
 }
 
