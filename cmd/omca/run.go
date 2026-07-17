@@ -270,6 +270,22 @@ func runIsolated(stderr io.Writer, host string, realEnv hostcontext.Environment,
 	// detectEnv which is realEnv with the shim dir filtered out of PATH)
 	// already rejects a request whose Environment has no absolute HOME.
 	virtualHomeDir := filepath.Join(outputDir, "hosts", host, surface, runtime.VirtualHomeDirName)
+	// EnsureGeneration (above) returns a cache hit as soon as outputDir
+	// already has a valid manifest.json — it never re-validates the rest of
+	// the on-disk directory set against what the current compiler version
+	// promises to have created. A generation directory compiled by an
+	// older omca build, from before HOME virtualization existed, can still
+	// be a perfectly valid cache hit by content address (nothing about the
+	// desired-state inputs changed) while genuinely lacking virtualHomeDir
+	// on disk. Blindly setting HOME to a path that does not exist would
+	// silently reopen exactly the isolation gap this generation-compiler
+	// change exists to close — some host binaries/libraries fall back to a
+	// different, unmanaged home resolution when HOME points at something
+	// invalid, rather than failing outright. Fail closed and loud instead.
+	if info, statErr := os.Stat(virtualHomeDir); statErr != nil || !info.IsDir() {
+		fmt.Fprintf(stderr, "omca: run: generation %s is missing its virtual-home directory (%s) -- it was likely compiled by an older omca build, before HOME isolation existed; delete %s and rerun to force a fresh compile\n", gen.Metadata.ID, virtualHomeDir, outputDir)
+		return 1
+	}
 
 	overrides := map[string]string{
 		envVar:             nativeHomeDir,

@@ -256,7 +256,7 @@ func TestShim_EndToEnd_NonRecursionAndEnvInjection(t *testing.T) {
 	// this fix, neither line was ever present -- HOME passed through
 	// unmodified, so a real host binary launched this way still resolved its
 	// own native, unmanaged $HOME/.agents/skills.
-	wantVirtualHomeDir := filepath.Join(generationDir, "hosts", "codex", "cli", "virtual-home")
+	wantVirtualHomeDir := filepath.Join(generationDir, "hosts", "codex", "cli", runtime.VirtualHomeDirName)
 	wantHomeLine := "HOME=" + wantVirtualHomeDir
 	if !containsExactLine(stdout.String(), wantHomeLine) {
 		t.Errorf("fakehost's dumped environment did not contain the exact line %q (HOME was not virtualized); stdout:\n%s", wantHomeLine, stdout.String())

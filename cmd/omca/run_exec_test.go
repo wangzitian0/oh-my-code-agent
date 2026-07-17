@@ -238,10 +238,86 @@ func TestRunIsolated_EndToEnd_VirtualizesHome(t *testing.T) {
 
 	// docs/architecture/runtime.md §7.1's other required export:
 	// OMCA_REAL_HOME must carry the caller's real (here: scratch) HOME
-	// forward, so the launched process can still recover it.
-	wantRealHomeLine := "OMCA_REAL_HOME=" + scratchHome
-	if !strings.Contains(stdout, wantRealHomeLine) {
-		t.Errorf("fakehost's dumped environment did not contain %q; stdout:\n%s", wantRealHomeLine, stdout)
+	// forward, so the launched process can still recover it. dumpedEnvLine,
+	// not strings.Contains: a substring check on the whole dump could false-
+	// positive if some other env var's value happens to contain scratchHome
+	// as a substring (e.g. a var whose own value is itself HOME-prefixed).
+	execdRealHome, ok := dumpedEnvLine(stdout, "OMCA_REAL_HOME")
+	if !ok {
+		t.Fatalf("fakehost's dumped environment did not contain an OMCA_REAL_HOME line at all; stdout:\n%s", stdout)
+	}
+	if execdRealHome != scratchHome {
+		t.Errorf("OMCA_REAL_HOME = %q, want %q", execdRealHome, scratchHome)
+	}
+}
+
+// TestRunIsolated_StaleGenerationMissingVirtualHome_FailsClosed proves the
+// Copilot-review fix: EnsureGeneration treats any directory with a valid
+// manifest.json as a cache hit, without re-checking that the rest of the
+// on-disk directory set still matches what the current compiler promises
+// to have created. A generation compiled before HOME virtualization
+// existed (simulated here by deleting an already-compiled generation's
+// virtual-home directory and reusing the same worktree/state dir, so the
+// second `omca run` call is guaranteed to hit EnsureGeneration's cache
+// path rather than recompiling) must make `omca run` fail loudly rather
+// than silently launching with HOME pointed at a path that does not
+// exist -- which would reopen the exact isolation gap this generation-
+// compiler change exists to close.
+func TestRunIsolated_StaleGenerationMissingVirtualHome_FailsClosed(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("syscall.Exec-based `omca run` is macOS-first scope")
+	}
+
+	worktreeRoot := t.TempDir()
+	if err := os.Mkdir(filepath.Join(worktreeRoot, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	scratchHome := t.TempDir()
+	stateRoot := t.TempDir()
+	restoreWritableTree(t, stateRoot)
+	binDir := t.TempDir()
+	if err := os.Symlink(testFixtureBinaries.fakeHost, filepath.Join(binDir, "codex")); err != nil {
+		t.Fatal(err)
+	}
+	environ := []string{
+		"HOME=" + scratchHome,
+		"PATH=" + binDir,
+		"XDG_STATE_HOME=" + stateRoot,
+	}
+
+	// First call: a genuinely fresh compile, virtual-home included. Reuses
+	// the exact same environ/worktreeRoot on the second call below so
+	// EnsureGeneration's content-address computation is identical and it
+	// returns the (about to be tampered with) cached directory instead of
+	// recompiling.
+	stdout, stderr, code := runOmcaSubprocess(t, worktreeRoot, []string{"run", "codex", "--mode", "isolated"}, environ)
+	if code != 0 {
+		t.Fatalf("first omca run (fresh compile) = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	execdHome, ok := dumpedEnvLine(stdout, "HOME")
+	if !ok {
+		t.Fatalf("fakehost's dumped environment did not contain a HOME line at all; stdout:\n%s", stdout)
+	}
+	// The compiled generation tree lands read-only (internal/runtime/
+	// readonly.go); restore write permission before tampering with it.
+	// restoreWritableTree only registers a t.Cleanup hook for end-of-test,
+	// so call the underlying restore function directly to get an
+	// immediate, mid-test effect.
+	restoreWritableSkippingSymlinks(stateRoot)
+	if err := os.RemoveAll(execdHome); err != nil {
+		t.Fatalf("removing the compiled generation's virtual-home directory (%s): %v", execdHome, err)
+	}
+
+	// Second call: same environ, same worktree -- EnsureGeneration must find
+	// the same content-addressed generation directory (manifest.json is
+	// untouched) and treat it as a cache hit, exactly the scenario a real
+	// pre-fix-compiled generation would present.
+	_, stderr2, code2 := runOmcaSubprocess(t, worktreeRoot, []string{"run", "codex", "--mode", "isolated"}, environ)
+	if code2 == 0 {
+		t.Fatal("second omca run (virtual-home missing) exited 0, want a non-zero fail-closed exit -- HOME would have been set to a nonexistent path")
+	}
+	if !strings.Contains(stderr2, "virtual-home") {
+		t.Errorf("stderr does not mention the missing virtual-home directory, want an actionable message; stderr:\n%s", stderr2)
 	}
 }
 

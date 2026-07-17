@@ -136,7 +136,7 @@ func TestBuild_ResolvesRealBinaryAndInjectsGenerationEnv(t *testing.T) {
 	if plan.GenerationID != gen.Metadata.ID {
 		t.Errorf("GenerationID = %q, want %q", plan.GenerationID, gen.Metadata.ID)
 	}
-	wantVirtualHomeDir := filepath.Join(outputDir, "hosts", "codex", "cli", "virtual-home")
+	wantVirtualHomeDir := filepath.Join(outputDir, "hosts", "codex", "cli", runtime.VirtualHomeDirName)
 	if plan.VirtualHomeDir != wantVirtualHomeDir {
 		t.Errorf("VirtualHomeDir = %q, want %q", plan.VirtualHomeDir, wantVirtualHomeDir)
 	}
