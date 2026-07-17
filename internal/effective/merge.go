@@ -268,11 +268,16 @@ func resolveDeepMerge(group LogicalGroup, program domain.PrecedenceProgram, scop
 		LogicalID: group.LogicalID,
 		Provenance: Provenance{
 			Program: program.ID, Operator: ontology.OpDeepMerge,
-			SelectedSource: digest,
-			ActiveSources:  candidateRefs(group.Candidates),
+			// SelectedSource is documented as "the winning Candidate.Ref";
+			// DEEP_MERGE has no single source winner (every input stays
+			// active), so it stays empty here rather than being overloaded
+			// with the merged-content digest, which isn't a Ref at all.
+			ActiveSources: candidateRefs(group.Candidates),
+			Constraints:   []string{fmt.Sprintf("DEEP_MERGE: merged content digest %s", digest)},
 		},
 		EvidenceLevel: highestEvidence(group.Candidates),
 		Guarantee:     domain.GuaranteeObserved,
+		Confirmed:     highestEvidence(group.Candidates).Rank() >= domain.EvidenceLevelHostReported.Rank(),
 		Reason:        fmt.Sprintf("DEEP_MERGE: %d candidates merged with no unresolved leaf conflicts", len(distinct)),
 	}, nil
 }
@@ -286,7 +291,8 @@ func resolveDeepMerge(group LogicalGroup, program domain.PrecedenceProgram, scop
 // not, this function reports the first unresolvable path and stops.
 func deepMergeAll(distinct []Candidate, scopeRank map[string]int) (map[string]any, string, error) {
 	ordered := append([]Candidate(nil), distinct...)
-	if len(scopeRank) == len(uniqueScopes(distinct)) {
+	complete := scopeRankCoversAll(scopeRank, distinct)
+	if complete {
 		sort.SliceStable(ordered, func(i, j int) bool {
 			return scopeRank[ordered[i].Scope.Kind] < scopeRank[ordered[j].Scope.Kind]
 		})
@@ -294,19 +300,29 @@ func deepMergeAll(distinct []Candidate, scopeRank map[string]int) (map[string]an
 	result := map[string]any{}
 	for _, c := range ordered {
 		path, ok := deepMergeInto(result, c.Fields, "")
-		if !ok && len(scopeRank) != len(uniqueScopes(distinct)) {
+		if !ok && !complete {
 			return nil, path, fmt.Errorf("unresolved leaf conflict at %q", path)
 		}
 	}
 	return result, "", nil
 }
 
-func uniqueScopes(candidates []Candidate) map[string]bool {
-	out := map[string]bool{}
-	for _, c := range candidates {
-		out[c.Scope.Kind] = true
+// scopeRankCoversAll reports whether scopeRank declares an explicit rank for
+// every distinct candidate's scope kind. This must be checked by set
+// membership, not by comparing len(scopeRank) to the number of distinct
+// scopes here: a scopeRank map that happens to have the same number of
+// entries as there are distinct scopes, but names entirely different scope
+// kinds, would otherwise be treated as "complete." Every lookup in the sort
+// comparator would then silently fall back to the zero value, ranking every
+// candidate as 0 — a real leaf conflict would get resolved by incidental
+// stable-sort (original) order instead of an actual, intended precedence.
+func scopeRankCoversAll(scopeRank map[string]int, distinct []Candidate) bool {
+	for _, c := range distinct {
+		if _, ok := scopeRank[c.Scope.Kind]; !ok {
+			return false
+		}
 	}
-	return out
+	return true
 }
 
 // deepMergeInto merges src into dst in place (recursively, for nested
@@ -359,19 +375,24 @@ func valuesEqual(a, b any) bool {
 // one logical ID (the rarer, within-group use — see compose.go for the more
 // common cross-group composition CONCAT_ORDERED concepts like instruction
 // actually need). Every candidate is always active (concatenation never
-// shadows); the ordering itself is confirmed only when scopeRank covers
-// every candidate's scope.
+// shadows). Confirmed follows EffectiveEntry.Confirmed's documented contract
+// exactly like ComposeConcept does: true only when scopeRank covers every
+// candidate's scope (the order is known) AND the winning outcome is backed
+// by E3+ evidence — order-confirmed alone is not enough. Composed stays
+// false: EffectiveEntry.Composed documents "spanning every logical entity of
+// the concept" (compose.go's cross-entity composition), and this is a
+// per-group resolution, not that.
 func resolveConcatWithinGroup(group LogicalGroup, program domain.PrecedenceProgram, scopeRank map[string]int) (*EffectiveEntry, *Conflict) {
 	refs := candidateRefs(group.Candidates)
-	ordered, confirmed := concatOrder(group.Candidates, scopeRank)
+	ordered, orderConfirmed := concatOrder(group.Candidates, scopeRank)
+	confirmed := orderConfirmed && highestEvidence(group.Candidates).Rank() >= domain.EvidenceLevelHostReported.Rank()
 	reason := "CONCAT_ORDERED: all sources remain active; exact order unconfirmed (no scope order supplied)"
-	if confirmed {
+	if orderConfirmed {
 		reason = fmt.Sprintf("CONCAT_ORDERED: all sources active in confirmed order %v", ordered)
 	}
 	return &EffectiveEntry{
 		Concept:   group.Concept,
 		LogicalID: group.LogicalID,
-		Composed:  true,
 		Provenance: Provenance{
 			Program: program.ID, Operator: ontology.OpConcatOrdered,
 			ActiveSources: refs,
@@ -488,6 +509,7 @@ func resolveDenyWins(group LogicalGroup, program domain.PrecedenceProgram, denie
 	sort.Strings(deniedRefs)
 
 	distinctSurvivors := distinctByContent(survivors)
+	confirmed := highestEvidence(group.Candidates).Rank() >= domain.EvidenceLevelHostReported.Rank()
 	switch len(distinctSurvivors) {
 	case 0:
 		return &EffectiveEntry{
@@ -500,6 +522,7 @@ func resolveDenyWins(group LogicalGroup, program domain.PrecedenceProgram, denie
 			},
 			EvidenceLevel: highestEvidence(group.Candidates),
 			Guarantee:     domain.GuaranteeHard,
+			Confirmed:     confirmed,
 			Reason:        "DENY_WINS: every candidate is denied; nothing active",
 		}, nil
 	case 1:
@@ -516,6 +539,7 @@ func resolveDenyWins(group LogicalGroup, program domain.PrecedenceProgram, denie
 			},
 			EvidenceLevel: highestEvidence(group.Candidates),
 			Guarantee:     domain.GuaranteeHard,
+			Confirmed:     confirmed,
 			Reason:        fmt.Sprintf("DENY_WINS: %d candidate(s) denied, one distinct-content survivor remains", len(deniedRefs)),
 		}, nil
 	default:
@@ -564,6 +588,7 @@ func resolveManagedGuardrail(group LogicalGroup, program domain.PrecedenceProgra
 		},
 		EvidenceLevel: highestEvidence(group.Candidates),
 		Guarantee:     domain.GuaranteeHard,
+		Confirmed:     highestEvidence(group.Candidates).Rank() >= domain.EvidenceLevelHostReported.Rank(),
 		Reason:        "MANAGED_GUARDRAIL: the managed-scope source is authoritative",
 	}, nil
 }

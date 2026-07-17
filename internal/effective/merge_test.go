@@ -312,3 +312,106 @@ func TestResolveGroup_ManagedGuardrail_NoManagedSource_Unresolved(t *testing.T) 
 		t.Fatal("want a Conflict when no managed-scope source is present to apply the guardrail")
 	}
 }
+
+// --- Copilot-review fixes: Confirmed contract, scopeRank completeness, DEEP_MERGE's SelectedSource ---
+
+// candE3 is cand() with EvidenceLevelHostReported (E3) instead of the
+// default EvidenceLevelParsed (E1), for tests that need to distinguish
+// "the operator produced a winner" from "the winner is Confirmed" —
+// EffectiveEntry.Confirmed requires E3+ evidence, which every other test in
+// this file (all built on cand()'s default E1) never reaches on purpose.
+func candE3(ref, logicalID, scopeKind, content string) Candidate {
+	c := cand(ref, logicalID, scopeKind, content)
+	c.EvidenceLevel = domain.EvidenceLevelHostReported
+	return c
+}
+
+func TestResolveGroup_DeepMerge_LeafConflict_ScopeRankSameCountDifferentKeys_StillUnresolved(t *testing.T) {
+	// scopeRank has exactly as many entries (2) as there are distinct
+	// candidate scopes (2: "user", "workspace") but names neither of them —
+	// before the fix, deepMergeAll treated matching *counts* as "scopeRank is
+	// complete," silently letting stable-sort's incidental original order
+	// pick a winner for a real leaf conflict instead of reporting it.
+	a := Candidate{Concept: "mcp_server", LogicalID: "x", Ref: "a", Scope: domain.ObservationScope{Kind: "user"}, ContentDigest: "digest-a",
+		Fields: map[string]any{"command": "tool-a"}}
+	b := Candidate{Concept: "mcp_server", LogicalID: "x", Ref: "b", Scope: domain.ObservationScope{Kind: "workspace"}, ContentDigest: "digest-b",
+		Fields: map[string]any{"command": "tool-b"}}
+	group := LogicalGroup{Concept: "mcp_server", LogicalID: "x", Candidates: []Candidate{a, b}}
+	hk, capOps := qualifiedPack("mcp_server", "DEEP_MERGE")
+	entry, conflict := ResolveGroup(group, hk, capOps, Options{ScopeRank: map[string]int{"system": 5, "local": 2}})
+	if conflict == nil {
+		t.Fatalf("entry = %+v, want a Conflict: scopeRank names neither candidate's scope, so this must stay unresolved, not silently pick a winner", entry)
+	}
+}
+
+func TestResolveGroup_DeepMerge_SelectedSourceStaysEmpty(t *testing.T) {
+	// DEEP_MERGE keeps every input active; there is no single winning
+	// Candidate.Ref, so Provenance.SelectedSource (documented as exactly
+	// that) must stay empty rather than being overloaded with the merged
+	// content's digest.
+	a := Candidate{Concept: "mcp_server", LogicalID: "x", Ref: "a", Scope: domain.ObservationScope{Kind: "user"}, ContentDigest: "digest-a",
+		Fields: map[string]any{"command": "tool"}}
+	b := Candidate{Concept: "mcp_server", LogicalID: "x", Ref: "b", Scope: domain.ObservationScope{Kind: "workspace"}, ContentDigest: "digest-b",
+		Fields: map[string]any{"args": []any{"--flag"}}}
+	group := LogicalGroup{Concept: "mcp_server", LogicalID: "x", Candidates: []Candidate{a, b}}
+	hk, capOps := qualifiedPack("mcp_server", "DEEP_MERGE")
+	entry, conflict := ResolveGroup(group, hk, capOps, Options{})
+	if conflict != nil {
+		t.Fatalf("unexpected conflict: %+v", conflict)
+	}
+	if entry.Provenance.SelectedSource != "" {
+		t.Errorf("SelectedSource = %q, want empty: DEEP_MERGE has no single winning Ref", entry.Provenance.SelectedSource)
+	}
+	if len(entry.Provenance.Constraints) == 0 {
+		t.Error("Constraints is empty, want the merged content digest recorded there instead of in SelectedSource")
+	}
+}
+
+func TestResolveGroup_ConcatOrdered_WithinGroup_OrderConfirmedButLowEvidence_NotConfirmed(t *testing.T) {
+	// Scope order is fully known (scopeRank covers both candidates' scopes),
+	// but cand() gives both E1 evidence — below the E3+
+	// EffectiveEntry.Confirmed contract requires. Before the fix, Confirmed
+	// tracked only order-confirmation and ignored evidence level entirely.
+	a := cand("a", "x", "user", "digest-a")
+	b := cand("b", "x", "workspace", "digest-b")
+	group := LogicalGroup{Concept: "mcp_server", LogicalID: "x", Candidates: []Candidate{a, b}}
+	hk, capOps := qualifiedPack("mcp_server", "CONCAT_ORDERED")
+	entry, conflict := ResolveGroup(group, hk, capOps, Options{ScopeRank: map[string]int{"user": 1, "workspace": 2}})
+	if conflict != nil {
+		t.Fatalf("unexpected conflict: %+v", conflict)
+	}
+	if entry.Confirmed {
+		t.Error("Confirmed = true, want false: E1 evidence is below the E3+ EffectiveEntry.Confirmed contract, even though scope order is fully known")
+	}
+	if entry.Composed {
+		t.Error("Composed = true, want false: this is a within-group resolution (merge.go), not compose.go's cross-entity concept-level composition — EffectiveEntry.Composed documents the latter")
+	}
+}
+
+func TestResolveGroup_DenyWins_HighEvidence_Confirmed(t *testing.T) {
+	a := candE3("a", "x", "user", "digest-a")
+	b := candE3("b", "x", "workspace", "digest-b")
+	group := LogicalGroup{Concept: "mcp_server", LogicalID: "x", Candidates: []Candidate{a, b}}
+	hk, capOps := qualifiedPack("mcp_server", "DENY_WINS")
+	entry, conflict := ResolveGroup(group, hk, capOps, Options{DeniedRefs: map[string]bool{"a": true}})
+	if conflict != nil {
+		t.Fatalf("unexpected conflict: %+v", conflict)
+	}
+	if !entry.Confirmed {
+		t.Error("Confirmed = false, want true: both candidates carry E3 evidence, DENY_WINS must report that like every other operator does")
+	}
+}
+
+func TestResolveGroup_ManagedGuardrail_HighEvidence_Confirmed(t *testing.T) {
+	managed := candE3("managed/policy.json", "x", "managed", "digest-managed")
+	user := candE3("user/config.json", "x", "user", "digest-user")
+	group := LogicalGroup{Concept: "mcp_server", LogicalID: "x", Candidates: []Candidate{managed, user}}
+	hk, capOps := qualifiedPack("mcp_server", "MANAGED_GUARDRAIL")
+	entry, conflict := ResolveGroup(group, hk, capOps, Options{})
+	if conflict != nil {
+		t.Fatalf("unexpected conflict: %+v", conflict)
+	}
+	if !entry.Confirmed {
+		t.Error("Confirmed = false, want true: both candidates carry E3 evidence, MANAGED_GUARDRAIL must report that like every other operator does")
+	}
+}
