@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -113,17 +114,107 @@ func instructionContent(o domain.Observation) (content []byte, ok bool) {
 	return []byte(s), true
 }
 
-// permissionDefaultsFile returns the one OMCA-authored, conservative
-// default permission configuration file this package always emits inside
-// nativeHomeDir, per docs/project/roadmap.md M1 ("conservative permission
-// defaults"). Its content is a hardcoded M1 policy value, not a
-// host-verified capability resolution (see
-// knowledge/hosts/<host>/.../manifest.json's own capabilities.*.resolve:
-// UNKNOWN) -- a later milestone that actually resolves and verifies
-// permission semantics per host/version supersedes this. The returned
-// RelPath is relative to nativeHomeDir itself; compileHostTree joins it
-// under the full per-host prefix.
-func permissionDefaultsFile(host, nativeHomeDir string) (generatedFile, error) {
+// mcpServerID is the entry name this package registers the OMCA MCP server
+// under inside a generation's own config -- "omca", matching the binary a
+// human would recognize, distinct from any project- or user-registered
+// server ID a real config might otherwise carry (there is none in a
+// bootstrap generation's own generated tree, but the name still matters for
+// a human reading the generated file).
+const mcpServerID = "omca"
+
+// mcpServerArgs is the fixed argv `omca mcp serve` (cmd/omca/mcp.go) this
+// package always registers when it emits an MCP registration at all --
+// there is exactly one subcommand this PR wires up (issue #15's own "ONLY
+// omca_status; omca_query/omca_propose/omca_stage are explicitly out of
+// scope").
+var mcpServerArgs = []string{"mcp", "serve"}
+
+// tomlString quote-escapes s for a TOML basic string literal: backslash and
+// double-quote are TOML's own two escape-worthy characters inside a basic
+// (double-quoted) string. This package's other hardcoded TOML values never
+// contain either, so this is the one place a caller-supplied value (a real
+// filesystem path, which on a sane filesystem should never contain a
+// double-quote but could in principle) needs actual escaping rather than
+// bare interpolation.
+func tomlString(s string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
+	return `"` + replacer.Replace(s) + `"`
+}
+
+// codexMCPRegistrationTOML returns the `[mcp_servers.omca]` TOML table this
+// package appends to a codex generation's config.toml when omcaBinaryPath
+// is non-empty (docs/architecture/runtime.md §3: "the bootstrap generation
+// contains... the OMCA MCP server"). command is Bootstrap's caller-supplied,
+// absolute OMCA binary path (BootstrapRequest.OMCABinaryPath); args are the
+// fixed mcpServerArgs.
+func codexMCPRegistrationTOML(omcaBinaryPath string) string {
+	return fmt.Sprintf("\n[mcp_servers.%s]\ncommand = %s\nargs = [\"mcp\", \"serve\"]\n", mcpServerID, tomlString(omcaBinaryPath))
+}
+
+// claudeMCPServerEntry is one entry of a Claude-Code-shaped `mcpServers`
+// JSON object (fixtures/claude-code/2.1.211/mcp-merge/input's own
+// `{"command":..., "args":[...]}` shape).
+type claudeMCPServerEntry struct {
+	Command string   `json:"command"`
+	Args    []string `json:"args"`
+}
+
+// claudeMCPRegistrationJSON returns the generated `.claude.json` content
+// this package writes into a claude-code generation's nativeHomeDir when
+// omcaBinaryPath is non-empty: a single `mcpServers.omca` entry, matching
+// the real user-scope file internal/observe/rules.go's claudeUserRules
+// already looks for at $CLAUDE_CONFIG_DIR/.claude.json (fixtures/README.md's
+// static-inspection finding: this file sits directly under CLAUDE_CONFIG_DIR,
+// not nested under a further .claude/ subdirectory). Unlike a real user's
+// ~/.claude.json, this generated file carries nothing but the one MCP
+// registration -- no trust state, no OAuth/account data, nothing copied
+// from any real native source (docs/architecture/runtime.md §8:
+// "Authentication state is not normal configuration and is never imported
+// from an untrusted native home as part of runtime compilation").
+func claudeMCPRegistrationJSON(omcaBinaryPath string) ([]byte, error) {
+	doc := map[string]map[string]claudeMCPServerEntry{
+		"mcpServers": {
+			mcpServerID: {Command: omcaBinaryPath, Args: append([]string{}, mcpServerArgs...)},
+		},
+	}
+	data, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("runtime: claudeMCPRegistrationJSON: %w", err)
+	}
+	return append(data, '\n'), nil
+}
+
+// hostConfigFiles returns every OMCA-authored config file this package
+// always emits inside nativeHomeDir: conservative default permissions
+// (docs/project/roadmap.md M1), plus -- when omcaBinaryPath is non-empty --
+// the OMCA MCP server registration (docs/architecture/runtime.md §3: "the
+// bootstrap generation contains... the OMCA MCP server"; FR-7). This is the
+// scope cut doc.go's "What is deliberately NOT in the generated tree yet"
+// section flagged as open ("internal/mcp... is still an empty doc.go stub
+// -- there is no real command or protocol handler this compiler could point
+// a generated config entry at yet"): issue #15 built internal/mcp and
+// `omca mcp serve`, so this function now closes that gap whenever a caller
+// supplies a real omcaBinaryPath.
+//
+// Permission defaults and the MCP registration are emitted together, not as
+// two separately-tracked files, because for both hosts today they land in
+// the exact same physical file (codex's single config.toml; claude-code's
+// case is the one exception -- see below) and a generatedFile slice cannot
+// contain two entries with the same RelPath without one silently
+// overwriting the other on disk.
+//
+// Claude Code's MCP registration is the one case that does NOT share a file
+// with the permission defaults: internal/observe/rules.go's claudeUserRules
+// already establishes that Claude Code's MCP registry lives in
+// $CLAUDE_CONFIG_DIR/.claude.json, a different file from settings.json
+// (where defaultMode lives) -- writing them as two separate generated files
+// mirrors that real, already-established physical split rather than
+// inventing a combined file format Claude Code itself does not use.
+//
+// Returned RelPaths are relative to nativeHomeDir itself; compileHostTree
+// joins them under the full per-host prefix, exactly like the single-file
+// version this replaces.
+func hostConfigFiles(host, nativeHomeDir, omcaBinaryPath string) ([]generatedFile, error) {
 	switch host {
 	case "codex":
 		content := "" +
@@ -132,12 +223,23 @@ func permissionDefaultsFile(host, nativeHomeDir string) (generatedFile, error) {
 			"# resolution -- see knowledge/hosts/codex/cli/0.144/manifest.json.\n" +
 			"approval_policy = \"untrusted\"\n" +
 			"sandbox_mode = \"read-only\"\n"
-		return generatedFile{RelPath: filepath.Join(nativeHomeDir, "config.toml"), Content: []byte(content)}, nil
+		if omcaBinaryPath != "" {
+			content += codexMCPRegistrationTOML(omcaBinaryPath)
+		}
+		return []generatedFile{{RelPath: filepath.Join(nativeHomeDir, "config.toml"), Content: []byte(content)}}, nil
 	case "claude-code":
 		content := `{"permissions":{"defaultMode":"plan"}}` + "\n"
-		return generatedFile{RelPath: filepath.Join(nativeHomeDir, "settings.json"), Content: []byte(content)}, nil
+		files := []generatedFile{{RelPath: filepath.Join(nativeHomeDir, "settings.json"), Content: []byte(content)}}
+		if omcaBinaryPath != "" {
+			claudeJSON, err := claudeMCPRegistrationJSON(omcaBinaryPath)
+			if err != nil {
+				return nil, err
+			}
+			files = append(files, generatedFile{RelPath: filepath.Join(nativeHomeDir, ".claude.json"), Content: claudeJSON})
+		}
+		return files, nil
 	default:
-		return generatedFile{}, fmt.Errorf("runtime: permissionDefaultsFile: unsupported host %q", host)
+		return nil, fmt.Errorf("runtime: hostConfigFiles: unsupported host %q", host)
 	}
 }
 
@@ -235,12 +337,14 @@ func compileHostTree(req BootstrapRequest) ([]generatedFile, []domain.Generation
 		sources = append(sources, entry)
 	}
 
-	permFile, err := permissionDefaultsFile(host, nativeHomeDir)
+	configFiles, err := hostConfigFiles(host, nativeHomeDir, req.OMCABinaryPath)
 	if err != nil {
 		return nil, nil, err
 	}
-	permFile.RelPath = filepath.Join(hostPrefix, permFile.RelPath)
-	files = append(files, permFile)
+	for i := range configFiles {
+		configFiles[i].RelPath = filepath.Join(hostPrefix, configFiles[i].RelPath)
+	}
+	files = append(files, configFiles...)
 
 	if host == "claude-code" {
 		sources = append(sources, claudeConfigDirExclusionGapSources()...)

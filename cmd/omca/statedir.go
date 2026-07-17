@@ -61,3 +61,25 @@ func worktreeStateDirPath(stateRoot, worktreeID string) string {
 func shimDirPath(worktreeStateDir string) string {
 	return filepath.Join(worktreeStateDir, "shims")
 }
+
+// resolveOMCABinaryPath resolves the absolute, symlink-evaluated path to
+// the currently running omca binary. This is the exact resolution env.go's
+// installShims already performed inline for the codex/claude PATH shim
+// symlinks; factored out here so it has exactly one implementation, reused
+// by installShims and by every caller that needs to populate
+// runtime.BootstrapRequest.OMCABinaryPath (env.go's runEnv, run.go's
+// runIsolated, doctor.go's checkStaleGeneration) — those three call sites
+// must all resolve the identical value for a given running omca process, or
+// `omca doctor` would spuriously report every generation as stale the
+// moment this PR's MCP registration wiring folded OMCABinaryPath into
+// GenerationID (see internal/runtime/generationid.go).
+func resolveOMCABinaryPath() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("omca: resolveOMCABinaryPath: %w", err)
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	return exe, nil
+}

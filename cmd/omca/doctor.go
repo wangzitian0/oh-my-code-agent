@@ -11,6 +11,7 @@ import (
 	"time"
 
 	hostcontext "github.com/wangzitian0/oh-my-code-agent/internal/context"
+	"github.com/wangzitian0/oh-my-code-agent/internal/domain"
 	"github.com/wangzitian0/oh-my-code-agent/internal/observe"
 	"github.com/wangzitian0/oh-my-code-agent/internal/runtime"
 	"github.com/wangzitian0/oh-my-code-agent/internal/shim"
@@ -149,9 +150,14 @@ func checkPathBypass(host, binName, shimDir string) doctorFinding {
 // detect+observe, compare against the generation the "current" pointer
 // names) and "host binary moved since qualification" (compare the
 // CurrentRecord sidecar's recorded binary path against a fresh
-// resolution). It returns multiple findings (or a single one, for a host
-// that is not installed or has no compiled generation yet) rather than one
-// combined finding, so a caller/CI can see each condition independently.
+// resolution) — plus issue #15's context-cost report. It returns multiple
+// findings (or a single one, for a host that is not installed, has no
+// compiled generation yet, or whose manifest cannot even be read) rather
+// than one combined finding, so a caller/CI can see each condition
+// independently. The manifest is read exactly once here and passed to both
+// checkStaleGeneration and checkContextCost, rather than each independently
+// re-reading and re-validating the same file (an inefficiency an earlier
+// version of this PR had).
 func checkGenerationFreshness(host string, wt hostcontext.Worktree, worktreeStateDir string, env hostcontext.Environment, shimDir string) []doctorFinding {
 	detectEnv := envWithFilteredPath(env, shimDir)
 	hd, err := hostcontext.DetectHost(stdcontext.Background(), detectEnv, host)
@@ -174,19 +180,43 @@ func checkGenerationFreshness(host string, wt hostcontext.Worktree, worktreeStat
 		return []doctorFinding{{Check: "generation:" + host, Status: statusFail, Detail: fmt.Sprintf("%s's current-generation pointer in %s is corrupt: %v", host, worktreeStateDir, cgErr)}}
 	}
 
+	gen, readErr := runtime.ReadGenerationManifest(genDir)
+	if readErr != nil {
+		return []doctorFinding{{Check: "generation:" + host, Status: statusFail, Detail: fmt.Sprintf("current generation manifest for %s at %s is unreadable: %v", host, genDir, readErr)}}
+	}
+
 	var findings []doctorFinding
-	findings = append(findings, checkStaleGeneration(host, wt, genDir, hd))
+	findings = append(findings, checkStaleGeneration(host, wt, gen, hd))
 	findings = append(findings, checkBinaryMoved(host, worktreeStateDir, hd))
+	findings = append(findings, checkContextCost(host, gen))
 	return findings
 }
 
-// checkStaleGeneration is issue #14's "stale generation" AC.
-func checkStaleGeneration(host string, wt hostcontext.Worktree, genDir string, hd hostcontext.HostDetection) doctorFinding {
+// checkContextCost is issue #15's own instruction to surface the exclusion
+// counts and estimated context-cost delta "wherever omca doctor/omca env/a
+// report-producing command already prints diagnostic output," not only
+// through the omca_status MCP tool. Always statusOK: this is a report of
+// what the current generation excluded, never itself a pass/fail condition
+// — a host with zero exclusions (e.g. a genuinely clean native install) is
+// not a problem doctor should flag. (gen is already known-readable by the
+// time this is called — checkGenerationFreshness reads and validates the
+// manifest once, before calling this and checkStaleGeneration, so this
+// function itself has no failure path of its own.)
+func checkContextCost(host string, gen domain.Generation) doctorFinding {
+	return doctorFinding{Check: "context-cost:" + host, Status: statusOK, Detail: contextCostSummaryLine(host, gen)}
+}
+
+// checkStaleGeneration is issue #14's "stale generation" AC: recompute
+// GenerationID from a fresh detect+observe pass and compare against gen's
+// own recorded ID. OMCABinaryPath is deliberately left unset in the
+// recomputed BootstrapRequest below — it does not participate in
+// GenerationID at all (internal/runtime/request.go's OMCABinaryPath doc
+// comment: it is always the worktree's own stable PATH-shim path, which
+// never differs between two calls compiling "the same" generation), so
+// there is nothing here that needs to match whatever the original compile
+// used.
+func checkStaleGeneration(host string, wt hostcontext.Worktree, gen domain.Generation, hd hostcontext.HostDetection) doctorFinding {
 	check := "stale-generation:" + host
-	gen, readErr := runtime.ReadGenerationManifest(genDir)
-	if readErr != nil {
-		return doctorFinding{Check: check, Status: statusFail, Detail: fmt.Sprintf("current generation manifest for %s at %s is unreadable: %v", host, genDir, readErr)}
-	}
 	obs, obsErr := observe.Observe(observe.Request{Detection: hd, WorktreeRoot: wt.Root})
 	if obsErr != nil {
 		return doctorFinding{Check: check, Status: statusFail, Detail: fmt.Sprintf("re-observing %s failed: %v", host, obsErr)}

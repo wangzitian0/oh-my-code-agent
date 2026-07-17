@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"fmt"
+	"path/filepath"
 	"time"
 
 	hostcontext "github.com/wangzitian0/oh-my-code-agent/internal/context"
@@ -43,6 +44,38 @@ type BootstrapRequest struct {
 	// Parent is the previous generation ID this one supersedes, or nil for
 	// a first/bootstrap generation (domain.GenerationMetadata.Parent).
 	Parent *string
+
+	// OMCABinaryPath is the absolute command a generation should register
+	// as its MCP server's launch command (docs/architecture/runtime.md §3's
+	// "the bootstrap generation contains... the OMCA MCP server";
+	// docs/product/requirements.md FR-7). It is optional: a caller that
+	// leaves it empty (every test in this package predating issue #15 does,
+	// and any future caller that has no meaningful command to supply)
+	// simply gets a generation with no MCP registration written into the
+	// per-host config -- the exact scope cut doc.go's "What is deliberately
+	// NOT in the generated tree yet" section documented, closed by a caller
+	// that actually supplies this value (cmd/omca/env.go, cmd/omca/run.go).
+	//
+	// This is deliberately NOT a snapshot of the currently-running OMCA
+	// binary's own resolved filesystem path (os.Executable()): that path
+	// changes across every rebuild (and, worse, on every single `go run`
+	// invocation -- verified during this PR's own development), which would
+	// make GenerationID churn on every rebuild if this field participated
+	// in it, or silently register a stale/nonexistent command if it did
+	// not. Instead, cmd/omca passes the worktree's own stable PATH-shim
+	// entry (worktreeStateDir/shims/omca -- cmd/omca/env.go's
+	// shimEntryNames, refreshed to point at whatever omca binary is
+	// currently running on every `omca env`/`omca run` call, exactly like
+	// the existing codex/claude shim entries). That path is a deterministic
+	// function of the worktree's own state directory alone -- it never
+	// changes across an OMCA rebuild -- so it deliberately does NOT
+	// participate in GenerationID (generationid.go): a generation compiled
+	// yesterday and reused today under EnsureGeneration's content-addressed
+	// cache still resolves the SAME command, which (by construction of the
+	// shim refresh) always points at whatever omca binary is current at
+	// invocation time -- arguably more correct than freezing a specific
+	// build's path inside an old generation would be.
+	OMCABinaryPath string
 }
 
 // validate rejects a request this package cannot compile: an unrecognized
@@ -71,6 +104,9 @@ func (req BootstrapRequest) validate() error {
 	}
 	if req.Now.IsZero() {
 		return fmt.Errorf("runtime: BootstrapRequest: Now is required (this package never reads the clock implicitly)")
+	}
+	if req.OMCABinaryPath != "" && !filepath.IsAbs(req.OMCABinaryPath) {
+		return fmt.Errorf("runtime: BootstrapRequest: OMCABinaryPath %q is not absolute", req.OMCABinaryPath)
 	}
 	for i, o := range req.Observations {
 		if o.Spec.Host.ID != req.Detection.Host {

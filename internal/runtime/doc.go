@@ -81,19 +81,23 @@
 // deliberately different loadouts from one desired state," roadmap M2's
 // exit gate) -- not invented here.
 //
-// # What is deliberately NOT in the generated tree yet
+// # The OMCA MCP server registration (closed by issue #15 / PR-11)
 //
 // docs/project/roadmap.md M1's abstract deliverable list names three
 // bootstrap-generation contents: conservative permission defaults, "the
-// OMCA MCP server", and project-loadable Instructions. This PR's own,
-// more specific "What to build" instructions enumerate the generated
-// per-host tree as containing ONLY the repository Instructions chain and
-// conservative default permission config. internal/mcp (the package that
-// would define what "the OMCA MCP server" actually is) is still an empty
-// doc.go stub -- there is no real command or protocol handler this
-// compiler could point a generated config entry at yet. Rather than
-// fabricating a registration for a server that does not exist, this
-// compiler omits it; a future PR (M4, once internal/mcp exists) should
-// extend compileHostTree to also emit that registration. This is a
-// documented scope cut, not an oversight.
+// OMCA MCP server", and project-loadable Instructions. PR-09 (this
+// package's original PR) left the second of those three as a documented
+// scope cut: internal/mcp was still an empty doc.go stub, so there was no
+// real command or protocol handler a generated config entry could point at.
+// PR-11 (issue #15) built internal/mcp and `omca mcp serve`, and closed the
+// gap here: compile.go's hostConfigFiles now writes an `[mcp_servers.omca]`
+// entry into codex's config.toml, and a `.claude.json` carrying
+// `mcpServers.omca` for claude-code, whenever BootstrapRequest.
+// OMCABinaryPath is supplied (cmd/omca/env.go and cmd/omca/run.go always
+// supply it in production, as the worktree's own stable PATH-shim path --
+// never a snapshot of the currently-running omca binary's own resolved
+// location; every test predating PR-11 leaves it empty and simply gets a
+// generation with no MCP registration, exactly PR-09's original behavior).
+// See request.go's OMCABinaryPath doc comment for why this value
+// deliberately does NOT fold into GenerationID.
 package runtime

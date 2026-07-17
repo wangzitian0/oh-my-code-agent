@@ -62,6 +62,16 @@ func runOmcaSubprocess(t *testing.T, dir string, args, environ []string) (stdout
 // unlike the shim tests which start from an already-compiled fixture), and
 // the real binary that finally runs (fakehost) sees CODEX_HOME pointing
 // into it.
+//
+// It also proves a real bug this PR's own review caught and fixed: earlier,
+// `omca run <host>` (unlike `omca env`) never injected OMCA_STATE_DIR or
+// OMCA_WORKTREE_ID into the exec'd environment, so a spawned `omca mcp
+// serve` subprocess (per this PR's own MCP-registration wiring,
+// internal/runtime/compile.go's hostConfigFiles) could never answer
+// omca_status for a session launched this way — internal/mcp.ComputeStatus
+// hard-fails without OMCA_STATE_DIR. fakehost's dumped environment is the
+// only observable proof available to a real-subprocess test of what the
+// exec'd process actually received.
 func TestRunIsolated_EndToEnd_ExecsWithGenerationEnv(t *testing.T) {
 	if goruntime.GOOS == "windows" {
 		t.Skip("syscall.Exec-based `omca run` is macOS-first scope")
@@ -95,6 +105,12 @@ func TestRunIsolated_EndToEnd_ExecsWithGenerationEnv(t *testing.T) {
 	// own XDG_STATE_HOME/omca convention), not anywhere ambient.
 	if !strings.Contains(stdout, filepath.Join(stateRoot, "omca")) {
 		t.Errorf("CODEX_HOME does not point inside the configured XDG_STATE_HOME (%s); stdout:\n%s", stateRoot, stdout)
+	}
+	if !strings.Contains(stdout, "OMCA_STATE_DIR=") {
+		t.Errorf("fakehost's dumped environment did not contain OMCA_STATE_DIR -- a spawned `omca mcp serve` subprocess could never answer omca_status; stdout:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "OMCA_WORKTREE_ID=") {
+		t.Errorf("fakehost's dumped environment did not contain OMCA_WORKTREE_ID; stdout:\n%s", stdout)
 	}
 }
 

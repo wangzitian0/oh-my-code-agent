@@ -148,6 +148,25 @@ func runNative(stderr io.Writer, host, binName string, env hostcontext.Environme
 // directly execs the target host with the generation environment injected
 // — the same internal/shim.ExecReplace discipline the PATH shim itself
 // uses, reused here rather than duplicated.
+//
+// The exec'd environment carries OMCA_STATE_DIR and OMCA_WORKTREE_ID (in
+// addition to the native-home variable and OMCA_RUN_ID this function always
+// set) precisely because the compiled generation now registers `omca mcp
+// serve` as an MCP server (internal/runtime/compile.go's hostConfigFiles,
+// PR-11/issue #15): if the host actually launches that registration as a
+// subprocess, cmd/omca/mcp.go's runMCP reads exactly these two variables
+// from its own (inherited) environment to answer omca_status, and
+// internal/mcp.ComputeStatus hard-fails without OMCA_STATE_DIR. Before this
+// fix, a session launched via `omca run <host>` — the documented "one-shot
+// use without direnv" path, docs/architecture/runtime.md §11 — silently
+// could never answer omca_status at all, since these variables are only
+// otherwise present when a shell has separately run `omca env`
+// (a Copilot-review-equivalent finding on this PR's own review pass).
+// OMCA_CONTEXT_ID is deliberately left unset here: computing the same
+// value `omca env` would (cmd/omca/env.go's computeContextID) requires
+// detecting every DetectedHostIDs entry, not just the one host `omca run`
+// targets, and StatusResult.ContextID is documented as optional/best-effort
+// for exactly this reason.
 func runIsolated(stderr io.Writer, host string, realEnv hostcontext.Environment, passthrough []string) int {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -168,6 +187,18 @@ func runIsolated(stderr io.Writer, host string, realEnv hostcontext.Environment,
 	worktreeStateDir := worktreeStateDirPath(stateRoot, wt.ID)
 	shimDir := shimDirPath(worktreeStateDir)
 
+	// installShims (not just shimDirPath's path arithmetic) must actually
+	// run here, not only in `omca env`: the compiled generation's MCP
+	// registration below points at shimDir/omca, and that entry must exist
+	// and resolve to a real, executable omca binary for a host that
+	// launches it to succeed — `omca run` is the documented direnv-free
+	// path, so it cannot assume a prior `omca env` call ever populated
+	// shimDir.
+	if err := installShims(shimDir); err != nil {
+		fmt.Fprintf(stderr, "omca: run: installing PATH shims: %v\n", err)
+		return 1
+	}
+
 	detectEnv := envWithFilteredPath(realEnv, shimDir)
 	hd, err := hostcontext.DetectHost(stdcontext.Background(), detectEnv, host)
 	if err != nil {
@@ -186,7 +217,7 @@ func runIsolated(stderr io.Writer, host string, realEnv hostcontext.Environment,
 	}
 
 	now := time.Now()
-	req := runtime.BootstrapRequest{Detection: hd, Worktree: wt, Observations: obs, Now: now}
+	req := runtime.BootstrapRequest{Detection: hd, Worktree: wt, Observations: obs, Now: now, OMCABinaryPath: omcaCommandPath(shimDir)}
 	gen, outputDir, err := runtime.EnsureGeneration(req, filepath.Join(worktreeStateDir, "generations"))
 	if err != nil {
 		fmt.Fprintf(stderr, "omca: run: compiling %s generation: %v\n", host, err)
@@ -196,6 +227,7 @@ func runIsolated(stderr io.Writer, host string, realEnv hostcontext.Environment,
 		fmt.Fprintf(stderr, "omca: run: recording current generation for %s: %v\n", host, err)
 		return 1
 	}
+	fmt.Fprintf(stderr, "omca: run: %s\n", contextCostSummaryLine(host, gen))
 
 	envVar, err := runtime.NativeHomeEnvVar(host)
 	if err != nil {
@@ -213,7 +245,12 @@ func runIsolated(stderr io.Writer, host string, realEnv hostcontext.Environment,
 	}
 	nativeHomeDir := filepath.Join(outputDir, "hosts", host, surface, homeDirName)
 
-	overrides := map[string]string{envVar: nativeHomeDir, "OMCA_RUN_ID": gen.Metadata.ID}
+	overrides := map[string]string{
+		envVar:             nativeHomeDir,
+		"OMCA_RUN_ID":      gen.Metadata.ID,
+		"OMCA_STATE_DIR":   worktreeStateDir,
+		"OMCA_WORKTREE_ID": wt.ID,
+	}
 	envp := shim.InjectEnv(os.Environ(), overrides)
 	argv := append([]string{hd.BinaryPath}, passthrough...)
 	if err := shim.ExecReplace(hd.BinaryPath, argv, envp); err != nil {
