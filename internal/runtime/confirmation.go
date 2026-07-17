@@ -229,15 +229,41 @@ func ClassifyChange(c ProposedChange) ConfirmationRequirement {
 	}
 }
 
+// ConfirmationKey identifies exactly which proposed change a caller-obtained
+// confirmation covers: RequireConfirmation's confirmed set is keyed by this,
+// not by ChangeKind alone (Copilot review finding on this PR: an earlier
+// version keyed only by Kind, so confirming ANY one MCP-server-enable also
+// silently satisfied confirmation for every OTHER MCP server or permission
+// change of the same Kind in the same activation -- exactly the class of
+// weakened-safety-property bug this project treats as a real defect, not a
+// style nit, since docs/product/requirements.md §7's whole point is that an
+// operator reviews and approves ONE specific server's command/network/
+// secret exposure, not "MCP servers in general"). Two ProposedChanges with
+// the same Kind but a different AssetID or Host are always distinct
+// confirmations.
+type ConfirmationKey struct {
+	Kind    ChangeKind
+	AssetID string
+	Host    string
+}
+
+// Key returns c's ConfirmationKey.
+func (c ProposedChange) Key() ConfirmationKey {
+	return ConfirmationKey{Kind: c.Kind, AssetID: c.AssetID, Host: c.Host}
+}
+
 // ConfirmationRequiredError reports that one or more ProposedChanges in an
 // activation require an explicit confirmation the caller has not yet
 // supplied -- mirrors internal/profiles.AmbiguousIdentityError's shape and
 // role exactly: a distinguished error a caller (a future CLI prompt, or
 // this package's own test) is expected to present, obtain an explicit
 // confirmation for, and retry with, rather than this package ever guessing
-// or silently proceeding.
+// or silently proceeding. Changes lists the exact ProposedChange each
+// pending Requirements entry (same index) is about, so a caller can report
+// which specific asset/host is still outstanding, not just which class.
 type ConfirmationRequiredError struct {
 	Requirements []ConfirmationRequirement
+	Changes      []ProposedChange
 }
 
 func (e *ConfirmationRequiredError) Error() string {
@@ -246,27 +272,30 @@ func (e *ConfirmationRequiredError) Error() string {
 
 // RequireConfirmation classifies every change in changes and returns a
 // *ConfirmationRequiredError naming every one that RequiresConfirmation and
-// is not already present (by Kind+AssetID+Host) in confirmed -- the
+// is not already present (by ConfirmationKey -- Kind+AssetID+Host, see that
+// type's doc comment for why the granularity matters) in confirmed -- the
 // caller-supplied set of changes an operator (or, later, a TUI) has already
 // explicitly approved. A nil error means every change either needs no
 // confirmation (auto-stage) or was already confirmed; the activation
 // transaction may proceed. This is the one function cmd/omca's `omca
 // activate` wires into the real Activate call (activate.go) -- see
 // cmd/omca/activate.go.
-func RequireConfirmation(changes []ProposedChange, confirmed map[ChangeKind]bool) *ConfirmationRequiredError {
-	var pending []ConfirmationRequirement
+func RequireConfirmation(changes []ProposedChange, confirmed map[ConfirmationKey]bool) *ConfirmationRequiredError {
+	var pendingReqs []ConfirmationRequirement
+	var pendingChanges []ProposedChange
 	for _, c := range changes {
 		req := ClassifyChange(c)
 		if !req.RequiresConfirmation {
 			continue
 		}
-		if confirmed[c.Kind] {
+		if confirmed[c.Key()] {
 			continue
 		}
-		pending = append(pending, req)
+		pendingReqs = append(pendingReqs, req)
+		pendingChanges = append(pendingChanges, c)
 	}
-	if len(pending) == 0 {
+	if len(pendingReqs) == 0 {
 		return nil
 	}
-	return &ConfirmationRequiredError{Requirements: pending}
+	return &ConfirmationRequiredError{Requirements: pendingReqs, Changes: pendingChanges}
 }

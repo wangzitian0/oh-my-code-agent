@@ -94,7 +94,7 @@ func TestConfirmation_EnableMCPServer_RequiresDetailConfirmation(t *testing.T) {
 	}
 
 	// Once explicitly confirmed, the same change must be allowed through.
-	confirmed := map[ChangeKind]bool{ChangeEnableMCPServer: true}
+	confirmed := map[ConfirmationKey]bool{change.Key(): true}
 	if err := RequireConfirmation([]ProposedChange{change}, confirmed); err != nil {
 		t.Errorf("RequireConfirmation after explicit confirmation: want nil, got %v", err)
 	}
@@ -125,7 +125,7 @@ func TestConfirmation_HookAndPermissionExpansion_AlwaysConfirm(t *testing.T) {
 		}
 	}
 
-	confirmed := map[ChangeKind]bool{ChangeEnableHookPluginExtension: true, ChangeExpandAccess: true}
+	confirmed := map[ConfirmationKey]bool{changes[0].Key(): true, changes[1].Key(): true}
 	if err := RequireConfirmation(changes, confirmed); err != nil {
 		t.Errorf("RequireConfirmation after explicit confirmation: want nil, got %v", err)
 	}
@@ -204,8 +204,46 @@ func TestDiffProposedChanges_NewMCPServerSkillAndPermission_ClassifiedCorrectly(
 	if err := RequireConfirmation(changes, nil); err == nil {
 		t.Fatal("RequireConfirmation over an unconfirmed mcpServer+skill+permission diff: want an error, got nil")
 	}
-	confirmed := map[ChangeKind]bool{ChangeEnableMCPServer: true, ChangeSelectReviewedSkill: true, ChangeExpandAccess: true}
+	confirmed := make(map[ConfirmationKey]bool, len(changes))
+	for _, c := range changes {
+		confirmed[c.Key()] = true
+	}
 	if err := RequireConfirmation(changes, confirmed); err != nil {
 		t.Errorf("RequireConfirmation after confirming every required class: want nil, got %v", err)
+	}
+}
+
+// TestRequireConfirmation_ConfirmationIsPerAsset_NotPerKind is a regression
+// test for a real Copilot review finding on this PR: RequireConfirmation
+// used to key its confirmed set by ChangeKind alone, so confirming ONE MCP
+// server enable would silently also satisfy confirmation for every OTHER
+// MCP server enable in the same activation -- exactly the weakened-safety-
+// property bug docs/product/requirements.md §7 exists to prevent (an
+// operator reviews and approves one specific server's command/network/
+// secret exposure, not "MCP servers in general"). This proves confirming
+// server A does NOT satisfy the requirement for server B.
+func TestRequireConfirmation_ConfirmationIsPerAsset_NotPerKind(t *testing.T) {
+	changeA := ProposedChange{Kind: ChangeEnableMCPServer, AssetID: "server-a", Host: "codex"}
+	changeB := ProposedChange{Kind: ChangeEnableMCPServer, AssetID: "server-b", Host: "codex"}
+	changes := []ProposedChange{changeA, changeB}
+
+	confirmed := map[ConfirmationKey]bool{changeA.Key(): true} // only server-a confirmed
+
+	err := RequireConfirmation(changes, confirmed)
+	if err == nil {
+		t.Fatal("RequireConfirmation with only server-a confirmed: want an error naming server-b, got nil")
+	}
+	var confErr *ConfirmationRequiredError
+	if !errors.As(err, &confErr) {
+		t.Fatalf("error = %v (%T), want a *ConfirmationRequiredError", err, err)
+	}
+	if len(confErr.Changes) != 1 || confErr.Changes[0].AssetID != "server-b" {
+		t.Fatalf("outstanding changes = %+v, want exactly one entry for server-b", confErr.Changes)
+	}
+
+	// Confirming both by their distinct keys clears the requirement.
+	confirmed[changeB.Key()] = true
+	if err := RequireConfirmation(changes, confirmed); err != nil {
+		t.Errorf("RequireConfirmation after confirming both server-a and server-b: want nil, got %v", err)
 	}
 }

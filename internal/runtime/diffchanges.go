@@ -15,12 +15,24 @@ type sourceKey struct {
 }
 
 // includedSourceSet indexes gen's Spec.Sources by sourceKey, for entries
-// where Included is true -- "what this generation actually activated,"
-// keyed for a newly-included lookup.
-func includedSourceSet(gen domain.Generation) map[sourceKey]domain.GenerationSourceEntry {
+// where Included is true AND Host equals host -- "what this generation
+// actually activated FOR THIS HOST," keyed for a newly-included lookup.
+//
+// The Host filter is required, not optional (Copilot review finding on this
+// PR): a shared multi-host Generation's Spec.Sources is one flat list
+// across every host it names (GenerationSourceEntry's own doc comment), so
+// without filtering, a host-scoped asset active for codex but not
+// claude-code would be indistinguishable by (Concept, Source) alone from
+// the same asset genuinely being active for BOTH -- silently breaking
+// DiffProposedChanges for exactly the differentiated-per-host-loadout
+// scenario M2's own exit gate exists to prove (a change could be wrongly
+// treated as "already active" because some OTHER host had it active, or
+// wrongly flagged as newly-active due to a same-keyed entry belonging to a
+// different host).
+func includedSourceSet(gen domain.Generation, host string) map[sourceKey]domain.GenerationSourceEntry {
 	out := make(map[sourceKey]domain.GenerationSourceEntry, len(gen.Spec.Sources))
 	for _, s := range gen.Spec.Sources {
-		if !s.Included {
+		if !s.Included || s.Host != host {
 			continue
 		}
 		out[sourceKey{Concept: s.Concept, Source: s.Source}] = s
@@ -52,12 +64,17 @@ func includedSourceSet(gen domain.Generation) map[sourceKey]domain.GenerationSou
 // the zero value (Generation{}) for a host's first-ever activation -- an
 // empty Spec.Sources list correctly means "everything in pending is newly
 // included."
+//
+// Both currentGen and pendingGen's Spec.Sources are filtered to entries
+// whose Host equals host before comparing (includedSourceSet's own doc
+// comment explains why this is required, not optional, for a shared
+// multi-host Generation).
 func DiffProposedChanges(currentGen, pendingGen domain.Generation, host string) []ProposedChange {
-	before := includedSourceSet(currentGen)
+	before := includedSourceSet(currentGen, host)
 
 	var changes []ProposedChange
 	for _, s := range pendingGen.Spec.Sources {
-		if !s.Included {
+		if !s.Included || s.Host != host {
 			continue
 		}
 		key := sourceKey{Concept: s.Concept, Source: s.Source}

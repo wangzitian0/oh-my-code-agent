@@ -303,6 +303,7 @@ func resolvedAssetSources(resolved resolve.ResolvedState) []domain.GenerationSou
 			Concept:  string(a.Kind),
 			Source:   a.ID,
 			Scope:    desiredStateScope,
+			Host:     resolved.Host,
 			Included: a.Active,
 			Reason:   fmt.Sprintf("resolved desired state (intent=%q): %s", string(a.Intent), a.Reason),
 		})
@@ -316,6 +317,7 @@ func resolvedAssetSources(resolved resolve.ResolvedState) []domain.GenerationSou
 			Concept:  string(c.Kind),
 			Source:   c.AssetID,
 			Scope:    desiredStateScope,
+			Host:     resolved.Host,
 			Included: false,
 			Reason:   fmt.Sprintf("resolved desired state: unresolved conflict among candidate intents %v; excluded from generation until resolved (docs/product/requirements.md §4.3: 'ambiguous conflicts remain visible and block unsafe generation')", intents),
 		})

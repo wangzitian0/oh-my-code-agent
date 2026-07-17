@@ -526,6 +526,21 @@ func compileHostTree(in hostTreeInput) ([]generatedFile, []domain.GenerationSour
 		sources = append(sources, claudeConfigDirExclusionGapSources()...)
 	}
 
+	// Stamp every entry with the host this call compiled for (Copilot
+	// review finding, issue #19/PR-15): compileHostTree always runs in a
+	// single-host context, so every entry it produces -- Observation-
+	// derived, permission-compilation, or the Claude Code capability-gap
+	// pair -- belongs to in.Host. A single blanket backfill here is simpler
+	// and less error-prone than threading Host through each of the three
+	// entry-producing paths individually, and is exactly what lets a
+	// shared multi-host Generation's flat Spec.Sources list still answer
+	// "which host does this entry belong to" once compileHostTree's three
+	// per-host calls (one per host in req.Hosts, compile_full.go) are all
+	// merged together.
+	for i := range sources {
+		sources[i].Host = in.Host
+	}
+
 	sort.Slice(files, func(i, j int) bool { return files[i].RelPath < files[j].RelPath })
 	sort.Slice(sources, func(i, j int) bool {
 		if sources[i].Concept != sources[j].Concept {

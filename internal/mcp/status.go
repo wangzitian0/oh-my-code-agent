@@ -195,6 +195,20 @@ func ComputeStatus(req ComputeStatusRequest) (StatusResult, error) {
 	if req.WorktreeStateDir == "" {
 		return StatusResult{}, fmt.Errorf("mcp: ComputeStatus: WorktreeStateDir is required")
 	}
+	// Enforce ComputeStatusRequest.SessionGenerationID's own documented
+	// contract ("required whenever SessionHost is set") instead of silently
+	// skipping restart detection when it's violated (Copilot review finding
+	// on this PR): a caller that determined SessionHost but failed to also
+	// thread through SessionGenerationID is a real caller-composition bug
+	// (most likely a wiring gap in whatever set OMCA_RUN_ID/SessionHost
+	// upstream, cmd/omca/mcp.go's runMCP), the same class of mismatch
+	// BootstrapRequest.validate()'s Observation-host check and
+	// AppendLedgerEntry's entry.Host check already fail closed on elsewhere
+	// in this codebase -- silently degrading restartRequired reporting
+	// would mask exactly the kind of bug this check exists to surface.
+	if req.SessionHost != "" && req.SessionGenerationID == "" {
+		return StatusResult{}, fmt.Errorf("mcp: ComputeStatus: SessionGenerationID is required when SessionHost (%q) is set", req.SessionHost)
+	}
 	out := StatusResult{WorktreeID: req.WorktreeID, ContextID: req.ContextID}
 	for _, host := range req.Hosts {
 		hs := hostStatus(req.WorktreeStateDir, host)

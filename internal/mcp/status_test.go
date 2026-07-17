@@ -381,3 +381,24 @@ func TestComputeStatus_RestartNotRequired_WhenSessionMatchesCurrent(t *testing.T
 		t.Error("RestartRequired = true, want false: the session's own generation is still current")
 	}
 }
+
+// TestComputeStatus_RejectsSessionHostWithoutGenerationID is a regression
+// test for a real Copilot review finding on this PR: ComputeStatusRequest's
+// own doc comment says SessionGenerationID is "required whenever SessionHost
+// is set," but ComputeStatus used to silently skip restart detection instead
+// of enforcing that contract -- masking exactly the kind of caller-wiring
+// bug (SessionHost determined but OMCA_RUN_ID not threaded through) this
+// check exists to surface.
+func TestComputeStatus_RejectsSessionHostWithoutGenerationID(t *testing.T) {
+	worktreeStateDir := buildManagedCodexWorktree(t, false, 0)
+
+	_, err := ComputeStatus(ComputeStatusRequest{
+		WorktreeStateDir: worktreeStateDir,
+		Hosts:            []string{"codex"},
+		SessionHost:      "codex",
+		// SessionGenerationID deliberately left empty.
+	})
+	if err == nil {
+		t.Fatal("ComputeStatus with SessionHost set and SessionGenerationID empty: want error, got nil")
+	}
+}

@@ -145,7 +145,7 @@ func TestRunActivate_WithConfirmation_Succeeds(t *testing.T) {
 	worktreeStateDir, gen, outputDir := buildPendingFixtureForActivate(t, env, mcpServerProfileYAML, nil, now)
 
 	var stdout, stderr bytes.Buffer
-	code := runActivate(&stdout, &stderr, []string{"codex", "--confirm", "enable-mcp-server"})
+	code := runActivate(&stdout, &stderr, []string{"codex", "--confirm", "enable-mcp-server:internal-docs"})
 	if code != 0 {
 		t.Fatalf("runActivate with --confirm = %d, want 0; stderr:\n%s", code, stderr.String())
 	}
@@ -182,7 +182,7 @@ func TestRunRollback_RestoresParent(t *testing.T) {
 
 	worktreeStateDir, firstGen, firstDir := buildPendingFixtureForActivate(t, env, mcpServerProfileYAML, nil, now)
 	var stdout, stderr bytes.Buffer
-	if code := runActivate(&stdout, &stderr, []string{"codex", "--confirm", "enable-mcp-server"}); code != 0 {
+	if code := runActivate(&stdout, &stderr, []string{"codex", "--confirm", "enable-mcp-server:internal-docs"}); code != 0 {
 		t.Fatalf("runActivate (first): %d; stderr:\n%s", code, stderr.String())
 	}
 
@@ -208,7 +208,7 @@ spec:
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runActivate(&stdout, &stderr, []string{"codex", "--confirm", "select-reviewed-skill"}); code != 0 {
+	if code := runActivate(&stdout, &stderr, []string{"codex", "--confirm", "select-reviewed-skill:code-review"}); code != 0 {
 		t.Fatalf("runActivate (second): %d; stderr:\n%s", code, stderr.String())
 	}
 	gotCurrent, err := runtime.CurrentGenerationDir(worktreeStateDir, "codex")
