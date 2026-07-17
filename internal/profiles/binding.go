@@ -111,8 +111,22 @@ func matchesPaths(patterns []string, relPath string) bool {
 // patterns are a closed, simple grammar (docs/product/requirements.md
 // §4.2's only documented example is "**"), so a general glob library would
 // be more machinery than the grammar needs.
+//
+// p == "" (the repository root) is special-cased to zero segments, not one
+// empty-string segment: strings.Split("", "/") returns [""] (a single
+// empty-string element), and without this case a single-segment pattern
+// like "*" would incorrectly match the root too — path.Match("*", "")
+// itself returns true, since "*" matches a zero-length sequence of
+// non-separator characters — even though "*" is meant to mean "exactly one
+// real path segment," which the root is not (Copilot review finding on
+// this PR). Only "**" (zero-or-more segments) or an empty patterns list
+// (matchesPaths' own separate case) should ever match the root.
 func globMatch(pattern, p string) bool {
-	return globMatchSegments(strings.Split(pattern, "/"), strings.Split(p, "/"))
+	segments := strings.Split(p, "/")
+	if p == "" {
+		segments = nil
+	}
+	return globMatchSegments(strings.Split(pattern, "/"), segments)
 }
 
 func globMatchSegments(pattern, seg []string) bool {

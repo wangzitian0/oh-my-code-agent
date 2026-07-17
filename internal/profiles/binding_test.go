@@ -180,6 +180,16 @@ func TestGlobMatch_PatternGrammar(t *testing.T) {
 		{"apps/api/**", "apps/api/x", true},
 		{"apps/api/**", "apps/apiextra", false},
 		{"apps/web/**", "apps/api/main.go", false},
+		// Regression (Copilot review finding on this PR): a single-segment
+		// pattern must NOT match the repository root. strings.Split("", "/")
+		// returns [""] (one empty-string element, not zero elements), and
+		// path.Match("*", "") itself returns true (a zero-length match), so
+		// without root special-casing "*" would incorrectly match "" the
+		// same way "**" correctly does — even though "*" means "exactly one
+		// real path segment," which the root is not. Only "**" (zero-or-more
+		// segments) may match the root.
+		{"*", "", false},
+		{"apps", "", false},
 	}
 	for _, c := range cases {
 		if got := globMatch(c.pattern, c.path); got != c.want {
