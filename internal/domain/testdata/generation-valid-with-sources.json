@@ -1,0 +1,49 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "Generation",
+  "metadata": {
+    "id": "generation:sha256:fce460264c3d6cedd37ec0cd28eedf86aed8dd7e97bf85bb90672404960648be",
+    "worktree": "worktree:sha256:abc",
+    "parent": null,
+    "createdAt": "2026-07-16T00:00:00Z"
+  },
+  "spec": {
+    "desiredGraphDigest": "sha256:fce460264c3d6cedd37ec0cd28eedf86aed8dd7e97bf85bb90672404960648be",
+    "knowledgePacks": [],
+    "hosts": {
+      "codex": {
+        "surface": "cli",
+        "adapterId": "runtime.bootstrap-compiler",
+        "ownership": "managed",
+        "artifacts": [
+          { "path": "hosts/codex/cli/instructions/AGENTS.md", "digest": "sha256:88ab5e32bbf5205cac37d9464c219373ac4bbbb169bcfc5035bf5baf56919202" }
+        ]
+      }
+    },
+    "status": "pending",
+    "sources": [
+      {
+        "concept": "instruction",
+        "source": "/repo/AGENTS.md",
+        "scope": "workspace",
+        "included": true,
+        "reason": "included: repository-scope Instructions chain, project-loadable per the M1 bootstrap policy"
+      },
+      {
+        "concept": "mcp_server",
+        "source": "/home/user/.codex/config.toml",
+        "scope": "user",
+        "included": false,
+        "reason": "excluded: native user-global source; the M1 bootstrap policy never inherits user-global config"
+      },
+      {
+        "concept": "mcp_server",
+        "scope": "user",
+        "included": false,
+        "reason": "capability gap: whether CLAUDE_CONFIG_DIR relocation completely excludes every native user-global MCP server registration was only statically inspected, never behavior-probed",
+        "capabilityGap": true,
+        "trackingIssue": "https://github.com/wangzitian0/oh-my-code-agent/issues/999"
+      }
+    ]
+  }
+}
