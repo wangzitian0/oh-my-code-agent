@@ -108,15 +108,29 @@ func assertWithinCeiling(t *testing.T, name string, s Stats, ceilingNanos int64)
 // reusing an already-compiled generation must be faster than compiling one
 // from scratch, or this benchmark's own "steady-state exercises the fast,
 // no-recompile path" premise (internal/runtime/current.go's EnsureGeneration
-// doc comment) would be unverified. Comparing means (not a single sample)
-// keeps this robust to one-off scheduling noise.
+// doc comment) would be unverified.
+//
+// Compares Min, not Mean: this was a real, observed CI flake (a shared,
+// loaded runner occasionally inflated one side's mean enough to invert the
+// comparison — first-bootstrap's mean measured faster than steady-state's
+// on one CI run, with only 5 first-bootstrap samples against 20
+// steady-state samples). Min is far more robust to that kind of scheduling
+// noise than Mean here specifically because the two phases have
+// structurally different floors, not just different averages:
+// first-bootstrap's best possible sample still has to build a fresh fixture
+// (real disk I/O: 30 fake MCP entries, 20 fake Skill files) and run a full
+// compile, while steady-state's best possible sample is close to a bare
+// EnsureGeneration existence check. A single lucky-fast first-bootstrap
+// sample or one contention-slowed steady-state sample can shift a mean
+// across 5-20 samples; it essentially never lets the cheaper phase's floor
+// exceed the more expensive phase's floor.
 func TestPerf_Synthetic_SteadyStateIsFasterThanFirstBootstrap(t *testing.T) {
 	result, err := MeasureSynthetic(newMeasurementBaseDir(t), DefaultMeasureConfig)
 	if err != nil {
 		t.Fatalf("MeasureSynthetic: %v", err)
 	}
-	if result.SteadyState.Mean >= result.FirstBootstrap.Mean {
-		t.Errorf("steady-state mean (%s) is not faster than first-bootstrap mean (%s); the reuse fast path may not be triggering", result.SteadyState.Mean, result.FirstBootstrap.Mean)
+	if result.SteadyState.Min >= result.FirstBootstrap.Min {
+		t.Errorf("steady-state min (%s) is not faster than first-bootstrap min (%s); the reuse fast path may not be triggering", result.SteadyState.Min, result.FirstBootstrap.Min)
 	}
 }
 
