@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	hostcontext "github.com/wangzitian0/oh-my-code-agent/internal/context"
 	"github.com/wangzitian0/oh-my-code-agent/internal/observe"
 )
 
@@ -126,21 +125,31 @@ func TestGenerationID_SensitiveToObservationCountChange(t *testing.T) {
 }
 
 // TestGenerationID_SensitiveToHostVersion proves the host version is a real
-// input, not just carried through unused. The observation set is identical
-// in both requests (host version does not affect what Observe finds on
-// disk); only Detection.Version differs.
+// input, not just carried through unused. The same fixture tree is observed
+// under two different versions (host version does not affect what Observe
+// finds on disk -- both observation sets describe byte-identical content,
+// only the recorded Spec.Host.Version differs, exactly as a real
+// re-detection after a host upgrade would produce); only that stamped
+// version, and Detection.Version to match it (BootstrapRequest.validate
+// requires every observation's version to match what the generation is
+// being compiled for -- see request.go), differ between the two requests.
 func TestGenerationID_SensitiveToHostVersion(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	tr := newCodexFixtureTree(t)
 	mustWriteFile(t, filepath.Join(tr.WorktreeRoot, "AGENTS.md"), "# instructions\n")
-	obs, err := observe.Observe(tr.request("0.144.5"))
+
+	obsV1, err := observe.Observe(tr.request("0.144.5"))
 	if err != nil {
-		t.Fatalf("observe.Observe: %v", err)
+		t.Fatalf("observe.Observe(0.144.5): %v", err)
+	}
+	obsV2, err := observe.Observe(tr.request("0.145.0"))
+	if err != nil {
+		t.Fatalf("observe.Observe(0.145.0): %v", err)
 	}
 
 	wt := tr.worktree(t)
-	reqV1 := BootstrapRequest{Detection: hostcontextWithVersion(tr.detection("0.144.5"), "0.144.5"), Worktree: wt, Observations: obs, Now: now}
-	reqV2 := BootstrapRequest{Detection: hostcontextWithVersion(tr.detection("0.144.5"), "0.145.0"), Worktree: wt, Observations: obs, Now: now}
+	reqV1 := BootstrapRequest{Detection: tr.detection("0.144.5"), Worktree: wt, Observations: obsV1, Now: now}
+	reqV2 := BootstrapRequest{Detection: tr.detection("0.145.0"), Worktree: wt, Observations: obsV2, Now: now}
 
 	idV1, err := GenerationID(reqV1)
 	if err != nil {
@@ -189,12 +198,4 @@ func TestGenerationID_SensitiveToWorktree(t *testing.T) {
 	if id1 == id2 {
 		t.Fatalf("GenerationID collided across two different worktrees with identical file content: both %q", id1)
 	}
-}
-
-// hostcontextWithVersion returns a copy of det with Version overridden --
-// small local helper so TestGenerationID_SensitiveToHostVersion can vary
-// only the version field.
-func hostcontextWithVersion(det hostcontext.HostDetection, version string) hostcontext.HostDetection {
-	det.Version = version
-	return det
 }

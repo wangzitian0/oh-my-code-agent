@@ -89,8 +89,14 @@
               "included": { "type": "boolean" },
               "reason": { "type": "string", "minLength": 1 },
               "capabilityGap": { "type": "boolean" },
-              "trackingIssue": { "type": "string" }
-            }
+              "trackingIssue": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Required and non-empty when capabilityGap is true (capability-gap shipping is allowed, hiding is not)."
+              }
+            },
+            "if": { "properties": { "capabilityGap": { "const": true } } },
+            "then": { "required": ["capabilityGap", "trackingIssue"] }
           }
         }
       }

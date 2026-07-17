@@ -98,11 +98,22 @@ func Bootstrap(req BootstrapRequest, outputDir string) (domain.Generation, error
 			KnowledgePacks: []domain.KnowledgePackRef{},
 			Hosts: map[string]domain.GenerationHostEntry{
 				req.Detection.Host: {
-					Surface:        req.surface(),
-					AdapterID:      AdapterID,
-					AdapterVersion: req.Detection.Version,
-					Ownership:      domain.OwnershipManaged,
-					Artifacts:      artifacts,
+					Surface: req.surface(),
+					// AdapterVersion is the ADAPTER/plugin's own version
+					// (see internal/domain/testdata/generation-valid.json's
+					// golden fixture: "adapter:codex" at "0.1.0" -- a
+					// semver for the adapter, not the host binary it
+					// targets). req.Detection.Version is the host CLI's
+					// version (e.g. "0.144.5"); populating AdapterVersion
+					// with it would misrepresent this compiler as a
+					// versioned adapter plugin release, which it is not
+					// (see AdapterID's doc comment in policy.go). This
+					// package has no adapter-plugin versioning scheme of
+					// its own yet, so AdapterVersion is left empty rather
+					// than filled with a value that means something else.
+					AdapterID: AdapterID,
+					Ownership: domain.OwnershipManaged,
+					Artifacts: artifacts,
 				},
 			},
 			Sources: sources,

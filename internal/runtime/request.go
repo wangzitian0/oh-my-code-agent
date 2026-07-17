@@ -48,10 +48,14 @@ type BootstrapRequest struct {
 // validate rejects a request this package cannot compile: an unrecognized
 // or unimplemented host, a worktree with no resolved identity/root, a
 // missing injected clock value, or an observation that does not actually
-// belong to the host this generation targets (a caller composition bug --
-// e.g. accidentally passing both hosts' Observe output into one
-// BootstrapRequest -- that would otherwise silently leak one host's sources
-// into another host's generation).
+// belong to the host/version/surface this generation targets (a caller
+// composition bug -- e.g. accidentally passing both hosts' Observe output
+// into one BootstrapRequest, or observations gathered under a stale host
+// version after an upgrade -- that would otherwise silently leak one host's
+// sources into another host's generation, or let GenerationID digest
+// req.Detection.Version while the actual observed sources came from a
+// different version, producing a manifest that cannot be reproduced or
+// verified from its own stated inputs).
 func (req BootstrapRequest) validate() error {
 	if err := domain.ValidateHostID(req.Detection.Host); err != nil {
 		return fmt.Errorf("runtime: BootstrapRequest: %w", err)
@@ -71,6 +75,12 @@ func (req BootstrapRequest) validate() error {
 	for i, o := range req.Observations {
 		if o.Spec.Host.ID != req.Detection.Host {
 			return fmt.Errorf("runtime: BootstrapRequest: Observations[%d] is for host %q, want %q (every observation must belong to the host this generation is being compiled for)", i, o.Spec.Host.ID, req.Detection.Host)
+		}
+		if o.Spec.Host.Version != req.Detection.Version {
+			return fmt.Errorf("runtime: BootstrapRequest: Observations[%d] was gathered under host version %q, want %q (every observation must match the version this generation is being compiled for)", i, o.Spec.Host.Version, req.Detection.Version)
+		}
+		if o.Spec.Surface != req.surface() {
+			return fmt.Errorf("runtime: BootstrapRequest: Observations[%d] is for surface %q, want %q (every observation must match the surface this generation is being compiled for)", i, o.Spec.Surface, req.surface())
 		}
 	}
 	return nil
