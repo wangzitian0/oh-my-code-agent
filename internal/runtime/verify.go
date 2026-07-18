@@ -128,11 +128,13 @@ func VerifyActivation(worktreeStateDir, host string, now time.Time) (Verificatio
 	}
 
 	var failed []string
+	var failReasons []string
 	for _, a := range entry.Artifacts {
 		full := filepath.Join(currentDir, a.Path)
 		content, readErr := os.ReadFile(full)
 		if readErr != nil {
-			failed = append(failed, fmt.Sprintf("%s: %v", a.Path, readErr))
+			failed = append(failed, a.Path)
+			failReasons = append(failReasons, fmt.Sprintf("%s: %v", a.Path, readErr))
 			continue
 		}
 		// Mirrors Compile's own digest computation exactly
@@ -145,11 +147,13 @@ func VerifyActivation(worktreeStateDir, host string, now time.Time) (Verificatio
 		// comment gives for reusing hostSourcesFor/aggregateSources).
 		digest, digestErr := domain.CanonicalDigest(string(content))
 		if digestErr != nil {
-			failed = append(failed, fmt.Sprintf("%s: computing digest: %v", a.Path, digestErr))
+			failed = append(failed, a.Path)
+			failReasons = append(failReasons, fmt.Sprintf("%s: computing digest: %v", a.Path, digestErr))
 			continue
 		}
 		if digest != a.Digest {
 			failed = append(failed, a.Path)
+			failReasons = append(failReasons, a.Path)
 		}
 	}
 
@@ -159,7 +163,7 @@ func VerifyActivation(worktreeStateDir, host string, now time.Time) (Verificatio
 			GenerationID:    gen.Metadata.ID,
 			Passed:          false,
 			FailedArtifacts: failed,
-			Detail:          fmt.Sprintf("%d of %d artifact(s) for %s no longer match generation %s's recorded manifest digests: %v", len(failed), len(entry.Artifacts), host, gen.Metadata.ID, failed),
+			Detail:          fmt.Sprintf("%d of %d artifact(s) for %s no longer match generation %s's recorded manifest digests: %v", len(failed), len(entry.Artifacts), host, gen.Metadata.ID, failReasons),
 		}, nil
 	}
 	return VerificationResult{

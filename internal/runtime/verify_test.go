@@ -3,6 +3,7 @@ package runtime
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -94,6 +95,64 @@ func TestVerifyActivation_DetectsTamperedArtifact(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("FailedArtifacts = %v, want it to include %q", result.FailedArtifacts, codexConfigTOMLRelPath)
+	}
+}
+
+// TestVerifyActivation_MissingArtifact_FailedArtifactsIsPathOnly is a
+// regression test for a Copilot review finding on this PR: the struct
+// comment on VerificationResult.FailedArtifacts promises "every artifact
+// path (relative to the generation directory)", but the read-error branch
+// previously appended a formatted "path: error" string instead, breaking
+// that contract for exactly the callers this field exists for (anything
+// that wants to compare FailedArtifacts entries against known-good paths
+// programmatically, e.g. a future `omca doctor`/`omca bisect` consumer).
+// Deleting the artifact outright (rather than tamperArtifact's
+// content-swap) exercises the os.ReadFile error branch specifically, which
+// TestVerifyActivation_DetectsTamperedArtifact's digest-mismatch branch
+// does not reach.
+func TestVerifyActivation_MissingArtifact_FailedArtifactsIsPathOnly(t *testing.T) {
+	now := time.Date(2026, 7, 18, 9, 0, 0, 0, time.UTC)
+	worktreeStateDir := t.TempDir()
+
+	fx := compileFixture(t, worktreeStateDir, nil, nil, now)
+	if err := SetPendingGeneration(worktreeStateDir, "codex", fx.outputDir, fx.gen, fx.req.Hosts[0].Detection, now); err != nil {
+		t.Fatalf("SetPendingGeneration: %v", err)
+	}
+	if _, err := Activate(ActivateRequest{WorktreeStateDir: worktreeStateDir, Host: "codex", Fresh: fx.req, Now: now}); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
+	full := filepath.Join(fx.outputDir, codexConfigTOMLRelPath)
+	if err := os.Chmod(filepath.Dir(full), 0o755); err != nil {
+		t.Fatalf("chmod parent dir writable: %v", err)
+	}
+	if err := os.Remove(full); err != nil {
+		t.Fatalf("removing artifact to force a read error: %v", err)
+	}
+
+	result, err := VerifyActivation(worktreeStateDir, "codex", now)
+	if err != nil {
+		t.Fatalf("VerifyActivation: %v", err)
+	}
+	if result.Passed {
+		t.Fatal("Passed = true after deleting a compiled artifact, want false")
+	}
+	found := false
+	for _, p := range result.FailedArtifacts {
+		if p == codexConfigTOMLRelPath {
+			found = true
+		}
+		if p != codexConfigTOMLRelPath {
+			t.Errorf("FailedArtifacts entry %q is not a bare path (contract: FailedArtifacts lists paths only) -- got an entry that isn't the expected artifact path at all", p)
+		}
+	}
+	if !found {
+		t.Errorf("FailedArtifacts = %v, want it to include the bare path %q (not a formatted %q: <error> string)", result.FailedArtifacts, codexConfigTOMLRelPath, codexConfigTOMLRelPath)
+	}
+	if !strings.Contains(result.Detail, "no such file") && !strings.Contains(result.Detail, "no such file or directory") {
+		// The error detail must still be discoverable somewhere -- just not
+		// smuggled inside FailedArtifacts. Detail is the right place for it.
+		t.Errorf("Detail = %q, want it to still explain the underlying read error somewhere", result.Detail)
 	}
 }
 

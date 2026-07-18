@@ -231,8 +231,8 @@ func runActivate(stdout, stderr io.Writer, args []string) int {
 		return 1
 	}
 
-	fmt.Fprintf(stdout, "omca: activate: %s: activated %s (previous: %q) at %s\n", result.Activation.Host, result.Activation.ActivatedGenerationID, result.Activation.PreviousGenerationID, result.Activation.ActivatedAt)
 	if !result.RolledBack {
+		fmt.Fprintf(stdout, "omca: activate: %s: activated %s (previous: %q) at %s\n", result.Activation.Host, result.Activation.ActivatedGenerationID, result.Activation.PreviousGenerationID, result.Activation.ActivatedAt)
 		fmt.Fprintf(stdout, "omca: activate: %s: post-activation verification passed (%s)\n", result.Activation.Host, result.Verification.Detail)
 		return 0
 	}
@@ -243,8 +243,13 @@ func runActivate(stdout, stderr io.Writer, args []string) int {
 	// prints. The requested activation did NOT end up in effect, so this
 	// still exits non-zero: an operator who ran `omca activate` needs to
 	// know their intended change did not stick, even though the worktree
-	// itself was left in a safe, recoverable state.
-	fmt.Fprintf(stderr, "omca: activate: %s: post-activation verification FAILED (%s) -- automatically rolled back to the parent generation %s at %s\n", result.Activation.Host, result.Verification.Detail, result.Rollback.RestoredGenerationID, result.Rollback.RolledBackAt)
+	// itself was left in a safe, recoverable state. The "activated" success
+	// line is deliberately NOT printed on this path -- printing it
+	// unconditionally previously misled operators/log parsers into
+	// believing the activation stuck even though it was rolled back
+	// (Copilot review finding on this PR); the attempted generation ID is
+	// folded into the failure line below instead.
+	fmt.Fprintf(stderr, "omca: activate: %s: activation of %s: post-activation verification FAILED (%s) -- automatically rolled back to the parent generation %s at %s\n", result.Activation.Host, result.Activation.ActivatedGenerationID, result.Verification.Detail, result.Rollback.RestoredGenerationID, result.Rollback.RolledBackAt)
 	return 1
 }
 

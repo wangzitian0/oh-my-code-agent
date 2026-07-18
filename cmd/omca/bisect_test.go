@@ -98,6 +98,18 @@ func TestRunBisect_DryRun_ReportsPlanWithoutWritingAnything(t *testing.T) {
 	if _, err := os.Stat(generationsRoot); !os.IsNotExist(err) {
 		t.Errorf("generations/ exists after a --dry-run bisect call (want: never created); stat err = %v", err)
 	}
+
+	// Regression test (Copilot review finding on this PR): --dry-run
+	// previously called installShims unconditionally before reaching its
+	// own DryRun-gated compile logic, creating/refreshing shimDir's PATH
+	// symlinks -- a real disk write the doc comment on runBisect (and this
+	// AC's own round-3 safety audit text) explicitly promises --dry-run
+	// never does. Neither shimDirPath's directory nor anything under it may
+	// exist after a --dry-run run that started from a clean worktree.
+	shimDir := shimDirPath(worktreeStateDirForTest(t, env))
+	if _, err := os.Stat(shimDir); !os.IsNotExist(err) {
+		t.Errorf("shims/ exists after a --dry-run bisect call (want: never created, installShims must not run on the dry-run path); stat err = %v", err)
+	}
 }
 
 // TestRunBisect_Real_BuildsDisposableGenerationsNeverActivates is the real

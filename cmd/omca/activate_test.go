@@ -293,6 +293,15 @@ spec:
 	if !strings.Contains(stderr.String(), "verification FAILED") || !strings.Contains(stderr.String(), "rolled back") {
 		t.Errorf("stderr does not explain the failed verification / automated rollback:\n%s", stderr.String())
 	}
+	// Regression test (Copilot review finding on this PR): runActivate
+	// previously printed an unconditional "activated <gen>" success line to
+	// stdout even on this failed-verification/auto-rollback path, which
+	// could mislead an operator or log parser into believing the activation
+	// stuck. The requested generation never became "current" (asserted
+	// below via CurrentGenerationDir), so stdout must not claim it did.
+	if strings.Contains(stdout.String(), "activated") {
+		t.Errorf("stdout claims something was 'activated' on the failed-verification/auto-rollback path (want: silent stdout, the failure is reported on stderr only):\n%s", stdout.String())
+	}
 
 	gotCurrent, err := runtime.CurrentGenerationDir(worktreeStateDir, "codex")
 	if err != nil {

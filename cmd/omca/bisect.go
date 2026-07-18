@@ -89,9 +89,19 @@ func runBisect(stdout, stderr io.Writer, args []string) int {
 	}
 	worktreeStateDir := worktreeStateDirPath(stateRoot, wt.ID)
 	shimDir := shimDirPath(worktreeStateDir)
-	if err := installShims(shimDir); err != nil {
-		fmt.Fprintf(stderr, "omca: bisect: installing PATH shims: %v\n", err)
-		return 1
+	// installShims is skipped on --dry-run: omcaCommandPath below is a pure
+	// string join (cmd/omca/env.go), and hostcontext.DetectHost only needs
+	// shimDir as a PATH-filtering reference (the same pattern runDoctor's
+	// checkGenerationFreshness uses without ever calling installShims) --
+	// neither requires the shim symlinks to actually exist on disk. Calling
+	// installShims unconditionally here previously broke --dry-run's own
+	// documented "without ... writing a single byte to disk" contract
+	// (Copilot review finding on this PR).
+	if !parsed.DryRun {
+		if err := installShims(shimDir); err != nil {
+			fmt.Fprintf(stderr, "omca: bisect: installing PATH shims: %v\n", err)
+			return 1
+		}
 	}
 
 	realEnv := hostcontext.RealEnvironment()
