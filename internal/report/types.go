@@ -73,12 +73,19 @@ type HostDebug struct {
 	PendingSources []domain.GenerationSourceEntry `json:"pendingSources,omitempty"`
 
 	// CurrentGenerationID/PendingGenerationID are the current/pending
-	// generation's own Metadata.ID (empty exactly when the corresponding
-	// Sources list is empty — no such generation exists yet for this host).
-	// build.go's generationSources already reads each generation's full
-	// manifest.json to compute CurrentSources/PendingSources and the
-	// context-cost estimate; these two fields just keep the ID it already
-	// read in hand rather than discarding it, so a caller (issue #24's
+	// generation's own Metadata.ID, empty exactly when no readable
+	// current/pending generation manifest exists for this host yet — NOT
+	// the same condition as the corresponding Sources list being empty.
+	// build.go's generationSources sets the ID as soon as the manifest is
+	// readable, before filtering Spec.Sources down to this host's own
+	// entries (sourcesForHost); a multi-host generation where this host
+	// legitimately has zero included sources (e.g. everything excluded) is
+	// a real, valid state with a non-empty ID and an empty Sources list —
+	// the ID and the Sources list answer two different questions ("does a
+	// generation exist for this host" vs. "what did it include"), and a
+	// caller must not infer one from the other. This keeps the ID
+	// build.go's generationSources already reads while parsing each
+	// manifest.json, rather than discarding it, so a caller (issue #24's
 	// omca_query "generation" query kind) can name which generation a
 	// Sources list came from without a second manifest read.
 	CurrentGenerationID string `json:"currentGenerationId,omitempty"`

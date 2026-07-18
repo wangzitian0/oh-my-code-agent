@@ -322,11 +322,17 @@ func queryDrift(a report.Artifact, args QueryArguments) (QueryResult, error) {
 		return QueryResult{Kind: QueryKindDrift, Page: page, Drift: &detail}, nil
 	}
 
-	summaries := make([]DriftSummary, 0, len(a.ActionCards))
-	for _, c := range a.ActionCards {
-		summaries = append(summaries, summarizeDriftCard(c))
+	// Page a.ActionCards itself first, then summarize only the requested
+	// slice -- summarizing every card up front (as an earlier version of
+	// this function did) is O(total cards) work and allocation on every
+	// call regardless of how small a page is actually requested, on
+	// exactly the kind of large-artifact/many-drift-cards case this
+	// query's own paging exists to keep bounded.
+	cardPage, page := pageSlice(a.ActionCards, offset, limit)
+	summaryPage := make([]DriftSummary, 0, len(cardPage))
+	for _, c := range cardPage {
+		summaryPage = append(summaryPage, summarizeDriftCard(c))
 	}
-	summaryPage, page := pageSlice(summaries, offset, limit)
 	return QueryResult{Kind: QueryKindDrift, Page: page, DriftCards: summaryPage}, nil
 }
 

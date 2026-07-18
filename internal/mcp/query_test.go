@@ -675,13 +675,21 @@ func TestQueryInputSchema_HasNoWorktreeOrGenerationProperty(t *testing.T) {
 	if !ok {
 		t.Fatal("queryInputSchema()[\"properties\"] is not an object")
 	}
+	// Exact-name match against the known retargeting-shaped identifiers,
+	// not a substring check: "generation" as a Contains match would also
+	// flag a legitimately-named non-identifier field merely containing that
+	// word (e.g. a hypothetical "generationKind" plane-style selector, the
+	// same shape this schema's actual "plane" field already is for
+	// kind=generation) -- an exact match stays precise without being
+	// fragile to that. Case-insensitive so "WorktreeID"/"RunId"/etc. still
+	// get caught regardless of casing convention.
+	dangerousNames := map[string]bool{
+		"worktree": true, "worktreeid": true,
+		"run": true, "runid": true,
+		"generation": true, "generationid": true,
+	}
 	for name := range props {
-		lower := strings.ToLower(name)
-		if strings.Contains(lower, "worktree") || strings.Contains(lower, "run") || (strings.Contains(lower, "generation") && lower != "") {
-			// "generation" alone would also flag a legitimately-named field
-			// if this tool ever grew one named e.g. "generationKind" -- it
-			// does not today, so an exact-name check is precise enough
-			// without being fragile to that hypothetical.
+		if dangerousNames[strings.ToLower(name)] {
 			t.Errorf("queryInputSchema() has a property named %q, which looks like a worktree/run/generation identifier -- omca_query must never accept one", name)
 		}
 	}
