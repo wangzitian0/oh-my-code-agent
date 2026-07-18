@@ -379,7 +379,27 @@ omca doctor codex
 - `native` is an explicit diagnostic baseline and may execute native Hooks or
   MCP servers; it requires a warning.
 - `bisect` builds disposable generations that import candidate sources one at a
-  time.
+  time, in stable content-addressed order, and never activates any of them.
+  `omca bisect --dry-run <host>` is a mandatory, always-available mode that
+  reports the exact plan (which generations, importing which candidates, in
+  what order) without compiling or writing anything to disk; omitting
+  `--dry-run` runs the real path, which does compile disposable generations
+  under the worktree's `generations/` directory but still never sets a
+  `current`/`pending` pointer and never appends a Ledger entry -- a bisect run
+  is purely an inspection aid, queryable afterward the same way any other
+  generation is (`omca diff`, `omca compare`, or reading `manifest.json`
+  directly).
+- Failed post-activation verification triggers an automated `rollback` to the
+  parent generation; the verification failure and the restoration are each
+  their own Ledger entry, in that order. This is a distinct check from
+  Activation's own compare-and-swap step (§5.4): the CAS check runs BEFORE the
+  switch and validates that pending's desired-state INPUTS have not gone
+  stale; post-activation verification runs AFTER the switch and validates
+  that the now-current generation's own compiled artifact tree still matches
+  what its manifest recorded -- has the compiled OUTPUT itself been
+  corrupted, partially written, or tampered with. A first activation with no
+  parent generation to restore is left as a clearly ledgered, honestly
+  unrecoverable failure rather than a silently swallowed one.
 
 Debugging remains tractable because native, current, pending, and historical
 generations are all queryable and content-addressed.
@@ -395,4 +415,6 @@ every generation has one complete manifest
 native exclusions are explained rather than hidden
 credentials are references or isolated state, not generated config
 system-level residual behavior is reported explicitly
+failed post-activation verification leaves a recoverable previous generation
+bisect never activates a disposable generation it builds
 ```

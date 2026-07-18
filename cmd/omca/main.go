@@ -35,7 +35,7 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-const usage = "usage: omca <version|context|env|run|doctor|mcp|activate|rollback|report|drift|explain|matrix|compare|diff> ..."
+const usage = "usage: omca <version|context|env|run|doctor|mcp|activate|rollback|bisect|report|drift|explain|matrix|compare|diff> ..."
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
@@ -61,6 +61,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runActivate(stdout, stderr, args[1:])
 	case "rollback":
 		return runRollback(stdout, stderr, args[1:])
+	case "bisect":
+		return runBisect(stdout, stderr, args[1:])
 	case "report":
 		return runReport(stdout, stderr, args[1:])
 	case "drift":

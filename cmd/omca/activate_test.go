@@ -234,6 +234,107 @@ spec:
 	}
 }
 
+// TestRunActivate_FailedVerification_AutomaticallyRollsBackAndLedgersBoth is
+// this PR's own CLI-level proof of issue #28's headline AC through the real
+// `omca activate` command: activate a first (parent) generation
+// successfully, then tamper with a second (child) generation's compiled
+// artifact tree before activating it -- simulating a generation whose
+// on-disk output diverged from its own manifest -- and prove `omca
+// activate` (a) exits non-zero (the requested activation did not stick),
+// (b) leaves "current" restored to the parent, not the broken child, and
+// (c) the Ledger records both the verification failure and the automated
+// restoration.
+func TestRunActivate_FailedVerification_AutomaticallyRollsBackAndLedgersBoth(t *testing.T) {
+	env := setupManagedTestEnv(t, true, false)
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+
+	worktreeStateDir, firstGen, firstDir := buildPendingFixtureForActivate(t, env, mcpServerProfileYAML, nil, now)
+	var stdout, stderr bytes.Buffer
+	if code := runActivate(&stdout, &stderr, []string{"codex", "--confirm", "enable-mcp-server:internal-docs"}); code != 0 {
+		t.Fatalf("runActivate (first): %d; stderr:\n%s", code, stderr.String())
+	}
+
+	const skillProfileYAML = `
+apiVersion: omca.dev/v1alpha1
+kind: Profile
+metadata:
+  id: company:example
+spec:
+  assets:
+    skills:
+      - id: code-review
+        intent: REQUIRED
+`
+	parent := firstGen.Metadata.ID
+	_, secondGen, secondDir := buildPendingFixtureForActivate(t, env, skillProfileYAML, &parent, now.Add(time.Minute))
+	if secondGen.Metadata.ID == firstGen.Metadata.ID {
+		t.Fatal("fixture setup did not actually vary content between the two generations")
+	}
+
+	// Tamper the second (about-to-be-activated) generation's compiled
+	// config.toml -- the same always-present artifact
+	// internal/runtime/verify_test.go's tamperArtifact targets -- BEFORE
+	// activating it, simulating a generation whose on-disk output no
+	// longer matches its own manifest at the moment it becomes current.
+	tamperedPath := filepath.Join(secondDir, "hosts", "codex", "cli", "codex-home", "config.toml")
+	if err := os.Chmod(tamperedPath, 0o644); err != nil {
+		t.Fatalf("chmod tampered artifact: %v", err)
+	}
+	if err := os.WriteFile(tamperedPath, []byte("tampered, does not match the manifest\n"), 0o644); err != nil {
+		t.Fatalf("writing tampered artifact: %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code := runActivate(&stdout, &stderr, []string{"codex", "--confirm", "select-reviewed-skill:code-review"})
+	if code != 1 {
+		t.Fatalf("runActivate (second, tampered) = %d, want 1; stdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "verification FAILED") || !strings.Contains(stderr.String(), "rolled back") {
+		t.Errorf("stderr does not explain the failed verification / automated rollback:\n%s", stderr.String())
+	}
+	// Regression test (Copilot review finding on this PR): runActivate
+	// previously printed an unconditional "activated <gen>" success line to
+	// stdout even on this failed-verification/auto-rollback path, which
+	// could mislead an operator or log parser into believing the activation
+	// stuck. The requested generation never became "current" (asserted
+	// below via CurrentGenerationDir), so stdout must not claim it did.
+	if strings.Contains(stdout.String(), "activated") {
+		t.Errorf("stdout claims something was 'activated' on the failed-verification/auto-rollback path (want: silent stdout, the failure is reported on stderr only):\n%s", stdout.String())
+	}
+
+	gotCurrent, err := runtime.CurrentGenerationDir(worktreeStateDir, "codex")
+	if err != nil {
+		t.Fatalf("CurrentGenerationDir: %v", err)
+	}
+	if gotCurrent != firstDir {
+		t.Errorf("CurrentGenerationDir after a failed-verification activation = %q, want the parent %q (never the broken child %q)", gotCurrent, firstDir, secondDir)
+	}
+
+	entries, err := runtime.ReadLedger(worktreeStateDir, "codex")
+	if err != nil {
+		t.Fatalf("ReadLedger: %v", err)
+	}
+	var verifyFailedIdx, rolledBackIdx = -1, -1
+	for i, e := range entries {
+		if e.Kind == "verification-failed" && e.GenerationID == secondGen.Metadata.ID {
+			verifyFailedIdx = i
+		}
+		if e.Kind == "rolledback" && e.GenerationID == firstGen.Metadata.ID {
+			rolledBackIdx = i
+		}
+	}
+	if verifyFailedIdx == -1 {
+		t.Errorf("ledger has no 'verification-failed' entry for the tampered generation %s: %+v", secondGen.Metadata.ID, entries)
+	}
+	if rolledBackIdx == -1 {
+		t.Errorf("ledger has no 'rolledback' entry restoring the parent %s: %+v", firstGen.Metadata.ID, entries)
+	}
+	if verifyFailedIdx != -1 && rolledBackIdx != -1 && verifyFailedIdx > rolledBackIdx {
+		t.Errorf("'verification-failed' (index %d) must be ledgered before 'rolledback' (index %d)", verifyFailedIdx, rolledBackIdx)
+	}
+}
+
 // worktreeStateDirForTest re-derives worktreeStateDir the same way
 // buildPendingFixtureForActivate did, for a test that needs it after
 // runActivate has already been called (rather than plumbing it back out of
