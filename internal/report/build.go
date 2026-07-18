@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/wangzitian0/oh-my-code-agent/internal/assurance"
 	hostcontext "github.com/wangzitian0/oh-my-code-agent/internal/context"
 	"github.com/wangzitian0/oh-my-code-agent/internal/contextcost"
 	"github.com/wangzitian0/oh-my-code-agent/internal/domain"
@@ -106,6 +107,15 @@ func Build(req BuildRequest) (Artifact, error) {
 		if err != nil {
 			return Artifact{}, fmt.Errorf("report: Build: %s: computing effective graph: %w", host, err)
 		}
+		// Every effective value in the report carries its evidence level
+		// (issue #26's own acceptance criterion), and that level must never
+		// exceed what internal/assurance's committed evidence-ceiling table
+		// (docs/architecture/evidence-ceiling.md) proves this host+concept
+		// can honestly back — VerifyGraph re-derives it in place before
+		// anything downstream (drift signals, Debug, Evidence) reads it, so
+		// there is no code path in this function that can see an
+		// unverified EvidenceLevel.
+		graph = assurance.VerifyGraph(host, graph, hk)
 
 		rs, err := resolve.Resolve(req.Profiles, req.Activation, req.Exceptions, host, req.Now)
 		if err != nil {
@@ -132,12 +142,25 @@ func Build(req BuildRequest) (Artifact, error) {
 		currentSources, pendingSources, currentGenID, pendingGenID, costEntry := generationSources(req.WorktreeStateDir, host, hi.Detection.Version)
 		currentCount, pendingCount := len(currentSources), len(pendingSources)
 
+		// Evidence turns graph's (now-verified) EvidenceLevel/Guarantee
+		// fields into standalone, separately queryable domain.Evidence
+		// documents (issue #26's Goal line: "attach honest evidence to
+		// every conclusion"), plus — when internal/context's --version
+		// probe succeeded — the one E3 (HOST_REPORTED) record this
+		// package can honestly produce today (docs/architecture/
+		// evidence-ceiling.md's "host" rows).
+		hostEvidence := assurance.BuildEvidence(host, graph, hk, req.Now)
+		if v, ok := assurance.HostVersionEvidence(hi.Detection, req.Now); ok {
+			hostEvidence = append(hostEvidence, v)
+		}
+
 		debug[host] = HostDebug{
 			Graph:               graph,
 			Candidates:          candidates,
 			Observations:        hi.Observations,
 			Desired:             rs,
 			KnowledgeEvidence:   hk.Evidence,
+			Evidence:            hostEvidence,
 			CurrentSources:      currentSources,
 			PendingSources:      pendingSources,
 			CurrentGenerationID: currentGenID,
@@ -334,14 +357,39 @@ func attributeDuplicateCost(d effective.DuplicateCapability) ContextCostAttribut
 }
 
 // computeFingerprint digests a's content-addressable identity: everything
-// except Metadata (ID/GeneratedAt are per-build bookkeeping, not content)
-// and Spec.Fingerprint itself (obviously, since this computes it). Two Build
-// calls over identical logical inputs at different instants produce
-// different Metadata but the same Fingerprint — the "reproducible: input and
-// output digests can reconstruct the result" trust property (docs/
-// architecture/reporting.md §1).
+// except Metadata (ID/GeneratedAt are per-build bookkeeping, not content),
+// Spec.Fingerprint itself (obviously, since this computes it), and every
+// Debug[host].Evidence[i].Spec.ObservedAt (assurance.BuildEvidence/
+// HostVersionEvidence stamp these from the same req.Now Metadata.GeneratedAt
+// derives from — bookkeeping of when Build ran, not content of what it
+// found). Two Build calls over identical logical inputs at different
+// instants produce different Metadata and different Evidence.ObservedAt
+// values but the same Fingerprint — the "reproducible: input and output
+// digests can reconstruct the result" trust property (docs/architecture/
+// reporting.md §1).
 func computeFingerprint(a Artifact) (string, error) {
 	a.Report.Metadata = domain.ReportMetadata{}
 	a.Report.Spec.Fingerprint = ""
+	// a.Debug is a map: a was received by value, but a map's header is a
+	// reference to the same underlying storage the caller's Artifact.Debug
+	// already points to. Assigning into a.Debug[host] directly here would
+	// silently corrupt the real, returned Artifact's Evidence.ObservedAt
+	// values (used for actual display/query, not just this digest) as a
+	// side effect of computing a fingerprint — so this builds an entirely
+	// new map instead of mutating a.Debug in place.
+	if len(a.Debug) > 0 {
+		debugForDigest := make(map[string]HostDebug, len(a.Debug))
+		for host, hd := range a.Debug {
+			if len(hd.Evidence) > 0 {
+				evidence := append([]domain.Evidence(nil), hd.Evidence...)
+				for i := range evidence {
+					evidence[i].Spec.ObservedAt = ""
+				}
+				hd.Evidence = evidence
+			}
+			debugForDigest[host] = hd
+		}
+		a.Debug = debugForDigest
+	}
 	return domain.CanonicalDigest(a)
 }
