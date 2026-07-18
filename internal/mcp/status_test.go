@@ -7,6 +7,7 @@ import (
 	"time"
 
 	hostcontext "github.com/wangzitian0/oh-my-code-agent/internal/context"
+	"github.com/wangzitian0/oh-my-code-agent/internal/contextcost"
 	"github.com/wangzitian0/oh-my-code-agent/internal/domain"
 	"github.com/wangzitian0/oh-my-code-agent/internal/observe"
 	"github.com/wangzitian0/oh-my-code-agent/internal/runtime"
@@ -167,7 +168,7 @@ func TestComputeStatus_ReportsExclusionCountsAndContextCost(t *testing.T) {
 	if codex.ContextCost == nil {
 		t.Fatal("codex ContextCost is nil, want a populated estimate")
 	}
-	wantTokens := 1*estimatedTokensPerExcludedMCPServer + 2*estimatedTokensPerExcludedSkill
+	wantTokens := 1*contextcost.EstimatedTokensPerExcludedMCPServer + 2*contextcost.EstimatedTokensPerExcludedSkill
 	if codex.ContextCost.EstimatedTokensExcluded != wantTokens {
 		t.Errorf("EstimatedTokensExcluded = %d, want %d", codex.ContextCost.EstimatedTokensExcluded, wantTokens)
 	}

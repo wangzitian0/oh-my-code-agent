@@ -6,11 +6,11 @@ import (
 	"time"
 
 	hostcontext "github.com/wangzitian0/oh-my-code-agent/internal/context"
+	"github.com/wangzitian0/oh-my-code-agent/internal/contextcost"
 	"github.com/wangzitian0/oh-my-code-agent/internal/domain"
 	"github.com/wangzitian0/oh-my-code-agent/internal/drift"
 	"github.com/wangzitian0/oh-my-code-agent/internal/effective"
 	"github.com/wangzitian0/oh-my-code-agent/internal/knowledge"
-	"github.com/wangzitian0/oh-my-code-agent/internal/mcp"
 	"github.com/wangzitian0/oh-my-code-agent/internal/resolve"
 	"github.com/wangzitian0/oh-my-code-agent/internal/runtime"
 )
@@ -129,17 +129,19 @@ func Build(req BuildRequest) (Artifact, error) {
 		allSignals = append(allSignals, BuildDriftSignals(req.Worktree.ID, graphs)...)
 		duplicates = append(duplicates, graph.DuplicateCapabilities...)
 
-		currentSources, pendingSources, costEntry := generationSources(req.WorktreeStateDir, host, hi.Detection.Version)
+		currentSources, pendingSources, currentGenID, pendingGenID, costEntry := generationSources(req.WorktreeStateDir, host, hi.Detection.Version)
 		currentCount, pendingCount := len(currentSources), len(pendingSources)
 
 		debug[host] = HostDebug{
-			Graph:             graph,
-			Candidates:        candidates,
-			Observations:      hi.Observations,
-			Desired:           rs,
-			KnowledgeEvidence: hk.Evidence,
-			CurrentSources:    currentSources,
-			PendingSources:    pendingSources,
+			Graph:               graph,
+			Candidates:          candidates,
+			Observations:        hi.Observations,
+			Desired:             rs,
+			KnowledgeEvidence:   hk.Evidence,
+			CurrentSources:      currentSources,
+			PendingSources:      pendingSources,
+			CurrentGenerationID: currentGenID,
+			PendingGenerationID: pendingGenID,
 		}
 
 		hostSummaries = append(hostSummaries, HostSummary{
@@ -225,15 +227,15 @@ func findPack(repo knowledge.Repository, packID string) (knowledge.Pack, bool) {
 }
 
 // generationSources reads host's current/pending generation manifests (when
-// present) under worktreeStateDir, returning each one's Sources list and a
-// context-cost estimate derived from the current generation. A missing
-// current/pending generation is not an error — a worktree that has never
-// run `omca env`/`omca activate` for this host simply has nothing to report
-// or estimate yet, so the returned slices are nil and costEntry is nil
-// (never a synthesized cost for a generation that does not exist —
-// reporting.md §8's "unknown ... reported as unknown, not a fake token
-// count" applies here just as much as to the estimate's own Method/
-// Confidence fields).
+// present) under worktreeStateDir, returning each one's Sources list, the
+// generation's own Metadata.ID, and a context-cost estimate derived from the
+// current generation. A missing current/pending generation is not an error —
+// a worktree that has never run `omca env`/`omca activate` for this host
+// simply has nothing to report or estimate yet, so the returned slices/IDs
+// are zero-valued and costEntry is nil (never a synthesized cost for a
+// generation that does not exist — reporting.md §8's "unknown ... reported
+// as unknown, not a fake token count" applies here just as much as to the
+// estimate's own Method/Confidence fields).
 //
 // Both returned Sources lists are filtered to host: a Generation can share
 // multiple hosts' artifact trees, so Spec.Sources is a flat list across all
@@ -243,24 +245,30 @@ func findPack(repo knowledge.Repository, packID string) (knowledge.Pack, bool) {
 // compare/diff output would incorrectly include another host's sources —
 // the same host-scoping bug class internal/runtime.DiffProposedChanges
 // already guards against (its `s.Host != host` filter), applied here too.
-func generationSources(worktreeStateDir, host, hostVersion string) (currentSources, pendingSources []domain.GenerationSourceEntry, costEntry *ContextCostEntry) {
+// currentGenID/pendingGenID are NOT filtered by host (a Generation has one
+// Metadata.ID regardless of how many hosts' artifact trees it carries) —
+// they identify the generation manifest itself, matching runtime.
+// ReadGenerationManifest's own return.
+func generationSources(worktreeStateDir, host, hostVersion string) (currentSources, pendingSources []domain.GenerationSourceEntry, currentGenID, pendingGenID string, costEntry *ContextCostEntry) {
 	if worktreeStateDir == "" {
-		return nil, nil, nil
+		return nil, nil, "", "", nil
 	}
 	if dir, err := runtime.CurrentGenerationDir(worktreeStateDir, host); err == nil {
 		if gen, err := runtime.ReadGenerationManifest(dir); err == nil {
 			currentSources = sourcesForHost(gen.Spec.Sources, host)
-			excludedMCP, excludedSkills := mcp.CountUserExclusions(gen)
-			cost := mcp.EstimateContextCost(excludedMCP, excludedSkills)
+			currentGenID = gen.Metadata.ID
+			excludedMCP, excludedSkills := contextcost.CountUserExclusions(gen)
+			cost := contextcost.EstimateContextCost(excludedMCP, excludedSkills)
 			costEntry = &ContextCostEntry{ContextCostEstimate: cost, HostVersion: hostVersion}
 		}
 	}
 	if dir, err := runtime.PendingGenerationDir(worktreeStateDir, host); err == nil {
 		if gen, err := runtime.ReadGenerationManifest(dir); err == nil {
 			pendingSources = sourcesForHost(gen.Spec.Sources, host)
+			pendingGenID = gen.Metadata.ID
 		}
 	}
-	return currentSources, pendingSources, costEntry
+	return currentSources, pendingSources, currentGenID, pendingGenID, costEntry
 }
 
 // sourcesForHost filters a Generation's flat, multi-host Spec.Sources list
@@ -321,7 +329,7 @@ func attributeDuplicateCost(d effective.DuplicateCapability) ContextCostAttribut
 		RedundantSources: redundant,
 		EstimatedTokens:  redundant * estimatedTokensPerDuplicateToolSchema,
 		Method:           fmt.Sprintf("%d redundant source(s) beyond the first x ~%d tokens/tool-schema (fixed, documented per-item average, not measured from this fingerprint's actual schemas)", redundant, estimatedTokensPerDuplicateToolSchema),
-		Confidence:       mcp.ConfidenceEstimateNotMeasured,
+		Confidence:       contextcost.ConfidenceEstimateNotMeasured,
 	}
 }
 
