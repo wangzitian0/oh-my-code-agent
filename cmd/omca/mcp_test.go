@@ -67,6 +67,55 @@ func TestRunMCP_Serve_RespondsToToolsCall_ReadingRealAmbientEnvironment(t *testi
 	}
 }
 
+// TestRunMCP_Serve_RespondsToOmcaQuery_ThroughTheRealBuildPipeline proves
+// `omca mcp serve` wires omca_query to the real buildArtifactForCLI
+// pipeline (issue #24/PR-20) — the same detect-observe-compose-Build
+// sequence every `omca report`/`omca drift`/... CLI command already runs —
+// rather than some second, parallel implementation: a tools/call for
+// omca_query with kind=artifact over stdin succeeds and returns an
+// ArtifactSummary carrying a real, non-empty worktree ID (this repository's
+// own, computed by hostcontext.DetectWorktree(cwd) exactly like every other
+// CLI command run from this directory) — proof the omca_query path in
+// cmd/omca/mcp.go actually reaches real on-disk state, not a stub.
+func TestRunMCP_Serve_RespondsToOmcaQuery_ThroughTheRealBuildPipeline(t *testing.T) {
+	t.Setenv("OMCA_STATE_DIR", t.TempDir())
+
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"omca_query","arguments":{"kind":"artifact"}}}` + "\n"
+	var stdout, stderr bytes.Buffer
+	code := runMCP(strings.NewReader(input), &stdout, &stderr, []string{"serve"})
+	if code != 0 {
+		t.Fatalf("runMCP([serve]) = %d, want 0; stderr:\n%s", code, stderr.String())
+	}
+
+	line := strings.TrimSpace(stdout.String())
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(line), &resp); err != nil {
+		t.Fatalf("stdout line is not valid JSON: %v\nline: %s", err, line)
+	}
+	result, ok := resp["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("response has no result object: %v", resp)
+	}
+	if result["isError"] == true {
+		t.Fatalf("isError = true: %v", result)
+	}
+	structured, ok := result["structuredContent"].(map[string]any)
+	if !ok {
+		t.Fatalf("result has no structuredContent object: %v", result)
+	}
+	if structured["kind"] != "artifact" {
+		t.Errorf("structuredContent.kind = %v, want %q", structured["kind"], "artifact")
+	}
+	artifact, ok := structured["artifact"].(map[string]any)
+	if !ok {
+		t.Fatalf("structuredContent has no artifact object: %v", structured)
+	}
+	worktree, _ := artifact["worktree"].(string)
+	if worktree == "" {
+		t.Error("artifact.worktree is empty, want the real worktree ID this test's own cwd resolves to")
+	}
+}
+
 // TestSessionHostFromEnv covers issue #19's restart_required wiring: which
 // host this `omca mcp serve` process is answering for is inferred from
 // whichever native-home environment variable (CODEX_HOME/CLAUDE_CONFIG_DIR)

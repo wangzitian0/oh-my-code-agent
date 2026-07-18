@@ -1,10 +1,10 @@
 package report
 
 import (
+	"github.com/wangzitian0/oh-my-code-agent/internal/contextcost"
 	"github.com/wangzitian0/oh-my-code-agent/internal/domain"
 	"github.com/wangzitian0/oh-my-code-agent/internal/drift"
 	"github.com/wangzitian0/oh-my-code-agent/internal/effective"
-	"github.com/wangzitian0/oh-my-code-agent/internal/mcp"
 	"github.com/wangzitian0/oh-my-code-agent/internal/resolve"
 )
 
@@ -71,6 +71,25 @@ type HostDebug struct {
 	// PENDING planes).
 	CurrentSources []domain.GenerationSourceEntry `json:"currentSources,omitempty"`
 	PendingSources []domain.GenerationSourceEntry `json:"pendingSources,omitempty"`
+
+	// CurrentGenerationID/PendingGenerationID are the current/pending
+	// generation's own Metadata.ID, empty exactly when no readable
+	// current/pending generation manifest exists for this host yet — NOT
+	// the same condition as the corresponding Sources list being empty.
+	// build.go's generationSources sets the ID as soon as the manifest is
+	// readable, before filtering Spec.Sources down to this host's own
+	// entries (sourcesForHost); a multi-host generation where this host
+	// legitimately has zero included sources (e.g. everything excluded) is
+	// a real, valid state with a non-empty ID and an empty Sources list —
+	// the ID and the Sources list answer two different questions ("does a
+	// generation exist for this host" vs. "what did it include"), and a
+	// caller must not infer one from the other. This keeps the ID
+	// build.go's generationSources already reads while parsing each
+	// manifest.json, rather than discarding it, so a caller (issue #24's
+	// omca_query "generation" query kind) can name which generation a
+	// Sources list came from without a second manifest read.
+	CurrentGenerationID string `json:"currentGenerationId,omitempty"`
+	PendingGenerationID string `json:"pendingGenerationId,omitempty"`
 }
 
 // DriftCard is one ActionCard plus the stable, content-addressed ID
@@ -117,16 +136,26 @@ type HostKnowledge struct {
 	Reason    string                 `json:"reason,omitempty"`
 }
 
-// ContextCostEntry is mcp.ContextCostEstimate plus HostVersion — issue #23's
-// literal AC text: "Context-cost entries carry method, hostVersion, and
-// confidence." internal/mcp's existing ContextCostEstimate (reused here,
-// not reinvented, per this issue's own instruction) already carries Method
-// and Confidence; HostVersion is added at this projection layer via
-// embedding rather than by changing internal/mcp's already-shipped,
-// already-tested type, so every existing caller of mcp.ContextCostEstimate
-// (omca_status, omca doctor/env) is unaffected.
+// ContextCostEntry is contextcost.ContextCostEstimate plus HostVersion —
+// issue #23's literal AC text: "Context-cost entries carry method,
+// hostVersion, and confidence." internal/contextcost's existing
+// ContextCostEstimate (reused here, not reinvented, per this issue's own
+// instruction) already carries Method and Confidence; HostVersion is added
+// at this projection layer via embedding rather than by changing
+// internal/contextcost's already-shipped, already-tested type, so every
+// existing caller of contextcost.ContextCostEstimate (omca_status, omca
+// doctor/env) is unaffected.
+//
+// This type used to embed internal/mcp.ContextCostEstimate directly (this
+// package's own original PR-19 implementation); PR-20 (issue #24) moved the
+// underlying type to internal/contextcost (see that package's doc comment)
+// specifically so this package could stop importing internal/mcp — a
+// prerequisite for internal/mcp's own omca_query implementation to import
+// this package in turn, without an import cycle. internal/mcp still exports
+// ContextCostEstimate as a type alias of contextcost.ContextCostEstimate,
+// so this is a source-compatible rename, not a shape change.
 type ContextCostEntry struct {
-	mcp.ContextCostEstimate
+	contextcost.ContextCostEstimate
 	HostVersion string `json:"hostVersion,omitempty"`
 }
 

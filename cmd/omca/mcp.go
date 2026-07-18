@@ -3,9 +3,11 @@ package main
 import (
 	"fmt"
 	"io"
+	"time"
 
 	hostcontext "github.com/wangzitian0/oh-my-code-agent/internal/context"
 	"github.com/wangzitian0/oh-my-code-agent/internal/mcp"
+	"github.com/wangzitian0/oh-my-code-agent/internal/report"
 	"github.com/wangzitian0/oh-my-code-agent/internal/runtime"
 )
 
@@ -46,18 +48,33 @@ func sessionHostFromEnv(env hostcontext.Environment) string {
 
 // runMCP implements `omca mcp serve` (issue #15, docs/architecture/
 // runtime.md §6's OMCA MCP server): starts the stdio JSON-RPC 2.0 server
-// (internal/mcp.Serve) against stdin/stdout, answering omca_status from the
-// CURRENT process's environment. This is the exact command
-// internal/runtime/compile.go's hostConfigFiles registers as a managed
-// generation's MCP server entry — a host that launches this managed session
-// spawns `<omcaBinaryPath> mcp serve` as a subprocess, and that subprocess
-// inherits the launching process's environment (the same OMCA_RUN_ID/
-// OMCA_STATE_DIR/OMCA_WORKTREE_ID/OMCA_CONTEXT_ID docs/architecture/
-// runtime.md §7.1 shows `omca run`/the PATH shim setting before exec'ing
-// the host binary), so reading them here — exactly like checkSessionManaged/
-// checkPathBypass in doctor.go already read managed-session state from the
-// environment — is how this process learns which worktree/generation it is
-// answering for, without any argument or config file of its own.
+// (internal/mcp.Serve) against stdin/stdout, answering omca_status and
+// omca_query from the CURRENT process's environment. This is the exact
+// command internal/runtime/compile.go's hostConfigFiles registers as a
+// managed generation's MCP server entry — a host that launches this managed
+// session spawns `<omcaBinaryPath> mcp serve` as a subprocess, and that
+// subprocess inherits the launching process's environment (the same
+// OMCA_RUN_ID/OMCA_STATE_DIR/OMCA_WORKTREE_ID/OMCA_CONTEXT_ID docs/
+// architecture/runtime.md §7.1 shows `omca run`/the PATH shim setting
+// before exec'ing the host binary), so reading them here — exactly like
+// checkSessionManaged/checkPathBypass in doctor.go already read managed-
+// session state from the environment — is how this process learns which
+// worktree/generation it is answering for, without any argument or config
+// file of its own, and it is the ONLY place that reads them: neither
+// mcp.StatusFunc nor mcp.ArtifactFunc take a worktree/run/generation
+// argument at call time (see internal/mcp/query.go's QueryArguments doc
+// comment), so nothing a tool-call argument names can ever redirect either
+// away from this one binding.
+//
+// omca_query's mcp.ArtifactFunc is wired to buildArtifactForCLI — the exact
+// same detect-observe-compose-Build pipeline every `omca report`/`omca
+// drift`/`omca explain`/... CLI command already runs fresh for its own
+// single invocation (cmd/omca/reportbuild.go) — called fresh for every
+// omca_query "tools/call" (mcp.ArtifactFunc's own doc comment: "never
+// answer from a value computed once at startup"), never once at server
+// startup: this process is long-lived, but the report it answers queries
+// from must reflect whatever is on disk AT CALL TIME, exactly like
+// omca_status's statusFn below already does for the generation it reports.
 //
 // stdin/stdout/stderr are accepted as explicit parameters (like every other
 // runX function in this package) so the pre-Serve argument-validation path
@@ -84,8 +101,11 @@ func runMCP(stdin io.Reader, stdout, stderr io.Writer, args []string) int {
 			SessionGenerationID: env.Get("OMCA_RUN_ID"),
 		})
 	}
+	queryFn := func() (report.Artifact, error) {
+		return buildArtifactForCLI(stderr, time.Now())
+	}
 
-	if err := mcp.Serve(stdin, stdout, statusFn); err != nil {
+	if err := mcp.Serve(stdin, stdout, statusFn, queryFn); err != nil {
 		fmt.Fprintf(stderr, "omca: mcp: %v\n", err)
 		return 1
 	}

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
+	"strings"
 
 	"github.com/wangzitian0/oh-my-code-agent/internal/version"
 )
@@ -20,8 +22,14 @@ import (
 // nothing to negotiate.
 const protocolVersion = "2025-06-18"
 
-// toolNameStatus is the one tool this package exposes.
-const toolNameStatus = "omca_status"
+// toolNameStatus / toolNameQuery are the tools this package exposes today
+// (PR-20/issue #24 adds toolNameQuery alongside PR-11's original
+// toolNameStatus; PR-21 is expected to add two more — see newToolRegistry's
+// doc comment for why that no longer means touching this dispatch code).
+const (
+	toolNameStatus = "omca_status"
+	toolNameQuery  = "omca_query"
+)
 
 // statusToolDescription is what tools/list reports for omca_status —
 // deliberately small (docs/architecture/runtime.md §6's M4 exit-gate design
@@ -36,6 +44,96 @@ const statusToolDescription = "Report the current OMCA-managed context: worktree
 // omca_status reports on can change during the server's own lifetime, e.g.
 // a restart-activated new generation).
 type StatusFunc func() (StatusResult, error)
+
+// toolHandler executes one tool's "tools/call" and returns the raw result
+// value to render (see renderCallToolResult) or a tool-level error — the
+// same isError:true-shaped outcome handleToolsCall's own doc comment
+// distinguishes from a protocol-level *jsonrpcError. arguments is the
+// tools/call params' raw, not-yet-decoded "arguments" object
+// (json.RawMessage(nil) when the caller supplied none, mirroring
+// toolsCallParams.Arguments' existing contract) — each handler decodes its
+// own tool-specific shape; this generalized dispatch layer never inspects
+// argument content itself.
+type toolHandler func(arguments json.RawMessage) (any, error)
+
+// toolEntry is one registered tool: its tools/list definition paired with
+// the handler tools/call dispatches to by name.
+type toolEntry struct {
+	Definition toolDefinition
+	Handler    toolHandler
+}
+
+// toolRegistry is this server's complete tool surface: tools/list projects
+// Entries (in registration order, so tools/list is deterministic across
+// calls rather than a random map-iteration order) and tools/call dispatches
+// through byName. Building both from the SAME ordered slice — rather than,
+// as the PR-11 stub did, tools/list and tools/call each independently
+// hardcoding their own one-tool knowledge — is this PR's generalization
+// (issue #24's round-4 audit, "Generalize internal/mcp/server.go's tool
+// dispatch into a real name-to-handler registry"): a tool registered here
+// can never be present in tools/list but missing from tools/call's dispatch
+// (or vice versa), and PR-21 adding its own two tools is a matter of
+// appending two more toolEntry values to newToolRegistry, not touching
+// Serve/handleLine/handleToolsCall again.
+type toolRegistry struct {
+	entries []toolEntry
+	byName  map[string]toolHandler
+}
+
+// newToolRegistry builds this server's tool table from the StatusFunc/
+// ArtifactFunc callbacks Serve was given — the closures below are where
+// each tool's handler captures the one dependency it actually needs
+// (status for omca_status, query for omca_query), rather than every handler
+// receiving both regardless of relevance.
+func newToolRegistry(status StatusFunc, query ArtifactFunc) toolRegistry {
+	entries := []toolEntry{
+		{
+			Definition: toolDefinition{
+				Name:        toolNameStatus,
+				Description: statusToolDescription,
+				InputSchema: noArgumentsInputSchema(),
+			},
+			Handler: func(json.RawMessage) (any, error) { return status() },
+		},
+		{
+			Definition: toolDefinition{
+				Name:        toolNameQuery,
+				Description: queryToolDescription,
+				InputSchema: queryInputSchema(),
+			},
+			Handler: queryToolHandler(query),
+		},
+	}
+	byName := make(map[string]toolHandler, len(entries))
+	for _, e := range entries {
+		byName[e.Definition.Name] = e.Handler
+	}
+	return toolRegistry{entries: entries, byName: byName}
+}
+
+// names returns every registered tool name, in tools/list order — used only
+// to compose an "unknown tool" error message a client can act on (e.g. "did
+// you mean...").
+func (t toolRegistry) names() []string {
+	names := make([]string, 0, len(t.entries))
+	for _, e := range t.entries {
+		names = append(names, e.Definition.Name)
+	}
+	sort.Strings(names) // error-message cosmetics only; tools/list itself uses registration order below
+	return names
+}
+
+// noArgumentsInputSchema is the shared inputSchema for a tool that takes no
+// arguments at all — omca_status's shape, factored out so a future
+// no-argument tool (PR-21) does not need to redeclare the same four-line
+// literal.
+func noArgumentsInputSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"properties":           map[string]any{},
+		"additionalProperties": false,
+	}
+}
 
 // jsonrpcRequest is the subset of a JSON-RPC 2.0 request/notification this
 // server reads. ID is nil for a notification (per the JSON-RPC 2.0 spec, a
@@ -98,7 +196,9 @@ const (
 // message is never such a failure: it produces a JSON-RPC error response
 // (or, for a notification, no response at all) and Serve keeps running,
 // exactly like a long-lived server must.
-func Serve(r io.Reader, w io.Writer, status StatusFunc) error {
+func Serve(r io.Reader, w io.Writer, status StatusFunc, query ArtifactFunc) error {
+	registry := newToolRegistry(status, query)
+
 	scanner := bufio.NewScanner(r)
 	// The default 64KiB token limit is already generous for this server's
 	// entire message vocabulary (a no-argument tools/call request, or an
@@ -114,7 +214,7 @@ func Serve(r io.Reader, w io.Writer, status StatusFunc) error {
 		if len(line) == 0 {
 			continue
 		}
-		resp := handleLine(line, status)
+		resp := handleLine(line, registry)
 		if resp == nil {
 			continue // notification: JSON-RPC 2.0 defines no response at all
 		}
@@ -143,7 +243,7 @@ func Serve(r io.Reader, w io.Writer, status StatusFunc) error {
 // "id") and therefore gets no response under any circumstance, including an
 // error — a notification's sender has, by construction, declared it is not
 // waiting for one.
-func handleLine(line []byte, status StatusFunc) *jsonrpcResponse {
+func handleLine(line []byte, registry toolRegistry) *jsonrpcResponse {
 	var req jsonrpcRequest
 	if err := json.Unmarshal(line, &req); err != nil {
 		// encoding/json.Unmarshal populates every struct field it CAN parse
@@ -194,9 +294,9 @@ func handleLine(line []byte, status StatusFunc) *jsonrpcResponse {
 	case "ping":
 		result = struct{}{}
 	case "tools/list":
-		result = toolsListResult()
+		result = toolsListResult(registry)
 	case "tools/call":
-		result, rpcErr = handleToolsCall(req.Params, status)
+		result, rpcErr = handleToolsCall(req.Params, registry)
 	default:
 		rpcErr = &jsonrpcError{Code: codeMethodNotFound, Message: "method not found: " + req.Method}
 	}
@@ -228,9 +328,9 @@ type initializeResultPayload struct {
 }
 
 // initializeResult is this server's fixed "initialize" response:
-// capabilities.tools (present, listChanged:false — this server's one tool
-// list never changes at runtime) and nothing else, matching the actual,
-// narrow capability surface this M1 stub has.
+// capabilities.tools (present, listChanged:false — this server's tool list
+// never changes at runtime, even though it now has more than one entry) and
+// nothing else, matching this server's actual, narrow capability surface.
 func initializeResult() initializeResultPayload {
 	return initializeResultPayload{
 		ProtocolVersion: protocolVersion,
@@ -238,7 +338,7 @@ func initializeResult() initializeResultPayload {
 			"tools": map[string]any{"listChanged": false},
 		},
 		ServerInfo:   implementation{Name: "omca", Version: version.Version},
-		Instructions: "This is an M1 status-only stub: it exposes exactly one tool, omca_status. See docs/project/roadmap.md M4 for the full control surface.",
+		Instructions: "This is the OMCA MCP read surface: omca_status (worktree/context/generation summary) and omca_query (logical entities, drift cards, Knowledge evidence, generation sources, and the report artifact overview -- all scoped to this process's own bound worktree/generation, never caller-selectable). See docs/architecture/reporting.md §11 and docs/project/roadmap.md M4 for the full control surface (omca_propose/omca_stage are not yet implemented).",
 	}
 }
 
@@ -249,31 +349,23 @@ type toolDefinition struct {
 	InputSchema map[string]any `json:"inputSchema"`
 }
 
-// toolsListResult returns the fixed, one-entry tools/list result: omca_status
-// takes no arguments, so its inputSchema is an empty object schema with
-// additionalProperties disallowed — a client that tries to pass any argument
-// gets a schema-shaped signal that none are accepted, not a silently ignored
-// one.
-func toolsListResult() map[string]any {
-	return map[string]any{
-		"tools": []toolDefinition{
-			{
-				Name:        toolNameStatus,
-				Description: statusToolDescription,
-				InputSchema: map[string]any{
-					"type":                 "object",
-					"properties":           map[string]any{},
-					"additionalProperties": false,
-				},
-			},
-		},
+// toolsListResult projects registry's entries into the tools/list result, in
+// registration order — see toolRegistry's doc comment for why this and
+// tools/call's dispatch (handleToolsCall) always agree on the exact same
+// tool set.
+func toolsListResult(registry toolRegistry) map[string]any {
+	defs := make([]toolDefinition, 0, len(registry.entries))
+	for _, e := range registry.entries {
+		defs = append(defs, e.Definition)
 	}
+	return map[string]any{"tools": defs}
 }
 
 // toolsCallParams is "tools/call"'s params shape: which tool, and its
-// arguments (unused here — omca_status takes none, but a client-supplied
-// arguments object is still valid JSON-RPC and must not itself cause a
-// parse failure).
+// arguments (a client-supplied arguments object is always valid JSON-RPC —
+// even for omca_status, which accepts none — and must never itself cause a
+// parse failure; each toolHandler decides what, if anything, to do with a
+// non-empty Arguments).
 type toolsCallParams struct {
 	Name      string          `json:"name"`
 	Arguments json.RawMessage `json:"arguments,omitempty"`
@@ -303,41 +395,58 @@ type callToolResult struct {
 // itself should be reported within the result object with isError set to
 // true... Protocol-level errors, such as issues finding the tool... should
 // be handled differently"), an unknown tool name is a protocol-level error
-// (returned as *jsonrpcError, this method's second return value), while
-// status() itself failing is a tool-level error (returned as a normal
-// result with IsError: true, first return value) — a client can recover
-// from the latter without treating the whole JSON-RPC exchange as broken.
-func handleToolsCall(params json.RawMessage, status StatusFunc) (any, *jsonrpcError) {
+// (returned as *jsonrpcError, this method's second return value), while the
+// matched handler itself failing is a tool-level error (returned as a
+// normal result with IsError: true, first return value) — a client can
+// recover from the latter without treating the whole JSON-RPC exchange as
+// broken. This dispatch logic itself is now tool-agnostic (issue #24's
+// round-4 audit): it looks the handler up in registry.byName by name and
+// renders whatever it returns, the same way regardless of which tool was
+// called — the PR-11 stub's single hardcoded `p.Name != toolNameStatus`
+// check is gone.
+func handleToolsCall(params json.RawMessage, registry toolRegistry) (any, *jsonrpcError) {
 	var p toolsCallParams
 	if len(params) > 0 {
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, &jsonrpcError{Code: codeInvalidParams, Message: "invalid params: " + err.Error()}
 		}
 	}
-	if p.Name != toolNameStatus {
-		return nil, &jsonrpcError{Code: codeInvalidParams, Message: fmt.Sprintf("unknown tool %q (this server exposes only %q)", p.Name, toolNameStatus)}
+	handler, ok := registry.byName[p.Name]
+	if !ok {
+		return nil, &jsonrpcError{Code: codeInvalidParams, Message: fmt.Sprintf("unknown tool %q (this server exposes: %s)", p.Name, strings.Join(registry.names(), ", "))}
 	}
 
-	result, err := status()
+	result, err := handler(p.Arguments)
 	if err != nil {
 		return callToolResult{
 			Content: []contentBlock{{Type: "text", Text: err.Error()}},
 			IsError: true,
 		}, nil
 	}
+	return renderCallToolResult(p.Name, result), nil
+}
 
-	pretty, marshalErr := json.MarshalIndent(result, "", "  ")
+// renderCallToolResult wraps a successful handler result into the shared
+// CallToolResult shape every tool uses: a pretty-printed JSON text block
+// (for a text-only client) plus the identical value as StructuredContent
+// (for a structured-content-aware client) — the exact rendering the PR-11
+// stub's handleToolsCall originally did only for omca_status, factored out
+// so every tool in the registry renders identically rather than each
+// reimplementing it.
+func renderCallToolResult(toolName string, result any) callToolResult {
+	pretty, err := json.MarshalIndent(result, "", "  ")
 	text := string(pretty)
-	if marshalErr != nil {
-		// StatusResult is a fixed, entirely JSON-marshalable struct (no
-		// channels, funcs, or cyclic pointers) — this should never actually
-		// happen, but a text fallback is cheap insurance against ever
-		// returning a response with an empty content array, which the MCP
-		// spec requires to be non-empty.
-		text = fmt.Sprintf("omca_status: %+v", result)
+	if err != nil {
+		// Every result type this package's handlers return is a fixed,
+		// entirely JSON-marshalable struct (no channels, funcs, or cyclic
+		// pointers) — this should never actually happen, but a text
+		// fallback is cheap insurance against ever returning a response
+		// with an empty content array, which the MCP spec requires to be
+		// non-empty.
+		text = fmt.Sprintf("%s: %+v", toolName, result)
 	}
 	return callToolResult{
 		Content:           []contentBlock{{Type: "text", Text: text}},
 		StructuredContent: result,
-	}, nil
+	}
 }
