@@ -3,10 +3,14 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	hostcontext "github.com/wangzitian0/oh-my-code-agent/internal/context"
+	"github.com/wangzitian0/oh-my-code-agent/internal/domain"
+	"github.com/wangzitian0/oh-my-code-agent/internal/runtime"
 )
 
 // TestRunMCP_RejectsMissingOrWrongSubcommand proves `omca mcp` requires
@@ -149,6 +153,67 @@ func TestSessionHostFromEnv(t *testing.T) {
 				t.Errorf("sessionHostFromEnv() = %q, want %q", got, c.want)
 			}
 		})
+	}
+}
+
+// TestCompileFuncForMCP_CorruptCachedManifest_FailsClosed proves the
+// Copilot-review fix: compileFuncForMCP (the CompileFunc backing omca_stage)
+// previously recompiled into outputDir on ANY ReadGenerationManifest error,
+// not just a genuine cache miss (os.IsNotExist) -- silently overwriting a
+// content-addressed generation directory whose manifest exists but failed
+// validation, the same "refuse to overwrite a broken content-addressed
+// path" invariant runtime.EnsureGeneration already enforces elsewhere.
+func TestCompileFuncForMCP_CorruptCachedManifest_FailsClosed(t *testing.T) {
+	if testFixtureBinaries.fakeHost == "" {
+		t.Skip("fixture binaries not built (TestMain)")
+	}
+	xdgStateHome := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", xdgStateHome)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	restoreWritableTree(t, xdgStateHome) // ensure t.TempDir()'s own cleanup can remove the read-only compiled tree
+	binDir := t.TempDir()
+	if err := os.Symlink(testFixtureBinaries.fakeHost, filepath.Join(binDir, "claude")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+
+	compileFn := compileFuncForMCP(&bytes.Buffer{})
+	activations := map[string]domain.HostActivation{"claude-code": {}}
+
+	gen, _, err := compileFn(activations)
+	if err != nil {
+		t.Fatalf("first compileFn call: %v", err)
+	}
+
+	stateRoot := filepath.Join(os.Getenv("XDG_STATE_HOME"), "omca")
+	// Find the generation's own manifest.json under the state root (its
+	// exact worktree-ID-derived subdirectory is not this test's concern)
+	// and corrupt it in place: still present, but no longer valid JSON.
+	var manifestPath string
+	_ = filepath.WalkDir(stateRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if d.Name() == "manifest.json" && strings.Contains(path, runtime.DirSafeID(gen.Metadata.ID)) {
+			manifestPath = path
+		}
+		return nil
+	})
+	if manifestPath == "" {
+		t.Fatalf("could not locate the compiled generation's manifest.json under %s", stateRoot)
+	}
+	// The compiled generation tree lands read-only (internal/runtime/
+	// readonly.go); restore write permission (immediately, not just via
+	// t.Cleanup) before tampering with it.
+	restoreWritableSkippingSymlinks(stateRoot)
+	if err := os.WriteFile(manifestPath, []byte("not valid json"), 0o644); err != nil {
+		t.Fatalf("corrupting manifest: %v", err)
+	}
+
+	if _, _, err := compileFn(activations); err == nil {
+		t.Fatal("second compileFn call with a corrupted cached manifest: want an error, got nil -- it silently recompiled over (or ignored) the corruption")
+	} else if !strings.Contains(err.Error(), "refusing to overwrite") {
+		t.Errorf("error = %q, want it to explain the refuse-to-overwrite-a-broken-content-addressed-path reasoning", err.Error())
 	}
 }
 

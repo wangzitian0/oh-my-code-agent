@@ -217,6 +217,18 @@ func compileFuncForMCP(stderr io.Writer) mcp.CompileFunc {
 
 		gen, err := runtime.ReadGenerationManifest(outputDir)
 		if err != nil {
+			if !os.IsNotExist(err) {
+				// outputDir exists but its manifest is present and
+				// unreadable/invalid -- the same "refuse to overwrite a
+				// broken content-addressed path" invariant
+				// runtime.EnsureGeneration already enforces elsewhere.
+				// Recompiling here would silently paper over corruption at
+				// a path this compiler does not own once something else
+				// has written into it; only a genuinely missing manifest
+				// (ENOENT, "nothing compiled here yet") is a real cache
+				// miss worth compiling into.
+				return domain.Generation{}, nil, fmt.Errorf("existing generation directory %s is present but its manifest failed validation, refusing to overwrite a content-addressed path: %w", outputDir, err)
+			}
 			gen, err = runtime.Compile(req, outputDir)
 			if err != nil {
 				return domain.Generation{}, nil, fmt.Errorf("compiling: %w", err)

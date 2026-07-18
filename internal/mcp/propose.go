@@ -262,10 +262,20 @@ func capabilityAndPolicyGates(pc ProposeContext, c domain.RepairChange) error {
 			if !ok || !capabilityQualifiedForCompile(ops) {
 				return &ProposeRejectedError{Gate: "capability", Reason: fmt.Sprintf("host %q's Knowledge Pack does not prove a qualified compile capability for concept %q (enabling %s %q); resolve=%q compile=%q", host, concept, chk.kind, id, ops.Resolve, ops.Compile)}
 			}
-			if hd, ok := pc.Artifact.Debug[host]; ok {
-				if asset, found := hd.Desired.Find(chk.kind, id); found && asset.Intent == domain.IntentDenied {
-					return &ProposeRejectedError{Gate: "policy", Reason: fmt.Sprintf("host %q's already-resolved desired state DENIES %s %q (%s); a proposal cannot silently override an established DENIED policy outcome (docs/product/requirements.md, resolve.Resolve semantics)", host, chk.kind, id, asset.Reason)}
-				}
+			hd, ok := pc.Artifact.Debug[host]
+			if !ok {
+				// No Desired state is available for host at all -- this
+				// gate cannot prove the enable selection doesn't contradict
+				// an already-resolved DENIED outcome, so it must fail
+				// closed rather than silently letting the selection through
+				// (the same "UNKNOWN is safer than a guessed adapter"
+				// discipline this project applies everywhere else; a
+				// missing Debug entry is not evidence of "nothing denied,"
+				// it is an inability to check at all).
+				return &ProposeRejectedError{Gate: "policy", Reason: fmt.Sprintf("host %q has no resolved Desired state in the bound report -- cannot prove enabling %s %q does not contradict an established DENIED policy outcome, failing closed", host, chk.kind, id)}
+			}
+			if asset, found := hd.Desired.Find(chk.kind, id); found && asset.Intent == domain.IntentDenied {
+				return &ProposeRejectedError{Gate: "policy", Reason: fmt.Sprintf("host %q's already-resolved desired state DENIES %s %q (%s); a proposal cannot silently override an established DENIED policy outcome (docs/product/requirements.md, resolve.Resolve semantics)", host, chk.kind, id, asset.Reason)}
 			}
 		}
 	}

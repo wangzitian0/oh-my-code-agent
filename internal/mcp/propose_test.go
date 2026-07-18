@@ -305,6 +305,27 @@ func TestComputePropose_RejectsAt_Policy_ContradictsDenied(t *testing.T) {
 	}
 }
 
+// TestComputePropose_RejectsAt_Policy_NoDesiredStateForHost proves the
+// Copilot-review fix: the policy gate previously only ran its DENIED-
+// contradiction check inside `if hd, ok := pc.Artifact.Debug[host]; ok`,
+// silently skipping the check entirely (fail-open) whenever the bound
+// report had no Debug entry for the target host at all -- a proposal could
+// enable an asset on a host the policy gate never actually examined.
+// "claude-code" is absent from proposeFixtureArtifact's Debug map (only
+// "codex" is populated), so this must now fail closed instead of silently
+// passing.
+func TestComputePropose_RejectsAt_Policy_NoDesiredStateForHost(t *testing.T) {
+	rp := validProposal(t)
+	rp.Spec.Changes[0].Patch = activationPatchJSON(t, "claude-code", "code-review")
+	_, err := ComputePropose(defaultProposeContext(), rp)
+	if err == nil {
+		t.Fatal("ComputePropose: want an error when the bound report has no Desired state for the target host, got nil")
+	}
+	if gate := rejectedGate(t, err); gate != "policy" {
+		t.Errorf("Gate = %q, want %q", gate, "policy")
+	}
+}
+
 // --- gate 6: risk (PROHIBITED short-circuit) -------------------------------
 
 func TestComputePropose_RejectsAt_Risk_ProhibitedSelfDeclaration(t *testing.T) {

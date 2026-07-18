@@ -97,19 +97,34 @@ type Registry struct {
 	byName  map[string]toolHandler
 }
 
-// NewRegistry builds a Registry from entries, in the order given — that
-// order is exactly what tools/list reports (toolsListResult). A later entry
-// naming the same tool as an earlier one overwrites the earlier one's
-// dispatch handler but not its position in tools/list ordering, matching
-// Go's own map-literal "last write wins" convention; every production call
-// site (runMCP) names each tool exactly once, so this never triggers
-// outside of a deliberately adversarial test.
+// NewRegistry builds a Registry from entries. tools/list reports one entry
+// per distinct tool name, in first-seen order; a later entry naming the
+// same tool as an earlier one replaces the earlier one everywhere —
+// tools/list's definition (name/description/schema) AND tools/call's
+// dispatch handler both come from the LAST entry given for that name, so
+// the two can never disagree about what a given tool currently is. The
+// name's POSITION in tools/list stays wherever it was first seen, matching
+// Go's own map-literal "last write wins for the value, first-seen for
+// anything order-dependent" convention. Every production call site
+// (runMCP) names each tool exactly once, so this never triggers outside of
+// a deliberately adversarial test.
 func NewRegistry(entries ...ToolEntry) Registry {
 	byName := make(map[string]toolHandler, len(entries))
+	latest := make(map[string]ToolEntry, len(entries))
+	order := make([]string, 0, len(entries))
 	for _, e := range entries {
-		byName[e.definition.Name] = e.handler
+		name := e.definition.Name
+		if _, seen := latest[name]; !seen {
+			order = append(order, name)
+		}
+		latest[name] = e
+		byName[name] = e.handler
 	}
-	return Registry{entries: entries, byName: byName}
+	deduped := make([]ToolEntry, 0, len(order))
+	for _, name := range order {
+		deduped = append(deduped, latest[name])
+	}
+	return Registry{entries: deduped, byName: byName}
 }
 
 // names returns every registered tool name, in tools/list order — used only

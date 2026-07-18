@@ -62,6 +62,49 @@ func testRegistry(status StatusFunc, query ArtifactFunc) Registry {
 	return NewRegistry(StatusToolEntry(status), QueryToolEntry(query))
 }
 
+// TestNewRegistry_DuplicateName_DedupesToLastEntry proves the Copilot-review
+// fix: registering two ToolEntry values under the same tool name (here,
+// two StatusToolEntry calls, both always named toolNameStatus regardless
+// of which StatusFunc each wraps) must produce exactly one tools/list
+// entry -- not two -- and tools/call must dispatch to the LAST one
+// registered, matching NewRegistry's own documented "last entry wins
+// everywhere" contract. Before the fix, entries kept every registration
+// verbatim, so tools/list would have listed "omca_status" twice.
+func TestNewRegistry_DuplicateName_DedupesToLastEntry(t *testing.T) {
+	registry := NewRegistry(
+		StatusToolEntry(staticStatus(StatusResult{WorktreeID: "first"}, nil)),
+		StatusToolEntry(staticStatus(StatusResult{WorktreeID: "second"}, nil)),
+	)
+
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/list"}` + "\n"
+	var out bytes.Buffer
+	if err := Serve(strings.NewReader(input), &out, registry); err != nil {
+		t.Fatalf("Serve: %v", err)
+	}
+	msgs := decodeLines(t, out.Bytes())
+	tools := msgs[0]["result"].(map[string]any)["tools"].([]any)
+	count := 0
+	for _, raw := range tools {
+		if raw.(map[string]any)["name"] == toolNameStatus {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("tools/list names %q %d times, want exactly 1", toolNameStatus, count)
+	}
+
+	callInput := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"omca_status","arguments":{}}}` + "\n"
+	out.Reset()
+	if err := Serve(strings.NewReader(callInput), &out, registry); err != nil {
+		t.Fatalf("Serve: %v", err)
+	}
+	callMsgs := decodeLines(t, out.Bytes())
+	structured := callMsgs[0]["result"].(map[string]any)["structuredContent"].(map[string]any)
+	if structured["worktreeId"] != "second" {
+		t.Errorf("tools/call dispatched to worktreeId=%v, want %q (the last-registered handler)", structured["worktreeId"], "second")
+	}
+}
+
 // TestServe_InitializeHandshake proves the initialize request/
 // notifications-initialized notification pair issue #15's "stdio JSON-RPC
 // 2.0 MCP server" AC requires: initialize gets exactly one response naming
