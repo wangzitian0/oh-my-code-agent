@@ -14,11 +14,25 @@ import (
 // exists so a broken Allowlist entry fails a normal `go test` assertion
 // too, with a clean failure message, in addition to a package-init panic).
 func TestProductionAllowlistIsValid(t *testing.T) {
-	if err := ValidateAllowlist(Allowlist); err != nil {
-		t.Fatalf("the production Allowlist is invalid: %v", err)
+	if err := ValidateAllowlist(allowlist); err != nil {
+		t.Fatalf("the production allowlist is invalid: %v", err)
 	}
-	if len(Allowlist) == 0 {
-		t.Fatal("Allowlist is empty -- issue #27's AC requires at least one concrete, fixture-backed shared class")
+	if len(allowlist) == 0 {
+		t.Fatal("allowlist is empty -- issue #27's AC requires at least one concrete, fixture-backed shared class")
+	}
+}
+
+// TestAllowlist_ReturnsDefensiveCopy proves the exported Allowlist()
+// accessor cannot be used to mutate the package-internal allowlist var:
+// mutating the returned slice must never be visible through a second call.
+func TestAllowlist_ReturnsDefensiveCopy(t *testing.T) {
+	got := Allowlist()
+	if len(got) == 0 {
+		t.Fatal("Allowlist() returned no entries")
+	}
+	got[0].RelPath = "tampered"
+	if allowlist[0].RelPath == "tampered" {
+		t.Fatal("mutating Allowlist()'s returned slice mutated the package-internal allowlist -- not a defensive copy")
 	}
 }
 
@@ -95,7 +109,7 @@ func TestPlanAllowlistedSymlinks_OnlyReturnsAllowlistedEntries(t *testing.T) {
 		t.Fatal("plans is empty, want at least the cache allowlist entry")
 	}
 	allowedRelPaths := map[string]bool{}
-	for _, e := range Allowlist {
+	for _, e := range allowlist {
 		if e.Host == "codex" {
 			allowedRelPaths[e.RelPath] = true
 		}
@@ -189,6 +203,30 @@ func TestCreateAllowlistedSymlinks_NoNativeContent_SkipsWithoutError(t *testing.
 	}
 	if _, err := os.Lstat(filepath.Join(generationHome, "cache")); err == nil {
 		t.Error("a symlink was created despite no native content existing")
+	}
+}
+
+// TestCreateAllowlistedSymlinks_RealLstatError_IsNotSwallowed proves the
+// Copilot-review fix: a real (non-IsNotExist) Lstat failure on a plan's
+// Target -- here, a permission error, simulated by making nativeHome itself
+// unsearchable -- must surface as an error, not be silently treated the
+// same as "nothing native to share yet." Swallowing it would silently
+// produce an incomplete symlink set with no trace of why a plan was
+// skipped.
+func TestCreateAllowlistedSymlinks_RealLstatError_IsNotSwallowed(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("permission checks are bypassed when running as root")
+	}
+	nativeHome := t.TempDir()
+	generationHome := t.TempDir()
+	if err := os.Chmod(nativeHome, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(nativeHome, 0o755) })
+
+	_, err := CreateAllowlistedSymlinks("codex", nativeHome, generationHome)
+	if err == nil {
+		t.Fatal("CreateAllowlistedSymlinks: want an error for a real (non-IsNotExist) Lstat failure, got nil")
 	}
 }
 

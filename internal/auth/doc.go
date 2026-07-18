@@ -41,7 +41,7 @@
 //     that has not been behaviorally qualified).
 //   - allowlist.go implements docs/architecture/runtime.md §9's "sharing
 //     state through symlinks is allowed only for an explicit allowlist
-//     backed by fixtures. A broad symlink to the native host host defeats
+//     backed by fixtures. A broad symlink to the native host home defeats
 //     isolation": the only way any native-home path can ever be symlinked
 //     into a generation is by appearing, byte-for-byte, as an entry in the
 //     closed Allowlist slice — there is no code path that accepts an

@@ -21,7 +21,7 @@ import (
 // <args joined by space>" line to markerFile, proving both that the
 // invocation happened exactly once and exactly which arguments it received
 // — the same evidentiary technique cmd/omca/testdata/fakehost's
-// FAMEHOST_MARKER mechanism uses for its own non-recursion proof.
+// FAKEHOST_MARKER mechanism uses for its own non-recursion proof.
 func writeFakeLoginBinary(t *testing.T, dir, name, markerFile string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
@@ -129,6 +129,43 @@ func TestInvoke_SkipsWhenBinaryNotFound(t *testing.T) {
 		// from actually running it -- matches internal/qualify.RunInvocation's
 		// own Attempted/Skipped semantics.
 		t.Errorf("Attempted = %v, want true", result.Attempted)
+	}
+}
+
+// TestInvoke_ProcessNeverStarts_DoesNotPanic locks in the behavior a
+// Copilot review comment questioned: cmd.ProcessState is nil whenever the
+// process never actually started (an exec-format error, here: a file with
+// the executable permission bits set but content that is not a valid
+// executable at all -- passes lookPathIn's permission-bit check, then fails
+// inside cmd.Run itself before a process image ever exists). Invoke's
+// explicit nil check means this never depended on (*os.ProcessState).
+// ExitCode()'s own nil-receiver safety (verified separately to already
+// return -1 for a nil receiver, os/exec_posix.go) -- this test proves the
+// caller-visible result (a real error, ExitCode -1, no panic) directly,
+// regardless of which of the two nil-safety layers is doing the work.
+func TestInvoke_ProcessNeverStarts_DoesNotPanic(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("exec-format-error scenario is POSIX-specific")
+	}
+	binDir := t.TempDir()
+	fakeBinaryPath := filepath.Join(binDir, "codex")
+	// Not a shebang script, not an ELF/Mach-O header -- garbage content the
+	// kernel will refuse to exec, despite the executable permission bit
+	// being set (so lookPathIn's isExecutableFile check still finds it).
+	if err := os.WriteFile(fakeBinaryPath, []byte("not an executable\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	plan := InvocationPlan{Host: "codex", Command: "codex", Args: []string{"login"}}
+	result, err := Invoke(context.Background(), plan, binDir, nil)
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if result.Err == nil {
+		t.Error("result.Err is nil, want the exec-format error cmd.Run reported")
+	}
+	if result.ExitCode != -1 {
+		t.Errorf("result.ExitCode = %d, want -1 (the documented no-real-exit-code sentinel)", result.ExitCode)
 	}
 }
 

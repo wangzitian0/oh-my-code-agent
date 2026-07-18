@@ -105,11 +105,28 @@ func Invoke(ctx context.Context, plan InvocationPlan, pathEnv string, env []stri
 	cmd.Stderr = &stderr
 
 	runErr := cmd.Run()
+	// cmd.ProcessState is nil when the process never actually started (an
+	// exec format error, a permission error, the binary vanishing between
+	// lookPathIn resolving it and Run attempting it, ...). (*os.ProcessState).
+	// ExitCode() is already documented and implemented to be nil-receiver-safe
+	// (returns -1 without dereferencing, os/exec_posix.go) -- this call was
+	// never actually going to panic even before this explicit check existed
+	// (confirmed empirically: a real exec-format-error run still returns a
+	// clean -1, not a crash). The check stays anyway: relying on a reader
+	// already knowing that specific stdlib nil-safety guarantee is fragile
+	// documentation, and being explicit here costs nothing. -1 matches the
+	// same "no real exit code" sentinel os/exec.ExitError.ExitCode() itself
+	// documents for its own analogous "process was terminated by a signal"
+	// case.
+	exitCode := -1
+	if cmd.ProcessState != nil {
+		exitCode = cmd.ProcessState.ExitCode()
+	}
 	return InvocationResult{
 		Attempted: true,
 		Command:   plan.Command,
 		Args:      plan.Args,
-		ExitCode:  cmd.ProcessState.ExitCode(),
+		ExitCode:  exitCode,
 		Stdout:    stdout.String(),
 		Stderr:    stderr.String(),
 		Err:       runErr,
