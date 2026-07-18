@@ -219,19 +219,33 @@ func runActivate(stdout, stderr io.Writer, args []string) int {
 		return 1
 	}
 
-	result, err := runtime.Activate(runtime.ActivateRequest{
+	generationsRoot := filepath.Join(worktreeStateDir, "generations")
+	result, err := runtime.ActivateAndVerify(runtime.ActivateRequest{
 		WorktreeStateDir: worktreeStateDir,
 		Host:             host,
 		Fresh:            fresh,
 		Now:              now,
-	})
+	}, generationsRoot)
 	if err != nil {
 		fmt.Fprintf(stderr, "omca: activate: %v\n", err)
 		return 1
 	}
 
-	fmt.Fprintf(stdout, "omca: activate: %s: activated %s (previous: %q) at %s\n", result.Host, result.ActivatedGenerationID, result.PreviousGenerationID, result.ActivatedAt)
-	return 0
+	fmt.Fprintf(stdout, "omca: activate: %s: activated %s (previous: %q) at %s\n", result.Activation.Host, result.Activation.ActivatedGenerationID, result.Activation.PreviousGenerationID, result.Activation.ActivatedAt)
+	if !result.RolledBack {
+		fmt.Fprintf(stdout, "omca: activate: %s: post-activation verification passed (%s)\n", result.Activation.Host, result.Verification.Detail)
+		return 0
+	}
+
+	// Post-activation verification failed and automated rollback already
+	// recovered the previous generation (runtime.ActivateAndVerify's own
+	// doc comment) -- both events are already ledgered by the time this
+	// prints. The requested activation did NOT end up in effect, so this
+	// still exits non-zero: an operator who ran `omca activate` needs to
+	// know their intended change did not stick, even though the worktree
+	// itself was left in a safe, recoverable state.
+	fmt.Fprintf(stderr, "omca: activate: %s: post-activation verification FAILED (%s) -- automatically rolled back to the parent generation %s at %s\n", result.Activation.Host, result.Verification.Detail, result.Rollback.RestoredGenerationID, result.Rollback.RolledBackAt)
+	return 1
 }
 
 // composeFreshCompileRequest builds the runtime.CompileRequest Activate's
