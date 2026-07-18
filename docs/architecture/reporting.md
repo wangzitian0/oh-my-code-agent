@@ -69,6 +69,10 @@ Evidence is monotonic only when the higher level proves the same claim. An `E4`
 behavior probe does not prove an `E3` prompt assembly trace, and neither turns
 an advisory Instruction into hard enforcement.
 
+`docs/architecture/evidence-ceiling.md` names, per host and concept, which of
+E0-E3 this repository can actually reach today and why — internal/assurance's
+`VerifyGraph` enforces that no reported conclusion exceeds it.
+
 ## 5. Guarantee Levels
 
 | Guarantee | Meaning |

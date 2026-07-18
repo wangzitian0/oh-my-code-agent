@@ -64,6 +64,18 @@ type HostDebug struct {
 	Desired           resolve.ResolvedState         `json:"desired"`
 	KnowledgeEvidence []domain.KnowledgeEvidenceRef `json:"knowledgeEvidence,omitempty"`
 
+	// Evidence is one domain.Evidence record per EffectiveEntry and
+	// Conflict in Graph (internal/assurance.BuildEvidence), plus — when
+	// available — the host binary's own E3 (HOST_REPORTED) version claim
+	// (internal/assurance.HostVersionEvidence). This is the literal,
+	// separately queryable form of "every effective value in the report
+	// carries its evidence level" (issue #26's own acceptance criterion):
+	// Graph's entries already carry an EvidenceLevel field each, and this
+	// slice states the same facts as standalone, KnowledgeRef-backed
+	// documents matching internal/domain/evidence.go's frozen Evidence
+	// contract.
+	Evidence []domain.Evidence `json:"evidence,omitempty"`
+
 	// CurrentSources/PendingSources are the host's current/pending
 	// Generation.Spec.Sources lists (empty when no such generation exists
 	// yet for this host in this worktree) — the CURRENT/PENDING plane data
