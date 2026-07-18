@@ -22,13 +22,17 @@ import (
 // nothing to negotiate.
 const protocolVersion = "2025-06-18"
 
-// toolNameStatus / toolNameQuery are the tools this package exposes today
-// (PR-20/issue #24 adds toolNameQuery alongside PR-11's original
-// toolNameStatus; PR-21 is expected to add two more — see newToolRegistry's
-// doc comment for why that no longer means touching this dispatch code).
+// toolNameStatus / toolNameQuery / toolNamePropose / toolNameStage are the
+// four tools docs/project/roadmap.md's M4 milestone names in full
+// (PR-11's original toolNameStatus, PR-20/issue #24's toolNameQuery, and
+// PR-21/issue #25's toolNamePropose/toolNameStage) — see Registry's doc
+// comment for why adding these two did not require touching this file's
+// dispatch logic at all.
 const (
-	toolNameStatus = "omca_status"
-	toolNameQuery  = "omca_query"
+	toolNameStatus  = "omca_status"
+	toolNameQuery   = "omca_query"
+	toolNamePropose = "omca_propose"
+	toolNameStage   = "omca_stage"
 )
 
 // statusToolDescription is what tools/list reports for omca_status —
@@ -56,71 +60,110 @@ type StatusFunc func() (StatusResult, error)
 // argument content itself.
 type toolHandler func(arguments json.RawMessage) (any, error)
 
-// toolEntry is one registered tool: its tools/list definition paired with
-// the handler tools/call dispatches to by name.
-type toolEntry struct {
-	Definition toolDefinition
-	Handler    toolHandler
+// ToolEntry is one registered tool: its tools/list definition paired with
+// the handler tools/call dispatches to by name. Its fields are unexported
+// (only this package knows toolDefinition/toolHandler's shape); a caller
+// outside this package builds one only through a tool-specific constructor
+// (StatusToolEntry, QueryToolEntry, ProposeToolEntry, StageToolEntry) and
+// otherwise treats the returned value as opaque.
+type ToolEntry struct {
+	definition toolDefinition
+	handler    toolHandler
 }
 
-// toolRegistry is this server's complete tool surface: tools/list projects
-// Entries (in registration order, so tools/list is deterministic across
+// Registry is this server's complete tool surface: tools/list projects
+// entries (in registration order, so tools/list is deterministic across
 // calls rather than a random map-iteration order) and tools/call dispatches
 // through byName. Building both from the SAME ordered slice — rather than,
 // as the PR-11 stub did, tools/list and tools/call each independently
-// hardcoding their own one-tool knowledge — is this PR's generalization
-// (issue #24's round-4 audit, "Generalize internal/mcp/server.go's tool
-// dispatch into a real name-to-handler registry"): a tool registered here
-// can never be present in tools/list but missing from tools/call's dispatch
-// (or vice versa), and PR-21 adding its own two tools is a matter of
-// appending two more toolEntry values to newToolRegistry, not touching
-// Serve/handleLine/handleToolsCall again.
-type toolRegistry struct {
-	entries []toolEntry
+// hardcoding their own one-tool knowledge — is issue #24's round-4 audit
+// generalization ("Generalize internal/mcp/server.go's tool dispatch into a
+// real name-to-handler registry"): a tool registered here can never be
+// present in tools/list but missing from tools/call's dispatch (or vice
+// versa).
+//
+// issue #25's own round-4 audit goes one step further: Serve itself now
+// takes an already-built Registry rather than a growing list of positional
+// per-tool callback parameters (Serve(r, w, status StatusFunc, query
+// ArtifactFunc) error, PR-20's shape) — a signature that would otherwise
+// grow by one parameter for every future tool this server ever adds.
+// cmd/omca/mcp.go's runMCP composes the full four-tool Registry itself
+// (NewRegistry(StatusToolEntry(...), QueryToolEntry(...),
+// ProposeToolEntry(...), StageToolEntry(...))) and hands the result to
+// Serve — this file never grows again when a fifth tool arrives; only
+// runMCP's own registry-composition call site does.
+type Registry struct {
+	entries []ToolEntry
 	byName  map[string]toolHandler
 }
 
-// newToolRegistry builds this server's tool table from the StatusFunc/
-// ArtifactFunc callbacks Serve was given — the closures below are where
-// each tool's handler captures the one dependency it actually needs
-// (status for omca_status, query for omca_query), rather than every handler
-// receiving both regardless of relevance.
-func newToolRegistry(status StatusFunc, query ArtifactFunc) toolRegistry {
-	entries := []toolEntry{
-		{
-			Definition: toolDefinition{
-				Name:        toolNameStatus,
-				Description: statusToolDescription,
-				InputSchema: noArgumentsInputSchema(),
-			},
-			Handler: func(json.RawMessage) (any, error) { return status() },
-		},
-		{
-			Definition: toolDefinition{
-				Name:        toolNameQuery,
-				Description: queryToolDescription,
-				InputSchema: queryInputSchema(),
-			},
-			Handler: queryToolHandler(query),
-		},
-	}
+// NewRegistry builds a Registry from entries. tools/list reports one entry
+// per distinct tool name, in first-seen order; a later entry naming the
+// same tool as an earlier one replaces the earlier one everywhere —
+// tools/list's definition (name/description/schema) AND tools/call's
+// dispatch handler both come from the LAST entry given for that name, so
+// the two can never disagree about what a given tool currently is. The
+// name's POSITION in tools/list stays wherever it was first seen, matching
+// Go's own map-literal "last write wins for the value, first-seen for
+// anything order-dependent" convention. Every production call site
+// (runMCP) names each tool exactly once, so this never triggers outside of
+// a deliberately adversarial test.
+func NewRegistry(entries ...ToolEntry) Registry {
 	byName := make(map[string]toolHandler, len(entries))
+	latest := make(map[string]ToolEntry, len(entries))
+	order := make([]string, 0, len(entries))
 	for _, e := range entries {
-		byName[e.Definition.Name] = e.Handler
+		name := e.definition.Name
+		if _, seen := latest[name]; !seen {
+			order = append(order, name)
+		}
+		latest[name] = e
+		byName[name] = e.handler
 	}
-	return toolRegistry{entries: entries, byName: byName}
+	deduped := make([]ToolEntry, 0, len(order))
+	for _, name := range order {
+		deduped = append(deduped, latest[name])
+	}
+	return Registry{entries: deduped, byName: byName}
 }
 
 // names returns every registered tool name, in tools/list order — used only
 // to compose an "unknown tool" error message a client can act on (e.g. "did
 // you mean...").
-func (t toolRegistry) names() []string {
+func (t Registry) names() []string {
 	names := make([]string, 0, len(t.entries))
 	for _, e := range t.entries {
-		names = append(names, e.Definition.Name)
+		names = append(names, e.definition.Name)
 	}
 	sort.Strings(names) // error-message cosmetics only; tools/list itself uses registration order below
 	return names
+}
+
+// StatusToolEntry builds the registered omca_status ToolEntry from a
+// StatusFunc — factored out of the old newToolRegistry so cmd/omca/mcp.go
+// can compose it directly (Registry's own doc comment explains why).
+func StatusToolEntry(status StatusFunc) ToolEntry {
+	return ToolEntry{
+		definition: toolDefinition{
+			Name:        toolNameStatus,
+			Description: statusToolDescription,
+			InputSchema: noArgumentsInputSchema(),
+		},
+		handler: func(json.RawMessage) (any, error) { return status() },
+	}
+}
+
+// QueryToolEntry builds the registered omca_query ToolEntry from an
+// ArtifactFunc.
+func QueryToolEntry(query ArtifactFunc) ToolEntry {
+	return ToolEntry{
+		definition: toolDefinition{
+			Name:        toolNameQuery,
+			Description: queryToolDescription,
+			InputSchema: queryInputSchema(),
+		},
+		handler: queryToolHandler(query),
+	}
 }
 
 // noArgumentsInputSchema is the shared inputSchema for a tool that takes no
@@ -196,9 +239,13 @@ const (
 // message is never such a failure: it produces a JSON-RPC error response
 // (or, for a notification, no response at all) and Serve keeps running,
 // exactly like a long-lived server must.
-func Serve(r io.Reader, w io.Writer, status StatusFunc, query ArtifactFunc) error {
-	registry := newToolRegistry(status, query)
-
+//
+// registry is the complete, already-built tool table (Registry's own doc
+// comment explains why Serve takes this rather than a per-tool callback
+// parameter list) — the caller (runMCP) composes it once, before calling
+// Serve, from whichever StatusFunc/ArtifactFunc/CapabilityFunc/CompileFunc
+// callbacks this process's own environment resolved.
+func Serve(r io.Reader, w io.Writer, registry Registry) error {
 	scanner := bufio.NewScanner(r)
 	// The default 64KiB token limit is already generous for this server's
 	// entire message vocabulary (a no-argument tools/call request, or an
@@ -243,7 +290,7 @@ func Serve(r io.Reader, w io.Writer, status StatusFunc, query ArtifactFunc) erro
 // "id") and therefore gets no response under any circumstance, including an
 // error — a notification's sender has, by construction, declared it is not
 // waiting for one.
-func handleLine(line []byte, registry toolRegistry) *jsonrpcResponse {
+func handleLine(line []byte, registry Registry) *jsonrpcResponse {
 	var req jsonrpcRequest
 	if err := json.Unmarshal(line, &req); err != nil {
 		// encoding/json.Unmarshal populates every struct field it CAN parse
@@ -338,7 +385,7 @@ func initializeResult() initializeResultPayload {
 			"tools": map[string]any{"listChanged": false},
 		},
 		ServerInfo:   implementation{Name: "omca", Version: version.Version},
-		Instructions: "This is the OMCA MCP read surface: omca_status (worktree/context/generation summary) and omca_query (logical entities, drift cards, Knowledge evidence, generation sources, and the report artifact overview -- all scoped to this process's own bound worktree/generation, never caller-selectable). See docs/architecture/reporting.md §11 and docs/project/roadmap.md M4 for the full control surface (omca_propose/omca_stage are not yet implemented).",
+		Instructions: "This is the OMCA MCP control surface: omca_status (worktree/context/generation summary), omca_query (logical entities, drift cards, Knowledge evidence, generation sources, and the report artifact overview), omca_propose (validate a RepairProposal document against report fingerprint, schema, capability gates, ownership, and policy, and classify its risk), and omca_stage (fully re-validate and, only for an AUTO_STAGE proposal, compile it into a fresh pending generation) -- all scoped to this process's own bound worktree/generation, never caller-selectable, and never able to bypass a confirmation class. See docs/architecture/reporting.md §11 and docs/product/requirements.md §7-8 for the full control surface.",
 	}
 }
 
@@ -350,13 +397,13 @@ type toolDefinition struct {
 }
 
 // toolsListResult projects registry's entries into the tools/list result, in
-// registration order — see toolRegistry's doc comment for why this and
+// registration order — see Registry's doc comment for why this and
 // tools/call's dispatch (handleToolsCall) always agree on the exact same
 // tool set.
-func toolsListResult(registry toolRegistry) map[string]any {
+func toolsListResult(registry Registry) map[string]any {
 	defs := make([]toolDefinition, 0, len(registry.entries))
 	for _, e := range registry.entries {
-		defs = append(defs, e.Definition)
+		defs = append(defs, e.definition)
 	}
 	return map[string]any{"tools": defs}
 }
@@ -404,7 +451,7 @@ type callToolResult struct {
 // renders whatever it returns, the same way regardless of which tool was
 // called — the PR-11 stub's single hardcoded `p.Name != toolNameStatus`
 // check is gone.
-func handleToolsCall(params json.RawMessage, registry toolRegistry) (any, *jsonrpcError) {
+func handleToolsCall(params json.RawMessage, registry Registry) (any, *jsonrpcError) {
 	var p toolsCallParams
 	if len(params) > 0 {
 		if err := json.Unmarshal(params, &p); err != nil {
