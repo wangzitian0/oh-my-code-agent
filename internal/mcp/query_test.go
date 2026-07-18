@@ -475,7 +475,7 @@ func TestServe_ToolsCall_OmcaQuery_WorktreeRetargetingArgumentIsIgnored(t *testi
 	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"omca_query","arguments":{"kind":"artifact","worktreeId":"worktree:sha256:attacker-worktree","generationId":"generation:attacker","runId":"run:attacker"}}}` + "\n"
 
 	var out bytes.Buffer
-	if err := Serve(strings.NewReader(input), &out, staticStatus(StatusResult{}, nil), staticQuery(bound, nil)); err != nil {
+	if err := Serve(strings.NewReader(input), &out, testRegistry(staticStatus(StatusResult{}, nil), staticQuery(bound, nil))); err != nil {
 		t.Fatalf("Serve: %v", err)
 	}
 	msgs := decodeLines(t, out.Bytes())
@@ -653,7 +653,7 @@ func TestComputeQuery_MaxLimitStillStaysWithinAGenerousBudget(t *testing.T) {
 // whole registered tool set, not just omca_query's own inputSchema in
 // isolation.
 func TestToolsList_SchemasStayWithinSizeBudget(t *testing.T) {
-	registry := newToolRegistry(staticStatus(StatusResult{}, nil), staticQuery(report.Artifact{}, nil))
+	registry := testRegistry(staticStatus(StatusResult{}, nil), staticQuery(report.Artifact{}, nil))
 	data, err := json.Marshal(toolsListResult(registry))
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)

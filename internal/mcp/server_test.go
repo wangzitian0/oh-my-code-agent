@@ -51,6 +51,17 @@ func staticQuery(result report.Artifact, err error) ArtifactFunc {
 	return func() (report.Artifact, error) { return result, err }
 }
 
+// testRegistry builds the two-tool Registry (omca_status + omca_query) this
+// file's protocol-mechanics tests exercise Serve against — factored out
+// once Serve stopped taking status/query as its own positional parameters
+// (issue #25's round-4 audit, Registry's own doc comment) so every call
+// site below only needs to name its two StatusFunc/ArtifactFunc values, not
+// re-spell NewRegistry(StatusToolEntry(...), QueryToolEntry(...)) at each
+// one.
+func testRegistry(status StatusFunc, query ArtifactFunc) Registry {
+	return NewRegistry(StatusToolEntry(status), QueryToolEntry(query))
+}
+
 // TestServe_InitializeHandshake proves the initialize request/
 // notifications-initialized notification pair issue #15's "stdio JSON-RPC
 // 2.0 MCP server" AC requires: initialize gets exactly one response naming
@@ -62,7 +73,7 @@ func TestServe_InitializeHandshake(t *testing.T) {
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}` + "\n"
 
 	var out bytes.Buffer
-	if err := Serve(strings.NewReader(input), &out, staticStatus(StatusResult{}, nil), staticQuery(report.Artifact{}, nil)); err != nil {
+	if err := Serve(strings.NewReader(input), &out, testRegistry(staticStatus(StatusResult{}, nil), staticQuery(report.Artifact{}, nil))); err != nil {
 		t.Fatalf("Serve: %v", err)
 	}
 
@@ -87,16 +98,17 @@ func TestServe_InitializeHandshake(t *testing.T) {
 }
 
 // TestServe_ToolsList_NamesOmcaStatusAndOmcaQuery proves tools/list reports
-// exactly this package's two implemented tools, omca_status and omca_query
-// (issue #24/PR-20's read surface; omca_propose/omca_stage remain M4 scope
-// not yet implemented), each with a non-empty description and inputSchema,
-// and in registration order (newToolRegistry's own doc comment: tools/list
-// projects registry.entries in order, never a random map-iteration order).
+// exactly the tools named in the Registry Serve was given (here, the
+// two-tool testRegistry -- omca_propose/omca_stage's own tools/list
+// presence is proven separately, propose_test.go/stage_test.go), each with
+// a non-empty description and inputSchema, in registration order
+// (Registry's own doc comment: tools/list projects registry.entries in
+// order, never a random map-iteration order).
 func TestServe_ToolsList_NamesOmcaStatusAndOmcaQuery(t *testing.T) {
 	input := `{"jsonrpc":"2.0","id":2,"method":"tools/list"}` + "\n"
 
 	var out bytes.Buffer
-	if err := Serve(strings.NewReader(input), &out, staticStatus(StatusResult{}, nil), staticQuery(report.Artifact{}, nil)); err != nil {
+	if err := Serve(strings.NewReader(input), &out, testRegistry(staticStatus(StatusResult{}, nil), staticQuery(report.Artifact{}, nil))); err != nil {
 		t.Fatalf("Serve: %v", err)
 	}
 	msgs := decodeLines(t, out.Bytes())
@@ -138,7 +150,7 @@ func TestServe_ToolsCall_OmcaStatus_ReturnsStructuredAndTextContent(t *testing.T
 	input := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"omca_status","arguments":{}}}` + "\n"
 
 	var out bytes.Buffer
-	if err := Serve(strings.NewReader(input), &out, staticStatus(want, nil), staticQuery(report.Artifact{}, nil)); err != nil {
+	if err := Serve(strings.NewReader(input), &out, testRegistry(staticStatus(want, nil), staticQuery(report.Artifact{}, nil))); err != nil {
 		t.Fatalf("Serve: %v", err)
 	}
 	msgs := decodeLines(t, out.Bytes())
@@ -180,7 +192,7 @@ func TestServe_ToolsCall_StatusFuncError_ReturnsToolLevelError(t *testing.T) {
 	input := `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"omca_status","arguments":{}}}` + "\n"
 
 	var out bytes.Buffer
-	if err := Serve(strings.NewReader(input), &out, staticStatus(StatusResult{}, errors.New("boom")), staticQuery(report.Artifact{}, nil)); err != nil {
+	if err := Serve(strings.NewReader(input), &out, testRegistry(staticStatus(StatusResult{}, errors.New("boom")), staticQuery(report.Artifact{}, nil))); err != nil {
 		t.Fatalf("Serve: %v", err)
 	}
 	msgs := decodeLines(t, out.Bytes())
@@ -209,7 +221,7 @@ func TestServe_ToolsCall_UnknownTool_ReturnsProtocolLevelError(t *testing.T) {
 	input := `{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"omca_propose","arguments":{}}}` + "\n"
 
 	var out bytes.Buffer
-	if err := Serve(strings.NewReader(input), &out, staticStatus(StatusResult{}, nil), staticQuery(report.Artifact{}, nil)); err != nil {
+	if err := Serve(strings.NewReader(input), &out, testRegistry(staticStatus(StatusResult{}, nil), staticQuery(report.Artifact{}, nil))); err != nil {
 		t.Fatalf("Serve: %v", err)
 	}
 	msgs := decodeLines(t, out.Bytes())
@@ -234,7 +246,7 @@ func TestServe_UnknownMethod_Request_ReturnsMethodNotFound(t *testing.T) {
 	input := `{"jsonrpc":"2.0","id":6,"method":"omca_query"}` + "\n"
 
 	var out bytes.Buffer
-	if err := Serve(strings.NewReader(input), &out, staticStatus(StatusResult{}, nil), staticQuery(report.Artifact{}, nil)); err != nil {
+	if err := Serve(strings.NewReader(input), &out, testRegistry(staticStatus(StatusResult{}, nil), staticQuery(report.Artifact{}, nil))); err != nil {
 		t.Fatalf("Serve: %v", err)
 	}
 	msgs := decodeLines(t, out.Bytes())
@@ -258,7 +270,7 @@ func TestServe_UnknownMethod_Notification_NoResponse(t *testing.T) {
 	input := `{"jsonrpc":"2.0","method":"some/unknown/notification"}` + "\n"
 
 	var out bytes.Buffer
-	if err := Serve(strings.NewReader(input), &out, staticStatus(StatusResult{}, nil), staticQuery(report.Artifact{}, nil)); err != nil {
+	if err := Serve(strings.NewReader(input), &out, testRegistry(staticStatus(StatusResult{}, nil), staticQuery(report.Artifact{}, nil))); err != nil {
 		t.Fatalf("Serve: %v", err)
 	}
 	if out.Len() != 0 {
@@ -275,7 +287,7 @@ func TestServe_MalformedJSON_ReturnsParseErrorWithNullID(t *testing.T) {
 	input := "not json at all\n" + `{"jsonrpc":"2.0","id":7,"method":"tools/list"}` + "\n"
 
 	var out bytes.Buffer
-	if err := Serve(strings.NewReader(input), &out, staticStatus(StatusResult{}, nil), staticQuery(report.Artifact{}, nil)); err != nil {
+	if err := Serve(strings.NewReader(input), &out, testRegistry(staticStatus(StatusResult{}, nil), staticQuery(report.Artifact{}, nil))); err != nil {
 		t.Fatalf("Serve: %v", err)
 	}
 	msgs := decodeLines(t, out.Bytes())
@@ -313,7 +325,7 @@ func TestServe_TypeMismatchJSON_EchoesKnownID_UsesInvalidRequestCode(t *testing.
 	input := `{"jsonrpc":"2.0","id":42,"method":123}` + "\n"
 
 	var out bytes.Buffer
-	if err := Serve(strings.NewReader(input), &out, staticStatus(StatusResult{}, nil), staticQuery(report.Artifact{}, nil)); err != nil {
+	if err := Serve(strings.NewReader(input), &out, testRegistry(staticStatus(StatusResult{}, nil), staticQuery(report.Artifact{}, nil))); err != nil {
 		t.Fatalf("Serve: %v", err)
 	}
 	msgs := decodeLines(t, out.Bytes())
@@ -355,7 +367,7 @@ func TestServe_InitializedSentAsRequest_StillGetsAResponse(t *testing.T) {
 	input := `{"jsonrpc":"2.0","id":99,"method":"initialized"}` + "\n"
 
 	var out bytes.Buffer
-	if err := Serve(strings.NewReader(input), &out, staticStatus(StatusResult{}, nil), staticQuery(report.Artifact{}, nil)); err != nil {
+	if err := Serve(strings.NewReader(input), &out, testRegistry(staticStatus(StatusResult{}, nil), staticQuery(report.Artifact{}, nil))); err != nil {
 		t.Fatalf("Serve: %v", err)
 	}
 	msgs := decodeLines(t, out.Bytes())
@@ -378,7 +390,7 @@ func TestServe_InitializedSentAsNotification_NoResponse(t *testing.T) {
 	input := `{"jsonrpc":"2.0","method":"notifications/initialized"}` + "\n"
 
 	var out bytes.Buffer
-	if err := Serve(strings.NewReader(input), &out, staticStatus(StatusResult{}, nil), staticQuery(report.Artifact{}, nil)); err != nil {
+	if err := Serve(strings.NewReader(input), &out, testRegistry(staticStatus(StatusResult{}, nil), staticQuery(report.Artifact{}, nil))); err != nil {
 		t.Fatalf("Serve: %v", err)
 	}
 	if out.Len() != 0 {
@@ -390,7 +402,7 @@ func TestServe_InitializedSentAsNotification_NoResponse(t *testing.T) {
 // closes) ends Serve without error — the expected end-of-session outcome,
 // not a failure.
 func TestServe_EOF_ReturnsNilError(t *testing.T) {
-	if err := Serve(strings.NewReader(""), &bytes.Buffer{}, staticStatus(StatusResult{}, nil), staticQuery(report.Artifact{}, nil)); err != nil {
+	if err := Serve(strings.NewReader(""), &bytes.Buffer{}, testRegistry(staticStatus(StatusResult{}, nil), staticQuery(report.Artifact{}, nil))); err != nil {
 		t.Fatalf("Serve on empty input: %v", err)
 	}
 }
@@ -405,7 +417,7 @@ func TestServe_NoOutputOtherThanValidMessages(t *testing.T) {
 		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}` + "\n"
 
 	var out bytes.Buffer
-	if err := Serve(strings.NewReader(input), &out, staticStatus(StatusResult{}, nil), staticQuery(report.Artifact{}, nil)); err != nil {
+	if err := Serve(strings.NewReader(input), &out, testRegistry(staticStatus(StatusResult{}, nil), staticQuery(report.Artifact{}, nil))); err != nil {
 		t.Fatalf("Serve: %v", err)
 	}
 	for i, line := range strings.Split(strings.TrimRight(out.String(), "\n"), "\n") {
