@@ -141,6 +141,25 @@ func Build(invokedName string, environ []string) (Plan, error) {
 		return Plan{}, fmt.Errorf("shim: Build: %w", err)
 	}
 
+	// realPath itself can be another shim -- specifically, an asdf-managed
+	// one (issue #69): ResolveReal's own PATH search has no way to tell an
+	// ordinary binary from an asdf shim script, and an asdf shim's dispatch
+	// needs a real, resolvable HOME to find asdf's own
+	// ~/.tool-versions-derived state, which Exec (exec.go) is about to
+	// override to this generation's virtual-home directory -- exactly the
+	// override docs/architecture/runtime.md §7.1 requires and this package
+	// cannot skip. ResolveASDFShimTarget resolves straight past the shim to
+	// the concrete, per-version real binary asdf's own `asdf reshim` step
+	// already recorded, entirely without invoking asdf or depending on
+	// HOME, so Plan.RealBinaryPath below can point directly at it.
+	if IsASDFShim(realPath) {
+		resolved, asdfErr := ResolveASDFShimTarget(realPath)
+		if asdfErr != nil {
+			return Plan{}, fmt.Errorf("shim: Build: %s resolves to an asdf-managed shim (%s) that isolated mode cannot safely resolve past: %w -- install it outside asdf (e.g. a plain global npm/brew install, not asdf-managed), or use `omca run --mode native` instead of the PATH shim", invokedName, realPath, asdfErr)
+		}
+		realPath = resolved
+	}
+
 	// HOME is required, the same fail-closed way OMCA_STATE_DIR is below:
 	// Exec must always set HOME to the generation's virtual-home directory
 	// (docs/architecture/runtime.md §7.1), and it must always record the

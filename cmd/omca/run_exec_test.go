@@ -321,6 +321,192 @@ func TestRunIsolated_StaleGenerationMissingVirtualHome_FailsClosed(t *testing.T)
 	}
 }
 
+// writeFakeASDFShim writes a synthetic asdf shim script at
+// <asdfDataDir>/shims/<name> whose body faithfully replicates the one real
+// behavior issue #69's bug hinges on -- needing a real, resolvable HOME to
+// find asdf's own state before it can dispatch -- without depending on any
+// real asdf installation or invoking the real `asdf` binary anywhere in
+// this test: it checks for a marker file this test plants only under a
+// scratch "real" HOME (never a compiled generation's virtual-home
+// directory, which is always a fresh, empty, compiler-created directory,
+// exactly like a real asdf-unaware virtual home would be) and exits 126 --
+// the exact bare, unhelpful exit code the issue reports -- if that marker
+// is not reachable via $HOME. pluginVersions mirrors asdf's own real
+// shim-generation metadata format (one "# asdf-plugin: <plugin> <version>"
+// comment line per candidate), verified read-only against a real, installed
+// asdf 0.18.0 during this fix's investigation (see internal/shim/asdf.go's
+// doc comment) -- one line means unambiguous, two or more means asdf's own
+// .tool-versions precedence would be required to disambiguate.
+func writeFakeASDFShim(t *testing.T, asdfDataDir, name string, pluginVersions [][2]string, dispatchTarget string) string {
+	t.Helper()
+	shimsDir := filepath.Join(asdfDataDir, "shims")
+	if err := os.MkdirAll(shimsDir, 0o755); err != nil {
+		t.Fatalf("writeFakeASDFShim: MkdirAll: %v", err)
+	}
+	body := "#!/usr/bin/env bash\n"
+	for _, pv := range pluginVersions {
+		body += "# asdf-plugin: " + pv[0] + " " + pv[1] + "\n"
+	}
+	body += `if [ ! -f "$HOME/.asdf-marker" ]; then
+  exit 126
+fi
+exec "` + dispatchTarget + `" "$@"
+`
+	path := filepath.Join(shimsDir, name)
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("writeFakeASDFShim: WriteFile: %v", err)
+	}
+	return path
+}
+
+// writeFakeASDFInstalledBinary symlinks
+// <asdfDataDir>/installs/<plugin>/<version>/bin/<name> to
+// testFixtureBinaries.fakeHost -- the concrete, per-version real binary
+// ResolveASDFShimTarget (internal/shim/asdf.go) must resolve an
+// unambiguous asdf shim to.
+func writeFakeASDFInstalledBinary(t *testing.T, asdfDataDir, plugin, version, name string) string {
+	t.Helper()
+	binDir := filepath.Join(asdfDataDir, "installs", plugin, version, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatalf("writeFakeASDFInstalledBinary: MkdirAll: %v", err)
+	}
+	path := filepath.Join(binDir, name)
+	if err := os.Symlink(testFixtureBinaries.fakeHost, path); err != nil {
+		t.Fatalf("writeFakeASDFInstalledBinary: Symlink: %v", err)
+	}
+	return path
+}
+
+// TestRunIsolated_EndToEnd_ResolvesPastASDFShim is issue #69's core
+// regression proof: `omca run codex --mode isolated` against a host binary
+// that resolves via PATH to an asdf-managed shim script must not bare-fail
+// with exit 126 the moment isolated mode virtualizes HOME. Before this fix,
+// runIsolated (run.go) always exec'd hd.BinaryPath directly -- here, the
+// synthetic asdf shim script itself -- with HOME overridden to the compiled
+// generation's virtual-home directory; the shim's own "$HOME/.asdf-marker"
+// check (writeFakeASDFShim's doc comment explains why this faithfully
+// stands in for asdf's real HOME-dependent dispatch) then fails, because a
+// freshly compiled virtual-home directory never has that marker, producing
+// exactly the bare "exit 126, no output" issue #69 reports. After this fix,
+// shim.IsASDFShim/ResolveASDFShimTarget resolve the exec target past the
+// shim script entirely -- straight to the concrete real binary
+// (testFixtureBinaries.fakeHost, standing in for the real per-version
+// asdf-managed binary) -- so the marker check is never reached and the
+// launch succeeds under the fully virtualized HOME the rest of isolated
+// mode requires.
+//
+// This test is written to FAIL against the pre-fix runIsolated (asserted by
+// temporarily reverting the shim.IsASDFShim/ResolveASDFShimTarget call in
+// run.go during this fix's own development) and PASS once the fix resolves
+// past the shim, per this project's fail-before/pass-after verification
+// discipline.
+func TestRunIsolated_EndToEnd_ResolvesPastASDFShim(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("syscall.Exec-based `omca run` is macOS-first scope")
+	}
+
+	worktreeRoot := t.TempDir()
+	if err := os.Mkdir(filepath.Join(worktreeRoot, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// realHome stands in for the developer's actual $HOME: it is where a
+	// real asdf shim would find real asdf-derived state (~/.tool-versions,
+	// ~/.asdf/...) to dispatch successfully. The marker file here is this
+	// test's own stand-in for that real, reachable state -- never anything
+	// under the real machine's own ~/.asdf (this repo's hard rule: tests
+	// touching HOME/asdf-shaped state always use t.TempDir(), never real
+	// paths).
+	realHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(realHome, ".asdf-marker"), []byte("stand-in for real asdf state\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	asdfDataDir := filepath.Join(t.TempDir(), ".asdf")
+	realBinary := writeFakeASDFInstalledBinary(t, asdfDataDir, "fakeplugin", "1.0.0", "codex")
+	writeFakeASDFShim(t, asdfDataDir, "codex", [][2]string{{"fakeplugin", "1.0.0"}}, realBinary)
+
+	stateRoot := t.TempDir()
+	restoreWritableTree(t, stateRoot)
+
+	environ := []string{
+		"HOME=" + realHome,
+		// "/usr/bin:/bin" is appended purely so the shim script's own
+		// "#!/usr/bin/env bash" shebang resolves (a real system bash/env,
+		// not anything asdf- or test-specific) -- without it, a pre-fix
+		// exec of the shim script under a PATH containing only the shims
+		// directory fails one step earlier, on the shebang lookup itself
+		// (exit 127), rather than on the marker check this test means to
+		// exercise (exit 126, matching issue #69's own real-world number).
+		"PATH=" + filepath.Join(asdfDataDir, "shims") + string(os.PathListSeparator) + "/usr/bin" + string(os.PathListSeparator) + "/bin",
+		"XDG_STATE_HOME=" + stateRoot,
+	}
+	stdout, stderr, code := runOmcaSubprocess(t, worktreeRoot, []string{"run", "codex", "--mode", "isolated"}, environ)
+	if code != 0 {
+		t.Fatalf("omca run --mode isolated codex (asdf-shimmed) = %d, want 0 (the pre-fix bug reproduces here as exit 126 with no output)\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "CODEX_HOME=") {
+		t.Fatalf("fakehost's dumped environment did not contain CODEX_HOME -- the resolved-past-the-shim real binary was never reached; stdout:\n%s", stdout)
+	}
+	execdHome, ok := dumpedEnvLine(stdout, "HOME")
+	if !ok {
+		t.Fatalf("fakehost's dumped environment did not contain a HOME line; stdout:\n%s", stdout)
+	}
+	if execdHome == realHome {
+		t.Fatalf("exec'd process's HOME (%s) is the real scratch HOME verbatim; HOME was never virtualized for the resolved asdf target", execdHome)
+	}
+}
+
+// TestRunIsolated_EndToEnd_AmbiguousASDFShim_FailsWithActionableError proves
+// the fallback half of this fix: when the asdf shim names two or more
+// candidate plugin versions (ResolveASDFShimTarget's own deliberate refusal
+// to replicate asdf's .tool-versions precedence, internal/shim/asdf.go),
+// `omca run --mode isolated` must fail with a clear, actionable, non-zero
+// exit -- naming the problem and a workaround -- rather than either
+// guessing at a version or propagating a bare, confusing exec failure.
+func TestRunIsolated_EndToEnd_AmbiguousASDFShim_FailsWithActionableError(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("syscall.Exec-based `omca run` is macOS-first scope")
+	}
+
+	worktreeRoot := t.TempDir()
+	if err := os.Mkdir(filepath.Join(worktreeRoot, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	realHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(realHome, ".asdf-marker"), []byte("stand-in for real asdf state\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	asdfDataDir := filepath.Join(t.TempDir(), ".asdf")
+	realBinaryA := writeFakeASDFInstalledBinary(t, asdfDataDir, "fakeplugin", "1.0.0", "codex")
+	writeFakeASDFInstalledBinary(t, asdfDataDir, "fakeplugin", "2.0.0", "codex")
+	writeFakeASDFShim(t, asdfDataDir, "codex", [][2]string{
+		{"fakeplugin", "1.0.0"},
+		{"fakeplugin", "2.0.0"},
+	}, realBinaryA)
+
+	stateRoot := t.TempDir()
+	restoreWritableTree(t, stateRoot)
+
+	environ := []string{
+		"HOME=" + realHome,
+		"PATH=" + filepath.Join(asdfDataDir, "shims") + string(os.PathListSeparator) + "/usr/bin" + string(os.PathListSeparator) + "/bin",
+		"XDG_STATE_HOME=" + stateRoot,
+	}
+	_, stderr, code := runOmcaSubprocess(t, worktreeRoot, []string{"run", "codex", "--mode", "isolated"}, environ)
+	if code == 0 {
+		t.Fatal("omca run --mode isolated codex against an ambiguous asdf shim exited 0, want a non-zero, actionable failure")
+	}
+	if !strings.Contains(stderr, "asdf") {
+		t.Errorf("stderr does not mention asdf, want an actionable message naming the problem; stderr:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "native") {
+		t.Errorf("stderr does not mention the --mode native workaround; stderr:\n%s", stderr)
+	}
+}
+
 // TestRunNative_EndToEnd_NoGenerationEnvInjected proves `--mode native`
 // really does exec with the caller's ambient environment completely
 // unmodified — no CODEX_HOME injected — after printing its unmanaged

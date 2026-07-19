@@ -254,6 +254,47 @@ Project config and Instructions follow Codex trust behavior. System sources may
 remain effective even when the user home is isolated and must be reported
 separately.
 
+#### 7.1.1 asdf-shimmed host installations
+
+Setting `HOME` to the generation's virtual-home directory is load-bearing (it
+is the only thing that actually stops a real host binary from resolving its
+own native, unmanaged `$HOME/.agents/skills` — see the isolated-mode
+end-to-end regression test guarding this,
+`TestRunIsolated_EndToEnd_VirtualizesHome`), but it is not free: a host binary
+installed and managed through [asdf](https://asdf-vm.com) resolves via PATH to
+a shim script (`~/.asdf/shims/<name>`) whose own dispatch (`exec asdf exec
+"<name>" "$@"` in every asdf version this project has observed) needs a real,
+resolvable `HOME` to find asdf's own `~/.tool-versions`-derived state. Under
+isolated mode's virtualized `HOME`, that dispatch fails outright — exit 126,
+no output — strictly inside the asdf shim script itself, strictly after this
+project's own `syscall.Exec` has already handed control to it (issue #69).
+
+Rather than either giving up HOME virtualization for asdf-managed installs (a
+real regression, per the paragraph above) or leaving the bare exit 126
+unexplained, `omca run --mode isolated` and the PATH shim (`internal/shim`)
+both detect an asdf shim by location (`internal/shim.IsASDFShim`: the
+resolved binary's grandparent directory is named `.asdf`, its parent
+`shims`) and resolve straight past it to the concrete, per-version real
+binary asdf's own `asdf reshim` step already recorded
+(`internal/shim.ResolveASDFShimTarget`): every shim asdf generates begins
+with one `# asdf-plugin: <plugin> <version>` comment line per plugin version
+that can provide the shimmed command, and the exec target is
+`<asdf-data-dir>/installs/<plugin>/<version>/bin/<name>`. This needs no real
+asdf invocation and no HOME lookup of its own, so it works correctly under
+the fully virtualized HOME the rest of isolated mode requires.
+
+When that comment names exactly one plugin version — the common case, and the
+one issue #69's own reproduction hit (a single `nodejs 20.19.0` line for an
+npm-global-installed `codex`) — the resolution is unambiguous. Two or more
+lines mean two or more installed versions can provide the command, and only
+asdf's own `.tool-versions` precedence (undocumented as a stable API, and a
+genuine source of fragility across asdf versions) can disambiguate which one
+is "current"; this project deliberately does not replicate that algorithm.
+In that case, and in any other case the resolved target does not exist or is
+not executable, `omca run` fails with a clear, actionable error naming the
+asdf shim and pointing at a workaround (install the host outside asdf, or use
+`--mode native`) instead of a bare, unexplained exit 126.
+
 ### 7.2 Claude Code
 
 Claude Code separates the concerns differently: user-global assets (settings,
