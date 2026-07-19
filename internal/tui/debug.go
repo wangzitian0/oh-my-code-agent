@@ -106,6 +106,25 @@ func evidenceForEntity(hd report.HostDebug, concept, logicalID string) []domain.
 	return out
 }
 
+// evidenceSourceString renders one domain.EvidenceSource as a single,
+// unambiguous string: URL is preferred (a citation to an external/pinned
+// official source is the more useful thing to show a human than a local
+// path), Path is the fallback when no URL is recorded, and the two are never
+// concatenated without a separator -- printing "%s%s" directly (an earlier
+// version of this function) could silently glue a URL and a Path together
+// into one indistinguishable, ambiguous token when both fields happened to
+// be set (a real Copilot review finding on this PR).
+func evidenceSourceString(src domain.EvidenceSource) string {
+	switch {
+	case src.URL != "" && src.Path != "":
+		return src.URL + " (" + src.Path + ")"
+	case src.URL != "":
+		return src.URL
+	default:
+		return src.Path
+	}
+}
+
 // observationsForPath returns observations whose own Source.Path matches
 // path — the raw Adapter Record (domain.Observation) a physical Candidate
 // (and therefore an ExplainTrace PhysicalSource) was extracted from. This
@@ -215,8 +234,8 @@ func renderDebugEntity(a report.Artifact, cardID, host, concept, logicalID strin
 	}
 	for _, e := range records {
 		fmt.Fprintf(&b, "  %-46s level=%-3s guarantee=%-11s method=%s\n", e.Metadata.ID, e.Spec.Level, e.Spec.Guarantee, e.Spec.Method)
-		if e.Spec.Source.Path != "" || e.Spec.Source.URL != "" {
-			fmt.Fprintf(&b, "      source: %s%s (%s)\n", e.Spec.Source.URL, e.Spec.Source.Path, e.Spec.Source.Kind)
+		if src := evidenceSourceString(e.Spec.Source); src != "" {
+			fmt.Fprintf(&b, "      source: %s (%s)\n", src, e.Spec.Source.Kind)
 		}
 		if e.Spec.KnowledgeRef.ID != "" {
 			fmt.Fprintf(&b, "      knowledgeRef: %s (%s)\n", e.Spec.KnowledgeRef.ID, e.Spec.KnowledgeRef.Digest)

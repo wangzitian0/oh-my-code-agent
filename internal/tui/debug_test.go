@@ -422,6 +422,30 @@ func TestEvidenceForEntity_FiltersBySubject(t *testing.T) {
 	}
 }
 
+// TestEvidenceSourceString_NeverGluesURLAndPathTogether is a regression test
+// (Copilot review finding on this PR): an earlier version printed
+// "%s%s" with URL then Path directly, so a record carrying both fields
+// concatenated into one ambiguous, unseparated token. URL is preferred when
+// both are set, with an unambiguous separator; Path is the fallback when no
+// URL is recorded; neither set renders an empty string.
+func TestEvidenceSourceString_NeverGluesURLAndPathTogether(t *testing.T) {
+	cases := []struct {
+		name string
+		src  domain.EvidenceSource
+		want string
+	}{
+		{"both set", domain.EvidenceSource{URL: "https://example.com/docs", Path: "hosts/codex/cli/config.toml"}, "https://example.com/docs (hosts/codex/cli/config.toml)"},
+		{"url only", domain.EvidenceSource{URL: "https://example.com/docs"}, "https://example.com/docs"},
+		{"path only", domain.EvidenceSource{Path: "hosts/codex/cli/config.toml"}, "hosts/codex/cli/config.toml"},
+		{"neither set", domain.EvidenceSource{}, ""},
+	}
+	for _, c := range cases {
+		if got := evidenceSourceString(c.src); got != c.want {
+			t.Errorf("%s: evidenceSourceString(%+v) = %q, want %q", c.name, c.src, got, c.want)
+		}
+	}
+}
+
 // TestObservationsForPath_MatchesSourcePathAndHandlesEmpty proves the
 // path-join helper matches only Observations whose own Source.Path equals
 // path, and returns nil (not a panic or a false match) for an empty path --
