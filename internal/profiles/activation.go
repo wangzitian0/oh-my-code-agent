@@ -91,11 +91,32 @@ func PersistActivation(worktreeStateDir string, a domain.Activation) error {
 	}
 	data = append(data, '\n')
 
-	finalPath := activationPath(worktreeStateDir)
-	tmpPath := finalPath + fmt.Sprintf(".tmp-%d", os.Getpid())
-	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+	// os.CreateTemp (not a PID-only suffix) guarantees a unique temp
+	// filename even across multiple PersistActivation calls racing within
+	// the same process -- a PID-only suffix collides on the same temp path
+	// for exactly that case, risking a lost update or write error (a real
+	// Copilot review finding on this PR).
+	tmpFile, err := os.CreateTemp(desiredDir, "activation-*.tmp")
+	if err != nil {
 		return fmt.Errorf("profiles: PersistActivation: %w", err)
 	}
+	tmpPath := tmpFile.Name()
+	_, writeErr := tmpFile.Write(data)
+	closeErr := tmpFile.Close()
+	if writeErr != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("profiles: PersistActivation: %w", writeErr)
+	}
+	if closeErr != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("profiles: PersistActivation: %w", closeErr)
+	}
+	if err := os.Chmod(tmpPath, 0o644); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("profiles: PersistActivation: %w", err)
+	}
+
+	finalPath := activationPath(worktreeStateDir)
 	if err := os.Rename(tmpPath, finalPath); err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("profiles: PersistActivation: %w", err)

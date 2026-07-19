@@ -1,9 +1,11 @@
 package profiles
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/wangzitian0/oh-my-code-agent/internal/domain"
@@ -204,5 +206,67 @@ func TestPersistActivation_RequiresWorktreeStateDir(t *testing.T) {
 	err := PersistActivation("", domain.Activation{APIVersion: domain.SupportedAPIVersion, Kind: "Activation", Metadata: domain.ActivationMetadata{Worktree: "x"}})
 	if err == nil {
 		t.Fatal("PersistActivation with an empty worktreeStateDir: want an error, got nil")
+	}
+}
+
+// TestPersistActivation_ConcurrentCalls_NoTempFileCollision is a regression
+// test (Copilot review finding on this PR): PersistActivation previously
+// built its temp file's name from the process PID alone
+// (".tmp-<pid>"), which is identical across every call within this same
+// process -- two goroutines racing PersistActivation could open/write/
+// rename the SAME temp path, risking a lost update or a write error,
+// exactly the case os.CreateTemp's own random-suffixed uniqueness (this
+// fix) exists to rule out. Many goroutines call PersistActivation
+// concurrently with distinct, individually valid Activation documents; none
+// may error, and the final activation.yaml must be a complete, valid
+// document matching exactly one caller's content (never truncated/
+// interleaved bytes from two writers), proving no collision occurred.
+func TestPersistActivation_ConcurrentCalls_NoTempFileCollision(t *testing.T) {
+	stateDir := t.TempDir()
+	const n = 20
+
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			a := domain.Activation{
+				APIVersion: domain.SupportedAPIVersion,
+				Kind:       "Activation",
+				Metadata:   domain.ActivationMetadata{Worktree: fmt.Sprintf("worktree:sha256:concurrent-%d", i)},
+			}
+			errs[i] = PersistActivation(stateDir, a)
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("PersistActivation call %d: %v", i, err)
+		}
+	}
+
+	final, ok, err := LoadActivation(activationPath(stateDir))
+	if err != nil {
+		t.Fatalf("LoadActivation after concurrent PersistActivation calls: %v (a temp-file collision would corrupt/truncate the final file, exactly what this failure would indicate)", err)
+	}
+	if !ok {
+		t.Fatal("LoadActivation reports no file present after concurrent PersistActivation calls")
+	}
+	if !strings.HasPrefix(final.Metadata.Worktree, "worktree:sha256:concurrent-") {
+		t.Errorf("final activation.yaml's Metadata.Worktree = %q, want one of the concurrent callers' own values", final.Metadata.Worktree)
+	}
+
+	// No leftover temp files: every os.CreateTemp-created file must have
+	// been successfully renamed away or removed on error, never abandoned.
+	entries, err := os.ReadDir(filepath.Join(stateDir, "desired"))
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	for _, e := range entries {
+		if e.Name() != "activation.yaml" {
+			t.Errorf("leftover file %q in desired/ after concurrent PersistActivation calls", e.Name())
+		}
 	}
 }

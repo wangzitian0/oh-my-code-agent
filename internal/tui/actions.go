@@ -66,7 +66,18 @@ type ActionContext struct {
 // WorktreeStateDir, preserving this package's pre-existing read-only
 // behavior exactly.
 func (ctx ActionContext) enabled() bool {
-	return ctx.WorktreeStateDir != "" && ctx.Worktree.Root != ""
+	// Every field this action layer actually reads must be non-empty, not
+	// just WorktreeStateDir/Worktree.Root: a zero-value ConfigRoot/ShimDir/
+	// Worktree.ID would silently run compositionDirsForAction against
+	// relative paths ("profiles/personal" instead of a real config root)
+	// and bake an incorrect OMCABinaryPath into a compiled generation,
+	// instead of this ActionContext being correctly treated as inert (a
+	// real Copilot review finding on this PR).
+	return ctx.WorktreeStateDir != "" &&
+		ctx.Worktree.Root != "" &&
+		ctx.Worktree.ID != "" &&
+		ctx.ShimDir != "" &&
+		ctx.ConfigRoot != ""
 }
 
 // compositionDirsForAction mirrors cmd/omca/activate.go's
@@ -228,9 +239,16 @@ type stageResult struct {
 
 // stageAssetActivation stages a pending generation for host that
 // additionally enables (concept, logicalID) -- issue #35's "Activating an
-// AVAILABLE asset stages pending" AC, for exactly the physical Candidate
-// this package's own RenderAssets already shows in the AVAILABLE bucket
-// (bucketFor).
+// AVAILABLE asset stages pending" AC. The candidate to activate
+// (firstActivatableCandidate, above) comes from the Desired Graph
+// (a.Debug[host].Desired.Assets, filtered to Intent=AVAILABLE and
+// !Active) -- a different data source than the physical Candidate
+// inventory this package's own RenderAssets/bucketFor renders for the
+// Assets view's AVAILABLE bucket, even though the two are expected to
+// agree in practice for a well-formed report (a real Copilot review
+// finding on this PR: the original wording claimed this operates on the
+// physical Candidate directly, which would mislead a future maintainer
+// about which data source actually drives this action).
 //
 // This mirrors cmd/omca/mcp.go's compileFuncForMCP -- the real production
 // `omca_stage` MCP tool's code path -- narrowed to exactly one host and one
@@ -246,26 +264,25 @@ type stageResult struct {
 // record it as host's "pending" pointer via runtime.SetPendingGeneration --
 // "current" stays untouched.
 //
-// # Why this persists the merged Activation (a gap compileFuncForMCP itself
-// still has)
+// # Why this persists the merged Activation (compileFuncForMCP now does too)
 //
-// compileFuncForMCP merges hostActivations into composed.Activation
-// PURELY IN MEMORY, for the one CompileRequest it is about to compile, and
-// never durably writes it anywhere. That is invisible to `omca_stage`
-// itself (it always compiles successfully against its own freshly-merged
-// request), but it is a real, latent problem for anything that activates
-// the result LATER, in a separate call: composeFreshCompileRequest
-// (cmd/omca/activate.go) -- and this file's own identical mirror,
-// composeFreshForActivate -- recompose desired state from SCRATCH via
-// profiles.Compose, which has no way to see an Enable choice that only
-// ever existed in some earlier caller's memory. Activate's CAS check
+// composeFreshCompileRequest (cmd/omca/activate.go) -- and this file's own
+// identical mirror, composeFreshForActivate -- recompose desired state
+// from SCRATCH via profiles.Compose on a LATER, independent call, which
+// has no way to see an Enable choice that only ever existed in some
+// earlier caller's memory. Left unpersisted, Activate's CAS check
 // (freshSourceDigest) then correctly reports the fresh recomposition no
 // longer matches what pending was compiled from — not a bug in the CAS
 // check, but a real hole in the production `omca_stage`-then-later-`omca
 // activate` path for any generation staged via an ActivationSelection
-// Enable rather than a Profile's own REQUIRED intent (mcp_stage_rollback_
-// test.go's own real-world regression test only ever exercises REQUIRED
-// intent for exactly this reason).
+// Enable rather than a Profile's own REQUIRED intent. This was a real,
+// pre-existing gap in compileFuncForMCP itself (mcp.go merged
+// hostActivations purely in memory, never durably writing it) surfaced
+// while building this action layer; compileFuncForMCP now also calls
+// profiles.PersistActivation, at the same point in its own sequence
+// (after detect/observe/Parent resolution succeed, before compiling) --
+// fixed at its root rather than left to silently diverge from this
+// newly-fixed TUI-side copy.
 //
 // Persisting to <worktree state dir>/desired/activation.yaml — the exact
 // path profiles.CompositionInput.ActivationPath already names and
@@ -295,10 +312,6 @@ func stageAssetActivation(ctx ActionContext, host, concept, logicalID string, no
 	}
 	mergedActivation.Spec.Hosts[host] = mergeHostActivationForAction(mergedActivation.Spec.Hosts[host], sel)
 
-	if err := profiles.PersistActivation(ctx.WorktreeStateDir, mergedActivation); err != nil {
-		return stageResult{}, fmt.Errorf("persisting worktree activation: %w", err)
-	}
-
 	hd, obs, err := detectAndObserveHost(ctx, host)
 	if err != nil {
 		return stageResult{}, err
@@ -316,6 +329,16 @@ func stageAssetActivation(ctx ActionContext, host, concept, logicalID string, no
 		parent = &id
 	} else if !os.IsNotExist(cerr) {
 		return stageResult{}, fmt.Errorf("host %q: resolving current-generation pointer: %w", host, cerr)
+	}
+
+	// Persist only once detect/observe/Parent-resolution have all already
+	// succeeded, immediately before compiling -- persisting any earlier
+	// durably mutated the user's worktree activation state even on a common,
+	// easy-to-hit failure path (e.g. host not installed), surprising a later
+	// CLI/TUI run with a selection that was never actually staged (a real
+	// Copilot review finding on this PR).
+	if err := profiles.PersistActivation(ctx.WorktreeStateDir, mergedActivation); err != nil {
+		return stageResult{}, fmt.Errorf("persisting worktree activation: %w", err)
 	}
 
 	req := runtime.CompileRequest{

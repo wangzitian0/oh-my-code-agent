@@ -197,6 +197,10 @@ func compileFuncForMCP(stderr io.Writer) mcp.CompileFunc {
 		}
 		sort.Strings(hostIDs)
 
+		mergedActivation.APIVersion = domain.SupportedAPIVersion
+		mergedActivation.Kind = "Activation"
+		mergedActivation.Metadata.Worktree = wt.ID
+
 		realEnv := hostcontext.RealEnvironment()
 		detectEnv := envWithFilteredPath(realEnv, shimDir)
 
@@ -269,6 +273,29 @@ func compileFuncForMCP(stderr io.Writer) mcp.CompileFunc {
 		}
 		if diverged {
 			parent = nil
+		}
+
+		// Durably persist the merged Enable/Disable selection before
+		// compiling, not just in memory: activate.go's own
+		// composeFreshCompileRequest recomposes desired state fresh from
+		// this exact file (profiles.Compose's ActivationPath) on a LATER,
+		// independent `omca activate` call, and has no way to see a
+		// selection this call only ever held in its own local variable. Left
+		// unpersisted, that later CAS check recomputes a desired state that
+		// disagrees with what was actually staged here, and Activate
+		// rejects the pending generation as stale -- a real, pre-existing
+		// production gap surfaced (and fixed at its root,
+		// profiles.PersistActivation) while building issue #35's TUI action
+		// layer, whose own stageAssetActivation does the identical fix.
+		//
+		// Persisted only here, after every detect/observe/Parent-resolution
+		// step above has already succeeded -- not immediately after merging
+		// -- so a common, easy-to-hit failure (a named host not installed)
+		// never durably mutates the worktree's activation.yaml on a call
+		// that goes on to fail anyway (the identical ordering fix Copilot
+		// flagged on this same PR's TUI-side stageAssetActivation).
+		if err := profiles.PersistActivation(worktreeStateDir, mergedActivation); err != nil {
+			return domain.Generation{}, nil, fmt.Errorf("persisting worktree activation: %w", err)
 		}
 
 		req := runtime.CompileRequest{

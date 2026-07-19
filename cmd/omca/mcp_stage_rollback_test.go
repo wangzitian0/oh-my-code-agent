@@ -354,3 +354,103 @@ spec:
 		t.Errorf("on-disk manifest.json Metadata.Parent after cache-hit reconciliation = %s, want %q", got, genY.Metadata.ID)
 	}
 }
+
+// availableMCPServerProfileYAML declares "internal-docs" as AVAILABLE, not
+// REQUIRED: it is not included by default, exactly the "select an AVAILABLE
+// asset" shape issue #35's own TUI action layer (and this test's real
+// omca_stage caller below) needs something real to activate.
+const availableMCPServerProfileYAML = `
+apiVersion: omca.dev/v1alpha1
+kind: Profile
+metadata:
+  id: company:example
+spec:
+  assets:
+    mcpServers:
+      - id: internal-docs
+        intent: AVAILABLE
+`
+
+// TestOmcaStage_EnableSelection_PersistsSoLaterActivateSeesIt is a
+// regression test for a real, pre-existing production gap surfaced (and
+// fixed at its root, profiles.PersistActivation) while building issue #35's
+// TUI action layer: compileFuncForMCP (the real omca_stage production path)
+// merged a caller-supplied Enable/Disable selection into mergedActivation
+// only in memory, never durably writing it to activation.yaml. A later,
+// independent `omca activate` call recomposes desired state fresh from that
+// exact file (composeFreshCompileRequest) for its own CAS check -- with the
+// selection never persisted, that fresh recomposition disagreed with what
+// omca_stage actually staged, and Activate rejected the pending generation.
+//
+// This test drives the real omca_stage -> omca activate sequence: stage
+// codex's pending generation through compileFuncForMCP with a genuine
+// Enable.MCPServers selection (never hand-injected into activation.yaml by
+// the test), then activate it. Before the persistence fix, this failed;
+// after it, the freshly recomposed desired state agrees and activation
+// succeeds.
+func TestOmcaStage_EnableSelection_PersistsSoLaterActivateSeesIt(t *testing.T) {
+	env := setupManagedTestEnv(t, true, false)
+	profileDir := filepath.Join(env.HomeDir, ".config", "omca", "profiles", "company")
+	mustWriteFileForActivateTest(t, filepath.Join(profileDir, "example.yaml"), availableMCPServerProfileYAML)
+
+	wt, err := hostcontext.DetectWorktree(env.WorktreeRoot)
+	if err != nil {
+		t.Fatalf("DetectWorktree: %v", err)
+	}
+	bindingDir := filepath.Join(env.HomeDir, ".config", "omca", "bindings")
+	mustWriteFileForActivateTest(t, filepath.Join(bindingDir, "example.yaml"), "apiVersion: omca.dev/v1alpha1\nkind: Binding\nmetadata:\n  id: binding:example\nspec:\n  match:\n    repository: "+wt.Root+"\n    paths: [\"**\"]\n  profiles:\n    - company:example\n")
+
+	compileFn := compileFuncForMCP(&bytes.Buffer{})
+	_, _, err = compileFn(map[string]domain.HostActivation{
+		"codex": {Enable: domain.ActivationSelection{MCPServers: []string{"internal-docs"}}},
+	})
+	if err != nil {
+		t.Fatalf("compileFuncForMCP (real omca_stage path): %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runActivate(&stdout, &stderr, []string{"codex", "--confirm", "enable-mcp-server:internal-docs"})
+	if code != 0 {
+		t.Fatalf("runActivate after omca_stage staged an Enable.MCPServers selection: %d, want 0 (the selection should have been persisted so this activation's own fresh CAS recomposition sees it); stderr:\n%s", code, stderr.String())
+	}
+}
+
+// TestCompileFuncForMCP_HostNotInstalled_DoesNotPersistActivation is a
+// regression test (Copilot review finding on this PR, also applied to
+// internal/tui/actions.go's identical stageAssetActivation): compileFuncForMCP
+// must persist the merged Enable/Disable selection only once every named
+// host's detect/observe/Parent-resolution has already succeeded -- not
+// immediately after merging -- so a common, easy-to-hit failure (a named
+// host not installed) never durably mutates desired/activation.yaml on a
+// call that goes on to fail anyway.
+func TestCompileFuncForMCP_HostNotInstalled_DoesNotPersistActivation(t *testing.T) {
+	env := setupManagedTestEnv(t, false, false) // codex NOT installed
+	profileDir := filepath.Join(env.HomeDir, ".config", "omca", "profiles", "company")
+	mustWriteFileForActivateTest(t, filepath.Join(profileDir, "example.yaml"), availableMCPServerProfileYAML)
+
+	wt, err := hostcontext.DetectWorktree(env.WorktreeRoot)
+	if err != nil {
+		t.Fatalf("DetectWorktree: %v", err)
+	}
+	bindingDir := filepath.Join(env.HomeDir, ".config", "omca", "bindings")
+	mustWriteFileForActivateTest(t, filepath.Join(bindingDir, "example.yaml"), "apiVersion: omca.dev/v1alpha1\nkind: Binding\nmetadata:\n  id: binding:example\nspec:\n  match:\n    repository: "+wt.Root+"\n    paths: [\"**\"]\n  profiles:\n    - company:example\n")
+
+	compileFn := compileFuncForMCP(&bytes.Buffer{})
+	_, _, err = compileFn(map[string]domain.HostActivation{
+		"codex": {Enable: domain.ActivationSelection{MCPServers: []string{"internal-docs"}}},
+	})
+	if err == nil {
+		t.Fatal("compileFuncForMCP against an uninstalled host: want an error, got nil")
+	}
+
+	stateRoot, err := realStateRoot()
+	if err != nil {
+		t.Fatalf("realStateRoot: %v", err)
+	}
+	activationYAML := filepath.Join(worktreeStateDirPath(stateRoot, wt.ID), "desired", "activation.yaml")
+	if _, statErr := os.Stat(activationYAML); statErr == nil {
+		t.Errorf("%s exists after a failed compileFuncForMCP call (codex was never installed) -- the activation selection was persisted despite staging failing", activationYAML)
+	} else if !os.IsNotExist(statErr) {
+		t.Fatalf("stat %s: %v", activationYAML, statErr)
+	}
+}

@@ -1,7 +1,10 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	hostcontext "github.com/wangzitian0/oh-my-code-agent/internal/context"
 	"github.com/wangzitian0/oh-my-code-agent/internal/domain"
@@ -33,7 +36,22 @@ func TestActivationSelectionFor_OnlySkillAndMCPServerAreSelectable(t *testing.T)
 // non-empty WorktreeStateDir and a non-empty Worktree.Root -- the zero
 // value (what NewModel leaves Model with until WithActionContext attaches
 // a real one) must report false.
+// TestActionContext_Enabled is a regression test (Copilot review finding on
+// this PR): enabled() previously returned true once WorktreeStateDir and
+// Worktree.Root were both set, even with ConfigRoot/ShimDir/Worktree.ID
+// still empty -- every one of those fields is actually read elsewhere in
+// this package's action layer (compositionDirsForAction, omcaCommandPathForAction,
+// mergedActivation.Metadata.Worktree), so a zero-value one would silently
+// run an action against a relative path or an incorrect OMCABinaryPath
+// instead of this ActionContext being correctly treated as inert. Every
+// field enabled() checks must independently gate it off.
 func TestActionContext_Enabled(t *testing.T) {
+	full := ActionContext{
+		WorktreeStateDir: "/tmp/state",
+		Worktree:         hostcontext.Worktree{Root: "/tmp/root", ID: "worktree:sha256:x"},
+		ShimDir:          "/tmp/state/shims",
+		ConfigRoot:       "/tmp/config",
+	}
 	cases := []struct {
 		name string
 		ctx  ActionContext
@@ -42,7 +60,10 @@ func TestActionContext_Enabled(t *testing.T) {
 		{"zero value", ActionContext{}, false},
 		{"only state dir", ActionContext{WorktreeStateDir: "/tmp/x"}, false},
 		{"only worktree root", ActionContext{Worktree: hostcontext.Worktree{Root: "/tmp/x"}}, false},
-		{"both set", ActionContext{WorktreeStateDir: "/tmp/x", Worktree: hostcontext.Worktree{Root: "/tmp/y"}}, true},
+		{"missing worktree ID", func() ActionContext { c := full; c.Worktree.ID = ""; return c }(), false},
+		{"missing shim dir", func() ActionContext { c := full; c.ShimDir = ""; return c }(), false},
+		{"missing config root", func() ActionContext { c := full; c.ConfigRoot = ""; return c }(), false},
+		{"every field set", full, true},
 	}
 	for _, c := range cases {
 		if got := c.ctx.enabled(); got != c.want {
@@ -96,5 +117,38 @@ func TestFirstActivatableCandidate(t *testing.T) {
 	}
 	if _, _, ok := firstActivatableCandidate(onlyInactiveInstruction, "codex"); ok {
 		t.Error("firstActivatableCandidate found an instruction asset, want false (instructions have no ActivationSelection field)")
+	}
+}
+
+// TestStageAssetActivation_DetectFails_DoesNotPersistActivation is a
+// regression test (Copilot review finding on this PR): stageAssetActivation
+// previously persisted the merged Activation to disk BEFORE detecting/
+// observing the target host, so a common, easy-to-hit failure (the host
+// isn't installed) still durably mutated desired/activation.yaml even
+// though staging itself failed -- surprising a later CLI/TUI run with a
+// selection that was never actually staged. This test points at a host
+// with nothing on PATH (guaranteed detection failure) and asserts both
+// that stageAssetActivation errors AND that activation.yaml was never
+// created.
+func TestStageAssetActivation_DetectFails_DoesNotPersistActivation(t *testing.T) {
+	ctx := setupActionTestEnv(t, "")
+	// Override Env so codex is NOT on PATH -- detectAndObserveHost must
+	// fail with "not installed" (setupActionTestEnv's own fake codex
+	// binary is deliberately excluded here).
+	ctx.Env = hostcontext.Environment{Vars: []string{
+		"HOME=" + t.TempDir(),
+		"PATH=" + t.TempDir(),
+	}}
+
+	_, err := stageAssetActivation(ctx, "codex", "skill", "code-review", time.Now())
+	if err == nil {
+		t.Fatal("stageAssetActivation against an uninstalled host: want an error, got nil")
+	}
+
+	activationYAML := filepath.Join(ctx.WorktreeStateDir, "desired", "activation.yaml")
+	if _, statErr := os.Stat(activationYAML); statErr == nil {
+		t.Errorf("%s exists after a failed stageAssetActivation call (detect never succeeded) -- the activation selection was persisted despite staging failing", activationYAML)
+	} else if !os.IsNotExist(statErr) {
+		t.Fatalf("stat %s: %v", activationYAML, statErr)
 	}
 }
