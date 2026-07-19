@@ -13,8 +13,8 @@ import (
 // "observe a couple of file-based sources" step, exercised directly and
 // in-process (no subprocess, no transport -- conformance_test.go in this
 // same package covers the out-of-process path). It proves Observe finds
-// both files it is given and reports nothing about a directory a third
-// root that does not exist under its Roots.
+// both files it is given and reports nothing about a directory, or a third
+// root that does not exist, under its Roots.
 func TestAdapter_Observe_TwoFileSources(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "settings.json", `{"greeting":"hello"}`)

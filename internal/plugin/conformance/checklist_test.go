@@ -6,8 +6,8 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
-	"sort"
 	"strings"
 	"testing"
 )
@@ -49,9 +49,13 @@ var knownSubChecks = []string{
 //
 // A bare identifier call (runXxx(...)) is what every existing sub-check
 // looks like; a selector call like t.Helper() or context.Background() is
-// deliberately excluded (ast.Ident vs ast.SelectorExpr), which is exactly
-// what keeps this list to the six real sub-checks instead of every call
-// Run's body happens to make.
+// deliberately excluded (ast.Ident vs ast.SelectorExpr). A bare-identifier
+// call is additionally required to be "run"-prefixed: without this,
+// Run gaining an unrelated bare-identifier helper call in the future (e.g.
+// setup/cleanup bookkeeping that is not itself a user-facing conformance
+// dimension) would be misclassified as a new sub-check, forcing an
+// unnecessary checklist update for something that was never meant to be one
+// (a real Copilot review finding on this PR).
 func runSubChecksFromSource(t *testing.T) []string {
 	t.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)
@@ -78,7 +82,7 @@ func runSubChecksFromSource(t *testing.T) []string {
 				if !ok {
 					return true
 				}
-				if ident, ok := call.Fun.(*ast.Ident); ok {
+				if ident, ok := call.Fun.(*ast.Ident); ok && strings.HasPrefix(ident.Name, "run") {
 					calls = append(calls, ident.Name)
 				}
 				return true
@@ -91,33 +95,27 @@ func runSubChecksFromSource(t *testing.T) []string {
 // TestRun_SubChecksMatchKnownList is the drift guard's first half: it fails
 // if Run's actual body calls a bare-identifier function that knownSubChecks
 // does not name (a sub-check was added or renamed and this list was not
-// updated), or if knownSubChecks names something Run's body no longer calls
-// (a sub-check was removed or renamed and this list still claims it
-// exists).
+// updated), if knownSubChecks names something Run's body no longer calls (a
+// sub-check was removed or renamed and this list still claims it exists),
+// or if Run's body now calls its sub-checks in a DIFFERENT order than
+// knownSubChecks lists them. Order matters here, not just membership: the
+// qualification checklist published in docs/plugin/authoring-guide.md is
+// explicitly ordered/numbered, so a silent reorder inside Run would leave
+// the checklist's numbering describing the wrong sequence even though every
+// sub-check name still matched (a real Copilot review finding on this PR) --
+// comparing the two slices directly, without sorting either one first,
+// catches that.
 func TestRun_SubChecksMatchKnownList(t *testing.T) {
 	actual := runSubChecksFromSource(t)
 	if len(actual) == 0 {
 		t.Fatal("parsed zero calls out of Run's body; the source-parsing step itself is broken, which would make this test vacuously pass")
 	}
 
-	got := append([]string(nil), actual...)
-	sort.Strings(got)
-	want := append([]string(nil), knownSubChecks...)
-	sort.Strings(want)
-
-	same := len(got) == len(want)
-	if same {
-		for i := range got {
-			if got[i] != want[i] {
-				same = false
-				break
-			}
-		}
-	}
-	if !same {
-		t.Fatalf("Run's body calls %v, but knownSubChecks (this file) declares %v -- "+
-			"update knownSubChecks and docs/plugin/authoring-guide.md's qualification checklist together",
-			got, want)
+	if !reflect.DeepEqual(actual, knownSubChecks) {
+		t.Fatalf("Run's body calls %v (in this order), but knownSubChecks (this file) declares %v -- "+
+			"update knownSubChecks and docs/plugin/authoring-guide.md's qualification checklist together, "+
+			"in the same order Run actually calls them",
+			actual, knownSubChecks)
 	}
 }
 
