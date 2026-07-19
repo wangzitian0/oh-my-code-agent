@@ -136,7 +136,7 @@ func Build(req BuildRequest) (Artifact, error) {
 			return Artifact{}, fmt.Errorf("report: Build: %s: extracting candidates: %w", host, err)
 		}
 
-		allSignals = append(allSignals, BuildDriftSignals(req.Worktree.ID, graphs)...)
+		allSignals = append(allSignals, BuildDriftSignals(req.Worktree.ID, graphs, resolution, req.Repository)...)
 		duplicates = append(duplicates, graph.DuplicateCapabilities...)
 
 		currentSources, pendingSources, currentGenID, pendingGenID, costEntry := generationSources(req.WorktreeStateDir, host, hi.Detection.Version)

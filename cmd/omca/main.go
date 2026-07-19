@@ -51,7 +51,7 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-const usage = "usage: omca <version|context|env|run|doctor|mcp|activate|rollback|bisect|report|drift|explain|matrix|compare|diff> ..."
+const usage = "usage: omca <version|context|env|run|doctor|mcp|activate|rollback|bisect|report|drift|explain|matrix|compare|diff|knowledge> ..."
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
@@ -91,6 +91,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runCompare(stdout, stderr, args[1:])
 	case "diff":
 		return runDiff(stdout, stderr, args[1:])
+	case "knowledge":
+		return runKnowledge(stdout, stderr, args[1:])
 	default:
 		fmt.Fprintf(stderr, "omca: unknown command %q\n%s\n", args[0], usage)
 		return 2
