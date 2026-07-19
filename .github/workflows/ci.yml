@@ -7,7 +7,17 @@ on:
 
 jobs:
   build-test:
-    runs-on: macos-latest
+    # Pinned to macos-14, not macos-latest: GitHub's macos-latest label
+    # rolled forward to macOS Tahoe (26) mid-session, and Go's internal
+    # linker does not emit an LC_UUID load command Tahoe's dyld now
+    # requires, so every -race test binary aborted at startup
+    # ("dyld: missing LC_UUID load command") -- a known, external Go/macOS
+    # toolchain incompatibility (golang/go#78012), not a regression in any
+    # PR's own code. Revisit this pin once Go ships a fix for Tahoe's
+    # stricter dyld (or once this project's own Go version is bumped past
+    # whatever release resolves it) rather than tracking macos-latest again
+    # blindly.
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
