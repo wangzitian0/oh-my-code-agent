@@ -103,6 +103,73 @@ func ReadGenerationManifest(generationDir string) (domain.Generation, error) {
 	return gen, nil
 }
 
+// stringPtrEqual reports whether a and b name the same value, treating nil
+// as its own distinct value (never equal to a non-nil empty string) -- the
+// same nil-vs-empty-string discipline GenerationMetadata.Parent's own doc
+// comment already requires ("nil for the very first generation").
+func stringPtrEqual(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+// ReconcileGenerationParent updates a cache-hit generation's on-disk
+// Metadata.Parent to freshParent if it differs from what is already
+// recorded, and returns the (possibly updated) manifest.
+//
+// A generation's content-addressed ID deliberately excludes Parent
+// (generationid.go's own doc comment: Parent never changes the compiled
+// artifact tree's content), so EnsureGeneration/a caller's own cache-hit
+// path can return a manifest whose Parent reflects whichever call FIRST
+// compiled that exact content -- not necessarily the freshest caller's own
+// notion of what host(s) were "current" moments ago. Left uncorrected, a
+// later Rollback reads that stale Parent from the manifest (Rollback has no
+// other source of truth) and can restore an unexpected, older generation
+// instead of the one the caller's own fresh state actually preceded this
+// activation with (a real Copilot review finding on issue #68's own PR,
+// docs/architecture/runtime.md's "failed verification leaves a recoverable
+// previous generation" guarantee only holds if Parent names the RIGHT
+// previous generation).
+//
+// This never touches genID/outputDir's own identity or any artifact under
+// hosts/ -- only manifest.json's Metadata.Parent field, which is not part of
+// the content-addressed digest by design. The manifest file is briefly
+// un-read-onlied (makeTreeReadOnly's own mode, restored before returning)
+// to allow the rewrite; every other file in the tree, and the tree's own
+// directory permissions, are left untouched.
+func ReconcileGenerationParent(outputDir string, freshParent *string) (domain.Generation, error) {
+	gen, err := ReadGenerationManifest(outputDir)
+	if err != nil {
+		return domain.Generation{}, err
+	}
+	if stringPtrEqual(gen.Metadata.Parent, freshParent) {
+		return gen, nil
+	}
+
+	gen.Metadata.Parent = freshParent
+	if err := domain.ValidateGeneration(gen); err != nil {
+		return domain.Generation{}, fmt.Errorf("runtime: ReconcileGenerationParent: %s: %w", outputDir, err)
+	}
+	manifestBytes, err := json.MarshalIndent(gen, "", "  ")
+	if err != nil {
+		return domain.Generation{}, fmt.Errorf("runtime: ReconcileGenerationParent: %s: %w", outputDir, err)
+	}
+
+	manifestPath := filepath.Join(outputDir, "manifest.json")
+	if err := os.Chmod(manifestPath, 0o644); err != nil {
+		return domain.Generation{}, fmt.Errorf("runtime: ReconcileGenerationParent: %s: %w", outputDir, err)
+	}
+	writeErr := os.WriteFile(manifestPath, manifestBytes, 0o644)
+	if chmodErr := os.Chmod(manifestPath, readOnlyFileMode); chmodErr != nil && writeErr == nil {
+		return domain.Generation{}, fmt.Errorf("runtime: ReconcileGenerationParent: %s: restoring read-only mode: %w", outputDir, chmodErr)
+	}
+	if writeErr != nil {
+		return domain.Generation{}, fmt.Errorf("runtime: ReconcileGenerationParent: %s: %w", outputDir, writeErr)
+	}
+	return gen, nil
+}
+
 // CurrentRecord is the small, OMCA-local bookkeeping SetCurrentGeneration
 // writes alongside the "current" pointer for one host -- deliberately NOT a
 // field on domain.Generation. `omca doctor`'s "host binary moved since

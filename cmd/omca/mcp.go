@@ -123,6 +123,32 @@ func mergeHostActivation(dst, src domain.HostActivation) domain.HostActivation {
 // runtime.SetPendingGeneration -- never runtime.SetCurrentGeneration,
 // which is how this function keeps "current" untouched (mcp.CompileFunc's
 // own doc comment's MUST list).
+//
+// Metadata.Parent (issue #68): this function compiles ONE shared generation
+// for potentially several named hosts at once (hostIDs can be
+// ["codex", "claude-code"] in a single call), but domain.GenerationMetadata.
+// Parent is a single *string on that one generation, not per-host, while
+// each named host has its own independent "current" generation
+// (currentByHost, below, keyed the same way). The reviewed decision (this
+// issue's own recommended default, matching this project's "record real
+// state, don't guess or silently drop information" bias --
+// internal/profiles.AmbiguousIdentityError's identical stance of surfacing
+// ambiguity as data rather than picking arbitrarily): a host with no
+// current generation yet (its first-ever activation) does not count against
+// agreement, since there is nothing for it to diverge from. If every named
+// host that DOES have a current generation agrees on the same ID, that ID
+// becomes Parent. If two or more named hosts' current generations genuinely
+// differ, Parent is left nil, exactly like before this fix -- the
+// pre-existing, honest "nothing to roll back to" refusal
+// (internal/runtime/rollback.go's own nil-Parent doc comment), not a
+// regression. This closes "at least the common single-host-changed-at-a-
+// time case" (issue #68's exit gate), which is also the overwhelmingly
+// common real usage pattern -- one host reactivated at a time -- while
+// deliberately leaving the genuinely-diverged multi-host case unresolved
+// rather than guessing. A future per-host Parent (e.g. a map instead of one
+// *string) would close that case too, but that is a
+// domain.GenerationMetadata schema change belonging to whoever next needs
+// it, not an unreviewed judgment call folded into this fix.
 func compileFuncForMCP(stderr io.Writer) mcp.CompileFunc {
 	return func(hostActivations map[string]domain.HostActivation) (domain.Generation, map[string]domain.Generation, error) {
 		cwd, err := os.Getwd()
@@ -192,11 +218,57 @@ func compileFuncForMCP(stderr io.Writer) mcp.CompileFunc {
 			}
 			hosts = append(hosts, runtime.HostCompileInput{Detection: hd, Observations: obs, OMCABinaryPath: omcaCommandPath(shimDir)})
 
-			if curDir, cerr := runtime.CurrentGenerationDir(worktreeStateDir, h); cerr == nil {
-				if g, rerr := runtime.ReadGenerationManifest(curDir); rerr == nil {
-					currentByHost[h] = g
+			curDir, cerr := runtime.CurrentGenerationDir(worktreeStateDir, h)
+			switch {
+			case cerr == nil:
+				g, rerr := runtime.ReadGenerationManifest(curDir)
+				if rerr != nil {
+					// The "current" pointer for h resolves to a real path,
+					// but its manifest is missing/corrupt -- a different,
+					// worse situation than "h has never been activated"
+					// (the os.IsNotExist(cerr) branch below), and treating
+					// it the same would silently derive Parent as if h had
+					// no prior generation at all. Fail loudly instead,
+					// mirroring this function's own cache-hit manifest
+					// check a few lines below ("only a genuinely missing
+					// manifest is a real cache miss worth compiling into") --
+					// a Copilot review finding on issue #68's own PR.
+					return domain.Generation{}, nil, fmt.Errorf("host %q has a current-generation pointer at %s but its manifest is unreadable, refusing to guess its Parent: %w", h, curDir, rerr)
 				}
+				currentByHost[h] = g
+			case os.IsNotExist(cerr):
+				// h has never been activated in this worktree -- genuinely
+				// no current generation, not an error.
+			default:
+				return domain.Generation{}, nil, fmt.Errorf("host %q: resolving current-generation pointer: %w", h, cerr)
 			}
+		}
+
+		// Parent: see this function's own doc comment for the full reviewed
+		// decision. Walk hostIDs (sorted, so this is deterministic) and
+		// collect the current generation ID of every named host that has
+		// one; a host with no entry in currentByHost is skipped (first-ever
+		// activation, does not count against agreement). Agreement across
+		// every host that DOES have one -> that ID becomes Parent. Any two
+		// disagreeing -> Parent stays nil, the same honest
+		// "nothing to roll back to" state Rollback already refuses on.
+		var parent *string
+		diverged := false
+		for _, h := range hostIDs {
+			g, ok := currentByHost[h]
+			if !ok {
+				continue
+			}
+			if parent == nil {
+				id := g.Metadata.ID
+				parent = &id
+			} else if *parent != g.Metadata.ID {
+				diverged = true
+				break
+			}
+		}
+		if diverged {
+			parent = nil
 		}
 
 		req := runtime.CompileRequest{
@@ -207,6 +279,7 @@ func compileFuncForMCP(stderr io.Writer) mcp.CompileFunc {
 			Exceptions: composition.Exceptions,
 			Now:        now,
 			Invocation: "omca_stage",
+			Parent:     parent,
 		}
 
 		genID, err := runtime.CompileGenerationID(req)
@@ -215,6 +288,17 @@ func compileFuncForMCP(stderr io.Writer) mcp.CompileFunc {
 		}
 		outputDir := filepath.Join(generationsDir, runtime.DirSafeID(genID))
 
+		// Note: genID (and therefore outputDir) deliberately excludes Parent
+		// (generationid.go's own doc comment -- Parent never changes the
+		// compiled artifact tree's content), so a cache hit below can find a
+		// manifest recorded with a DIFFERENT Parent than this call just
+		// freshly computed (e.g. identical desired state re-staged after
+		// some other activation moved "current" on). runtime.
+		// ReconcileGenerationParent below corrects the on-disk manifest to
+		// this call's freshly-computed Parent when they disagree -- a real
+		// Copilot review finding on issue #68's own PR: an uncorrected stale
+		// Parent makes a later Rollback restore an unexpected, older
+		// generation instead of the one this activation actually preceded.
 		gen, err := runtime.ReadGenerationManifest(outputDir)
 		if err != nil {
 			if !os.IsNotExist(err) {
@@ -232,6 +316,11 @@ func compileFuncForMCP(stderr io.Writer) mcp.CompileFunc {
 			gen, err = runtime.Compile(req, outputDir)
 			if err != nil {
 				return domain.Generation{}, nil, fmt.Errorf("compiling: %w", err)
+			}
+		} else {
+			gen, err = runtime.ReconcileGenerationParent(outputDir, parent)
+			if err != nil {
+				return domain.Generation{}, nil, fmt.Errorf("reconciling cached generation's Parent: %w", err)
 			}
 		}
 
