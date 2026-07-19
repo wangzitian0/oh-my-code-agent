@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	hostcontext "github.com/wangzitian0/oh-my-code-agent/internal/context"
@@ -205,5 +207,150 @@ spec:
 	_, thirdGen, _ := stageViaCompileFuncForMCP(t, env, thirdProfileYAML, "codex", "claude-code")
 	if thirdGen.Metadata.Parent != nil {
 		t.Errorf("Metadata.Parent = %q, want nil (codex and claude-code have genuinely different current generations, so there is no single correct parent)", *thirdGen.Metadata.Parent)
+	}
+}
+
+// TestCompileFuncForMCP_CorruptCurrentManifest_FailsLoudly is a regression
+// test (Copilot review finding on this PR): before this fix, currentByHost
+// silently ignored ANY error from CurrentGenerationDir/ReadGenerationManifest,
+// including a real "the pointer exists but its target manifest is
+// unreadable" failure -- indistinguishable, from compileFuncForMCP's own
+// point of view, from "this host has never been activated" (the genuinely
+// benign os.IsNotExist case). Treating the two the same silently derives
+// Parent as if codex had no current generation at all, exactly the kind of
+// "recompile/skip on any error, not just ENOENT" bug class this project has
+// already fixed at three other call sites this session.
+func TestCompileFuncForMCP_CorruptCurrentManifest_FailsLoudly(t *testing.T) {
+	env := setupManagedTestEnv(t, true, false)
+
+	worktreeStateDir, _, firstDir := stageViaCompileFuncForMCP(t, env, mcpServerProfileYAML, "codex")
+	var stdout, stderr bytes.Buffer
+	if code := runActivate(&stdout, &stderr, []string{"codex", "--confirm", "enable-mcp-server:internal-docs"}); code != 0 {
+		t.Fatalf("runActivate: %d; stderr:\n%s", code, stderr.String())
+	}
+
+	// codex's "current" pointer now resolves to firstDir, but the whole
+	// generation tree activation just wrote (readonly.go's makeTreeReadOnly)
+	// is read-only -- corrupt manifest.json in place, exactly like this
+	// package's own existing corrupt-manifest regression tests elsewhere in
+	// this codebase (e.g. activate_test.go's tampering pattern).
+	manifestPath := filepath.Join(firstDir, "manifest.json")
+	if err := os.Chmod(manifestPath, 0o644); err != nil {
+		t.Fatalf("chmod manifest writable: %v", err)
+	}
+	if err := os.WriteFile(manifestPath, []byte("not valid json"), 0o644); err != nil {
+		t.Fatalf("corrupting manifest.json: %v", err)
+	}
+	_ = worktreeStateDir
+
+	// Write a DIFFERENT desired state before calling compileFn directly
+	// (not via stageViaCompileFuncForMCP's own profile-write, to keep this
+	// test's raw compileFn call in full control) -- this call's own
+	// content-addressed outputDir must differ from the corrupted firstDir,
+	// so the only way its own corruption can surface is through
+	// currentByHost's lookup of codex's current generation, never through
+	// the unrelated, pre-existing "cache-hit manifest is corrupt" check a
+	// few lines later in compileFuncForMCP (which this test would otherwise
+	// accidentally also trip, since re-staging IDENTICAL content would reuse
+	// firstDir as its own outputDir too, confounding which check actually
+	// produced the error).
+	const differentProfileYAML = `
+apiVersion: omca.dev/v1alpha1
+kind: Profile
+metadata:
+  id: company:example
+spec:
+  assets:
+    skills:
+      - id: code-review
+        intent: REQUIRED
+`
+	profileDir := filepath.Join(env.HomeDir, ".config", "omca", "profiles", "company")
+	mustWriteFileForActivateTest(t, filepath.Join(profileDir, "example.yaml"), differentProfileYAML)
+
+	compileFn := compileFuncForMCP(&bytes.Buffer{})
+	_, _, err := compileFn(map[string]domain.HostActivation{"codex": {}})
+	if err == nil {
+		t.Fatal("compileFuncForMCP against a host whose current-generation manifest is corrupt: want an error, got nil")
+	}
+	if !strings.Contains(err.Error(), "codex") || !strings.Contains(err.Error(), "unreadable") {
+		t.Errorf("compileFuncForMCP error does not clearly name the host and explain the unreadable manifest: %v", err)
+	}
+}
+
+// TestCompileFuncForMCP_CacheHit_ReconcilesStaleParent is a regression test
+// (Copilot review finding on this PR): a generation's content-addressed ID
+// deliberately excludes Metadata.Parent (generationid.go's own doc
+// comment), so re-staging IDENTICAL desired state after codex's "current"
+// generation has moved on hits the SAME on-disk generation directory
+// (outputDir) a second time -- a cache hit. Before this fix, the cache-hit
+// branch returned that directory's manifest completely unchanged, so its
+// Metadata.Parent still named whichever generation was current the FIRST
+// time this exact content was compiled, not codex's actual, freshly
+// current generation. A later Rollback trusts manifest.Parent as its only
+// source of truth, so an uncorrected stale Parent would make it restore an
+// unexpected, older generation.
+func TestCompileFuncForMCP_CacheHit_ReconcilesStaleParent(t *testing.T) {
+	env := setupManagedTestEnv(t, true, false)
+
+	// 1. Stage and activate content X (mcpServerProfileYAML) -- codex's
+	// first-ever generation, Parent nil.
+	_, genX1, _ := stageViaCompileFuncForMCP(t, env, mcpServerProfileYAML, "codex")
+	var stdout, stderr bytes.Buffer
+	if code := runActivate(&stdout, &stderr, []string{"codex", "--confirm", "enable-mcp-server:internal-docs"}); code != 0 {
+		t.Fatalf("runActivate (X): %d; stderr:\n%s", code, stderr.String())
+	}
+
+	// 2. Stage and activate different content Y -- codex's current moves on
+	// to genY, whose own Parent correctly names genX1.
+	const skillProfileYAML = `
+apiVersion: omca.dev/v1alpha1
+kind: Profile
+metadata:
+  id: company:example
+spec:
+  assets:
+    skills:
+      - id: code-review
+        intent: REQUIRED
+`
+	_, genY, _ := stageViaCompileFuncForMCP(t, env, skillProfileYAML, "codex")
+	stdout.Reset()
+	stderr.Reset()
+	if code := runActivate(&stdout, &stderr, []string{"codex", "--confirm", "select-reviewed-skill:code-review"}); code != 0 {
+		t.Fatalf("runActivate (Y): %d; stderr:\n%s", code, stderr.String())
+	}
+
+	// 3. Re-stage the ORIGINAL content X again -- identical bytes, so this
+	// hits the exact same outputDir genX1 already compiled into (a cache
+	// hit, not a fresh compile). codex's current generation is now genY, so
+	// this call's freshly-computed Parent is genY.Metadata.ID -- the fix
+	// under test is that the returned (and on-disk) manifest reflects that,
+	// not genX1's original (nil) Parent.
+	_, genX2, outputDirX := stageViaCompileFuncForMCP(t, env, mcpServerProfileYAML, "codex")
+	if genX2.Metadata.ID != genX1.Metadata.ID {
+		t.Fatalf("fixture setup did not actually produce a cache hit: genX1.ID=%s genX2.ID=%s", genX1.Metadata.ID, genX2.Metadata.ID)
+	}
+	if genX2.Metadata.Parent == nil || *genX2.Metadata.Parent != genY.Metadata.ID {
+		got := "nil"
+		if genX2.Metadata.Parent != nil {
+			got = *genX2.Metadata.Parent
+		}
+		t.Errorf("cache-hit re-stage's returned Metadata.Parent = %s, want the freshly-current generation %q (not the stale value from when this content was first compiled)", got, genY.Metadata.ID)
+	}
+
+	// The on-disk manifest must agree with the returned value -- a later,
+	// independent ReadGenerationManifest (e.g. Rollback's own read) must
+	// see the same reconciled Parent, not just this call's in-memory return.
+	onDisk, err := runtime.ReadGenerationManifest(outputDirX)
+	if err != nil {
+		t.Fatalf("ReadGenerationManifest after cache-hit reconciliation: %v", err)
+	}
+	if onDisk.Metadata.Parent == nil || *onDisk.Metadata.Parent != genY.Metadata.ID {
+		got := "nil"
+		if onDisk.Metadata.Parent != nil {
+			got = *onDisk.Metadata.Parent
+		}
+		t.Errorf("on-disk manifest.json Metadata.Parent after cache-hit reconciliation = %s, want %q", got, genY.Metadata.ID)
 	}
 }

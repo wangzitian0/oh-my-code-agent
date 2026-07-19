@@ -218,10 +218,29 @@ func compileFuncForMCP(stderr io.Writer) mcp.CompileFunc {
 			}
 			hosts = append(hosts, runtime.HostCompileInput{Detection: hd, Observations: obs, OMCABinaryPath: omcaCommandPath(shimDir)})
 
-			if curDir, cerr := runtime.CurrentGenerationDir(worktreeStateDir, h); cerr == nil {
-				if g, rerr := runtime.ReadGenerationManifest(curDir); rerr == nil {
-					currentByHost[h] = g
+			curDir, cerr := runtime.CurrentGenerationDir(worktreeStateDir, h)
+			switch {
+			case cerr == nil:
+				g, rerr := runtime.ReadGenerationManifest(curDir)
+				if rerr != nil {
+					// The "current" pointer for h resolves to a real path,
+					// but its manifest is missing/corrupt -- a different,
+					// worse situation than "h has never been activated"
+					// (the os.IsNotExist(cerr) branch below), and treating
+					// it the same would silently derive Parent as if h had
+					// no prior generation at all. Fail loudly instead,
+					// mirroring this function's own cache-hit manifest
+					// check a few lines below ("only a genuinely missing
+					// manifest is a real cache miss worth compiling into") --
+					// a Copilot review finding on issue #68's own PR.
+					return domain.Generation{}, nil, fmt.Errorf("host %q has a current-generation pointer at %s but its manifest is unreadable, refusing to guess its Parent: %w", h, curDir, rerr)
 				}
+				currentByHost[h] = g
+			case os.IsNotExist(cerr):
+				// h has never been activated in this worktree -- genuinely
+				// no current generation, not an error.
+			default:
+				return domain.Generation{}, nil, fmt.Errorf("host %q: resolving current-generation pointer: %w", h, cerr)
 			}
 		}
 
@@ -271,13 +290,15 @@ func compileFuncForMCP(stderr io.Writer) mcp.CompileFunc {
 
 		// Note: genID (and therefore outputDir) deliberately excludes Parent
 		// (generationid.go's own doc comment -- Parent never changes the
-		// compiled artifact tree's content), so a cache hit below reuses
-		// whatever Parent that content was FIRST compiled with, not
-		// necessarily this call's freshly-recomputed req.Parent. This is an
-		// existing property of this compiler's content-addressed reuse
-		// design, not something this fix introduces or attempts to close --
-		// out of scope for issue #68, which is only about the "Parent is
-		// never threaded at all" gap.
+		// compiled artifact tree's content), so a cache hit below can find a
+		// manifest recorded with a DIFFERENT Parent than this call just
+		// freshly computed (e.g. identical desired state re-staged after
+		// some other activation moved "current" on). runtime.
+		// ReconcileGenerationParent below corrects the on-disk manifest to
+		// this call's freshly-computed Parent when they disagree -- a real
+		// Copilot review finding on issue #68's own PR: an uncorrected stale
+		// Parent makes a later Rollback restore an unexpected, older
+		// generation instead of the one this activation actually preceded.
 		gen, err := runtime.ReadGenerationManifest(outputDir)
 		if err != nil {
 			if !os.IsNotExist(err) {
@@ -295,6 +316,11 @@ func compileFuncForMCP(stderr io.Writer) mcp.CompileFunc {
 			gen, err = runtime.Compile(req, outputDir)
 			if err != nil {
 				return domain.Generation{}, nil, fmt.Errorf("compiling: %w", err)
+			}
+		} else {
+			gen, err = runtime.ReconcileGenerationParent(outputDir, parent)
+			if err != nil {
+				return domain.Generation{}, nil, fmt.Errorf("reconciling cached generation's Parent: %w", err)
 			}
 		}
 
