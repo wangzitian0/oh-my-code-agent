@@ -1,0 +1,17 @@
+┌──────────┐                                  
+│ Overview │  Drift    Assets    Generations  
+└──────────┘
+
+Report report:worktree:sha256:tui-fixture:2026-01-01T00:00:00Z
+Worktree worktree:sha256:tui-fixture, generated 2026-01-01T00:00:00Z
+Fingerprint sha256:b46bca2d8c562c4c2c76dad02fc60cdf5e14734c99c3ba1575ff78dd053394fc
+
+Planes  native=6 observed=6 desired=0 hostEffective=2 current=6 pending=5
+
+Hosts (1)
+  codex (0.144.5)
+    knowledge   FRESH (codex:cli:0.144)
+    context-cost ~200 tokens (1 excluded native MCP configuration source(s) x ~200 tokens/source (each source may register multiple individual servers; see HostStatus.ExcludedMCPServers' doc comment) + 0 excluded Skill(s) x ~150 tokens/description (fixed, documented per-item averages, not measured from this session's actual excluded schemas/descriptions)) [estimate, not measured -- no real MCP tool-schema or Skill description text was tokenized; this multiplies exclusion counts by fixed, documented per-item token averages (see docs/evidence/perf-v0.1.0.md)]
+    coverage    observed=6 effective=2 conflicts=1 desired=0 current=6 pending=5
+
+Drift: 1 root cause(s) — see the Drift view

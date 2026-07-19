@@ -1,0 +1,13 @@
+            ┌───────┐                         
+  Overview  │ Drift │  Assets    Generations  
+            └───────┘
+
+Drift: 1 root cause(s)
+
+DR-8105bca2  SOURCE_DRIFT
+  Reason      sources disagree and no resolver could select a single winner (see the Debug view for the full precedence trace)
+  Action      sources disagree and no resolver could select a single winner (see the Debug view for the full precedence trace)
+  Impact      1 project(s) x 1 host(s) x 1 artifact(s)
+  Guarantee   OBSERVED
+  Samples
+    mcp_server/stdio|shared-tools  worktree:sha256:tui-fixture / codex

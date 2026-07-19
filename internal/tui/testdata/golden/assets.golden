@@ -1,0 +1,13 @@
+                     ┌────────┐               
+  Overview    Drift  │ Assets │  Generations  
+                     └────────┘
+
+Assets — codex
+  Active (0)
+  Available (0)
+  Excluded (0)
+  Unknown (4)
+    mcp_server       stdio|project-only-server
+    mcp_server       stdio|shared-tools
+    mcp_server       stdio|shared-tools
+    mcp_server       stdio|user-only-server

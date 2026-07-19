@@ -1,0 +1,741 @@
+{
+  "report": {
+    "apiVersion": "omca.dev/v1alpha1",
+    "kind": "Report",
+    "metadata": {
+      "id": "report:worktree:sha256:tui-fixture:2026-01-01T00:00:00Z",
+      "worktree": "worktree:sha256:tui-fixture",
+      "generatedAt": "2026-01-01T00:00:00Z"
+    },
+    "spec": {
+      "fingerprint": "sha256:b46bca2d8c562c4c2c76dad02fc60cdf5e14734c99c3ba1575ff78dd053394fc",
+      "planes": {
+        "native": 6,
+        "observed": 6,
+        "current": 6,
+        "pending": 5,
+        "hostEffective": 2
+      },
+      "drift": [
+        {
+          "entityId": "mcp_server/stdio|shared-tools",
+          "field": "selectedSource",
+          "category": "SOURCE_DRIFT",
+          "expected": "single resolved source",
+          "observed": [
+            "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml#mcp_servers.shared-tools",
+            "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml#mcp_servers.shared-tools"
+          ],
+          "rootCause": "precedence program \"mcp_server.union-by-id\" declares operator UNION_BY_ID for concept \"mcp_server\", but the Knowledge Pack's resolve capability is \"UNKNOWN\" (not EXACT/COMPATIBLE); 2 sources disagree and this package refuses to guess a winner",
+          "remediation": "qualify a precedence program for this concept in the host's Knowledge Pack so the resolver can select a winner, or resolve the collision with an explicit Profile/Exception",
+          "contextCell": "worktree:sha256:tui-fixture / codex",
+          "evidenceLevel": "E1",
+          "guarantee": "OBSERVED"
+        }
+      ],
+      "knowledgeStatus": {
+        "codex": "FRESH"
+      }
+    }
+  },
+  "actionCards": [
+    {
+      "id": "DR-8105bca2",
+      "rootCause": "precedence program \"mcp_server.union-by-id\" declares operator UNION_BY_ID for concept \"mcp_server\", but the Knowledge Pack's resolve capability is \"UNKNOWN\" (not EXACT/COMPATIBLE); 2 sources disagree and this package refuses to guess a winner",
+      "remediation": "qualify a precedence program for this concept in the host's Knowledge Pack so the resolver can select a winner, or resolve the collision with an explicit Profile/Exception",
+      "category": "SOURCE_DRIFT",
+      "impact": {
+        "projects": 1,
+        "hosts": 1,
+        "artifacts": 1
+      },
+      "evidenceCounts": {
+        "E1": 1
+      },
+      "guarantee": "OBSERVED",
+      "samples": [
+        {
+          "entityId": "mcp_server/stdio|shared-tools",
+          "field": "selectedSource",
+          "category": "SOURCE_DRIFT",
+          "expected": "single resolved source",
+          "observed": [
+            "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml#mcp_servers.shared-tools",
+            "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml#mcp_servers.shared-tools"
+          ],
+          "rootCause": "precedence program \"mcp_server.union-by-id\" declares operator UNION_BY_ID for concept \"mcp_server\", but the Knowledge Pack's resolve capability is \"UNKNOWN\" (not EXACT/COMPATIBLE); 2 sources disagree and this package refuses to guess a winner",
+          "remediation": "qualify a precedence program for this concept in the host's Knowledge Pack so the resolver can select a winner, or resolve the collision with an explicit Profile/Exception",
+          "contextCell": "worktree:sha256:tui-fixture / codex",
+          "evidenceLevel": "E1",
+          "guarantee": "OBSERVED",
+          "underlyingCategory": "SOURCE_DRIFT",
+          "project": "worktree:sha256:tui-fixture",
+          "host": "codex",
+          "hostVersion": "0.144.5"
+        }
+      ],
+      "matrix": [
+        {
+          "entityId": "mcp_server/stdio|shared-tools",
+          "field": "selectedSource",
+          "category": "SOURCE_DRIFT",
+          "expected": "single resolved source",
+          "observed": [
+            "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml#mcp_servers.shared-tools",
+            "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml#mcp_servers.shared-tools"
+          ],
+          "rootCause": "precedence program \"mcp_server.union-by-id\" declares operator UNION_BY_ID for concept \"mcp_server\", but the Knowledge Pack's resolve capability is \"UNKNOWN\" (not EXACT/COMPATIBLE); 2 sources disagree and this package refuses to guess a winner",
+          "remediation": "qualify a precedence program for this concept in the host's Knowledge Pack so the resolver can select a winner, or resolve the collision with an explicit Profile/Exception",
+          "contextCell": "worktree:sha256:tui-fixture / codex",
+          "evidenceLevel": "E1",
+          "guarantee": "OBSERVED",
+          "underlyingCategory": "SOURCE_DRIFT",
+          "project": "worktree:sha256:tui-fixture",
+          "host": "codex",
+          "hostVersion": "0.144.5"
+        }
+      ]
+    }
+  ],
+  "hosts": [
+    {
+      "host": "codex",
+      "hostVersion": "0.144.5",
+      "knowledge": {
+        "qualified": true,
+        "packId": "codex:cli:0.144",
+        "status": "FRESH"
+      },
+      "contextCost": {
+        "estimatedTokensExcluded": 200,
+        "method": "1 excluded native MCP configuration source(s) x ~200 tokens/source (each source may register multiple individual servers; see HostStatus.ExcludedMCPServers' doc comment) + 0 excluded Skill(s) x ~150 tokens/description (fixed, documented per-item averages, not measured from this session's actual excluded schemas/descriptions)",
+        "confidence": "estimate, not measured -- no real MCP tool-schema or Skill description text was tokenized; this multiplies exclusion counts by fixed, documented per-item token averages (see docs/evidence/perf-v0.1.0.md)",
+        "hostVersion": "0.144.5"
+      },
+      "planes": {
+        "observed": 6,
+        "effective": 2,
+        "conflicts": 1,
+        "current": 6,
+        "pending": 5
+      }
+    }
+  ],
+  "debug": {
+    "codex": {
+      "graph": {
+        "Host": "codex",
+        "HostVersion": "0.144.5",
+        "Entries": [
+          {
+            "Concept": "mcp_server",
+            "LogicalID": "stdio|project-only-server",
+            "Composed": false,
+            "Provenance": {
+              "Program": "",
+              "Operator": "",
+              "SelectedSource": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml#mcp_servers.project-only-server",
+              "ActiveSources": [
+                "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml#mcp_servers.project-only-server"
+              ],
+              "IgnoredSources": null,
+              "Constraints": null
+            },
+            "EvidenceLevel": "E1",
+            "Guarantee": "OBSERVED",
+            "Confirmed": false,
+            "Reason": "only one physical source for \"stdio|project-only-server\""
+          },
+          {
+            "Concept": "mcp_server",
+            "LogicalID": "stdio|user-only-server",
+            "Composed": false,
+            "Provenance": {
+              "Program": "",
+              "Operator": "",
+              "SelectedSource": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml#mcp_servers.user-only-server",
+              "ActiveSources": [
+                "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml#mcp_servers.user-only-server"
+              ],
+              "IgnoredSources": null,
+              "Constraints": null
+            },
+            "EvidenceLevel": "E1",
+            "Guarantee": "OBSERVED",
+            "Confirmed": false,
+            "Reason": "only one physical source for \"stdio|user-only-server\""
+          }
+        ],
+        "Conflicts": [
+          {
+            "Concept": "mcp_server",
+            "LogicalID": "stdio|shared-tools",
+            "Candidates": [
+              {
+                "Concept": "mcp_server",
+                "LogicalID": "stdio|shared-tools",
+                "Ref": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml#mcp_servers.shared-tools",
+                "Scope": {
+                  "kind": "user",
+                  "root": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home"
+                },
+                "Source": {
+                  "kind": "file",
+                  "path": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml",
+                  "digest": "sha256:90a316c75347a61500cb63895cf585f9a361c05519b838c27278e527e089f886"
+                },
+                "Disposition": "DISCOVERED",
+                "EvidenceLevel": "E1",
+                "Fields": {
+                  "args": "[\"-y\", \"@example/shared-tools-server\"]",
+                  "command": "\"npx\"",
+                  "env": "{ EXAMPLE_TOKEN = \"user-level-placeholder-not-a-real-secret\" }"
+                },
+                "ContentDigest": "sha256:899ca3e9cf417146fb687b42dcb87e9450d8da2d1bab878120042d8fa0f17f40",
+                "Tools": null
+              },
+              {
+                "Concept": "mcp_server",
+                "LogicalID": "stdio|shared-tools",
+                "Ref": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml#mcp_servers.shared-tools",
+                "Scope": {
+                  "kind": "workspace",
+                  "root": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project"
+                },
+                "Source": {
+                  "kind": "file",
+                  "path": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml",
+                  "digest": "sha256:7c9a757f3e50c22e8ca5e598d11bf880809da47f973e163afd6263aa6793e930"
+                },
+                "Disposition": "DISCOVERED",
+                "EvidenceLevel": "E1",
+                "Fields": {
+                  "args": "[\"--project-mode\"]",
+                  "command": "\"./scripts/run-shared-tools.sh\""
+                },
+                "ContentDigest": "sha256:90a49615d470b1d5c412f3792c66b4d92f254399e9241b809e0d8588a9b40426",
+                "Tools": null
+              }
+            ],
+            "Program": "mcp_server.union-by-id",
+            "Operator": "UNION_BY_ID",
+            "EvidenceLevel": "E1",
+            "Reason": "precedence program \"mcp_server.union-by-id\" declares operator UNION_BY_ID for concept \"mcp_server\", but the Knowledge Pack's resolve capability is \"UNKNOWN\" (not EXACT/COMPATIBLE); 2 sources disagree and this package refuses to guess a winner"
+          }
+        ],
+        "AmbiguousIdentities": null,
+        "DuplicateCapabilities": null
+      },
+      "candidates": [
+        {
+          "Concept": "mcp_server",
+          "LogicalID": "stdio|project-only-server",
+          "Ref": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml#mcp_servers.project-only-server",
+          "Scope": {
+            "kind": "workspace",
+            "root": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project"
+          },
+          "Source": {
+            "kind": "file",
+            "path": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml",
+            "digest": "sha256:7c9a757f3e50c22e8ca5e598d11bf880809da47f973e163afd6263aa6793e930"
+          },
+          "Disposition": "DISCOVERED",
+          "EvidenceLevel": "E1",
+          "Fields": {
+            "args": "[\"-y\", \"@example/project-only-server\"]",
+            "command": "\"npx\""
+          },
+          "ContentDigest": "sha256:852acc292c808f8d29aa98c7a49ec3d686566c36958b31cbb67840cd63a6ae0d",
+          "Tools": null
+        },
+        {
+          "Concept": "mcp_server",
+          "LogicalID": "stdio|shared-tools",
+          "Ref": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml#mcp_servers.shared-tools",
+          "Scope": {
+            "kind": "user",
+            "root": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home"
+          },
+          "Source": {
+            "kind": "file",
+            "path": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml",
+            "digest": "sha256:90a316c75347a61500cb63895cf585f9a361c05519b838c27278e527e089f886"
+          },
+          "Disposition": "DISCOVERED",
+          "EvidenceLevel": "E1",
+          "Fields": {
+            "args": "[\"-y\", \"@example/shared-tools-server\"]",
+            "command": "\"npx\"",
+            "env": "{ EXAMPLE_TOKEN = \"user-level-placeholder-not-a-real-secret\" }"
+          },
+          "ContentDigest": "sha256:899ca3e9cf417146fb687b42dcb87e9450d8da2d1bab878120042d8fa0f17f40",
+          "Tools": null
+        },
+        {
+          "Concept": "mcp_server",
+          "LogicalID": "stdio|shared-tools",
+          "Ref": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml#mcp_servers.shared-tools",
+          "Scope": {
+            "kind": "workspace",
+            "root": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project"
+          },
+          "Source": {
+            "kind": "file",
+            "path": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml",
+            "digest": "sha256:7c9a757f3e50c22e8ca5e598d11bf880809da47f973e163afd6263aa6793e930"
+          },
+          "Disposition": "DISCOVERED",
+          "EvidenceLevel": "E1",
+          "Fields": {
+            "args": "[\"--project-mode\"]",
+            "command": "\"./scripts/run-shared-tools.sh\""
+          },
+          "ContentDigest": "sha256:90a49615d470b1d5c412f3792c66b4d92f254399e9241b809e0d8588a9b40426",
+          "Tools": null
+        },
+        {
+          "Concept": "mcp_server",
+          "LogicalID": "stdio|user-only-server",
+          "Ref": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml#mcp_servers.user-only-server",
+          "Scope": {
+            "kind": "user",
+            "root": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home"
+          },
+          "Source": {
+            "kind": "file",
+            "path": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml",
+            "digest": "sha256:90a316c75347a61500cb63895cf585f9a361c05519b838c27278e527e089f886"
+          },
+          "Disposition": "DISCOVERED",
+          "EvidenceLevel": "E1",
+          "Fields": {
+            "args": "[\"-y\", \"@example/user-only-server\"]",
+            "command": "\"npx\""
+          },
+          "ContentDigest": "sha256:fd6d62a095295215c53fba862601a19a0fa3148e2f9fc79a214d48fe74fc8572",
+          "Tools": null
+        }
+      ],
+      "observations": [
+        {
+          "apiVersion": "omca.dev/v1alpha1",
+          "kind": "Observation",
+          "metadata": {
+            "id": "codex:hook:/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml"
+          },
+          "spec": {
+            "host": {
+              "id": "codex",
+              "version": "0.144.5"
+            },
+            "surface": "cli",
+            "concept": "hook",
+            "source": {
+              "kind": "file",
+              "path": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml",
+              "digest": "sha256:90a316c75347a61500cb63895cf585f9a361c05519b838c27278e527e089f886"
+            },
+            "scope": {
+              "kind": "user",
+              "root": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home"
+            },
+            "disposition": "DISCOVERED",
+            "evidenceLevel": "E1",
+            "rawDigest": "sha256:90a316c75347a61500cb63895cf585f9a361c05519b838c27278e527e089f886",
+            "parsedDigest": "sha256:d921cd8db39ebf1eda7ec76ef8e6986d3e58f2502a017088f8ca552cd93a5b0e",
+            "opaqueVendorFields": {
+              "content": "# User-level Codex config (synthetic fixture, not a real user's config).\n# $CODEX_HOME/config.toml\n\n[mcp_servers.shared-tools]\ncommand = \"npx\"\nargs = [\"-y\", \"@example/shared-tools-server\"]\nenv = { EXAMPLE_TOKEN = \"user-level-placeholder-not-a-real-secret\" }\n\n[mcp_servers.user-only-server]\ncommand = \"npx\"\nargs = [\"-y\", \"@example/user-only-server\"]\n"
+            }
+          }
+        },
+        {
+          "apiVersion": "omca.dev/v1alpha1",
+          "kind": "Observation",
+          "metadata": {
+            "id": "codex:hook:/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml"
+          },
+          "spec": {
+            "host": {
+              "id": "codex",
+              "version": "0.144.5"
+            },
+            "surface": "cli",
+            "concept": "hook",
+            "source": {
+              "kind": "file",
+              "path": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml",
+              "digest": "sha256:7c9a757f3e50c22e8ca5e598d11bf880809da47f973e163afd6263aa6793e930"
+            },
+            "scope": {
+              "kind": "workspace",
+              "root": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project"
+            },
+            "disposition": "DISCOVERED",
+            "evidenceLevel": "E1",
+            "rawDigest": "sha256:7c9a757f3e50c22e8ca5e598d11bf880809da47f973e163afd6263aa6793e930",
+            "parsedDigest": "sha256:8ad0e090bfec17e54b9c24d26f92fb2b06a3f53dd45a6381c2acf2cba58b868e",
+            "opaqueVendorFields": {
+              "content": "# Project-level Codex config (synthetic fixture, not a real project).\n# \u003cproject-root\u003e/.codex/config.toml\n\n[mcp_servers.shared-tools]\ncommand = \"./scripts/run-shared-tools.sh\"\nargs = [\"--project-mode\"]\n\n[mcp_servers.project-only-server]\ncommand = \"npx\"\nargs = [\"-y\", \"@example/project-only-server\"]\n"
+            }
+          }
+        },
+        {
+          "apiVersion": "omca.dev/v1alpha1",
+          "kind": "Observation",
+          "metadata": {
+            "id": "codex:mcp_server:/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml"
+          },
+          "spec": {
+            "host": {
+              "id": "codex",
+              "version": "0.144.5"
+            },
+            "surface": "cli",
+            "concept": "mcp_server",
+            "source": {
+              "kind": "file",
+              "path": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml",
+              "digest": "sha256:90a316c75347a61500cb63895cf585f9a361c05519b838c27278e527e089f886"
+            },
+            "scope": {
+              "kind": "user",
+              "root": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home"
+            },
+            "disposition": "DISCOVERED",
+            "evidenceLevel": "E1",
+            "rawDigest": "sha256:90a316c75347a61500cb63895cf585f9a361c05519b838c27278e527e089f886",
+            "parsedDigest": "sha256:d921cd8db39ebf1eda7ec76ef8e6986d3e58f2502a017088f8ca552cd93a5b0e",
+            "opaqueVendorFields": {
+              "content": "# User-level Codex config (synthetic fixture, not a real user's config).\n# $CODEX_HOME/config.toml\n\n[mcp_servers.shared-tools]\ncommand = \"npx\"\nargs = [\"-y\", \"@example/shared-tools-server\"]\nenv = { EXAMPLE_TOKEN = \"user-level-placeholder-not-a-real-secret\" }\n\n[mcp_servers.user-only-server]\ncommand = \"npx\"\nargs = [\"-y\", \"@example/user-only-server\"]\n"
+            }
+          }
+        },
+        {
+          "apiVersion": "omca.dev/v1alpha1",
+          "kind": "Observation",
+          "metadata": {
+            "id": "codex:mcp_server:/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml"
+          },
+          "spec": {
+            "host": {
+              "id": "codex",
+              "version": "0.144.5"
+            },
+            "surface": "cli",
+            "concept": "mcp_server",
+            "source": {
+              "kind": "file",
+              "path": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml",
+              "digest": "sha256:7c9a757f3e50c22e8ca5e598d11bf880809da47f973e163afd6263aa6793e930"
+            },
+            "scope": {
+              "kind": "workspace",
+              "root": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project"
+            },
+            "disposition": "DISCOVERED",
+            "evidenceLevel": "E1",
+            "rawDigest": "sha256:7c9a757f3e50c22e8ca5e598d11bf880809da47f973e163afd6263aa6793e930",
+            "parsedDigest": "sha256:8ad0e090bfec17e54b9c24d26f92fb2b06a3f53dd45a6381c2acf2cba58b868e",
+            "opaqueVendorFields": {
+              "content": "# Project-level Codex config (synthetic fixture, not a real project).\n# \u003cproject-root\u003e/.codex/config.toml\n\n[mcp_servers.shared-tools]\ncommand = \"./scripts/run-shared-tools.sh\"\nargs = [\"--project-mode\"]\n\n[mcp_servers.project-only-server]\ncommand = \"npx\"\nargs = [\"-y\", \"@example/project-only-server\"]\n"
+            }
+          }
+        },
+        {
+          "apiVersion": "omca.dev/v1alpha1",
+          "kind": "Observation",
+          "metadata": {
+            "id": "codex:policy:/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml"
+          },
+          "spec": {
+            "host": {
+              "id": "codex",
+              "version": "0.144.5"
+            },
+            "surface": "cli",
+            "concept": "policy",
+            "source": {
+              "kind": "file",
+              "path": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml",
+              "digest": "sha256:90a316c75347a61500cb63895cf585f9a361c05519b838c27278e527e089f886"
+            },
+            "scope": {
+              "kind": "user",
+              "root": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home"
+            },
+            "disposition": "DISCOVERED",
+            "evidenceLevel": "E1",
+            "rawDigest": "sha256:90a316c75347a61500cb63895cf585f9a361c05519b838c27278e527e089f886",
+            "parsedDigest": "sha256:d921cd8db39ebf1eda7ec76ef8e6986d3e58f2502a017088f8ca552cd93a5b0e",
+            "opaqueVendorFields": {
+              "content": "# User-level Codex config (synthetic fixture, not a real user's config).\n# $CODEX_HOME/config.toml\n\n[mcp_servers.shared-tools]\ncommand = \"npx\"\nargs = [\"-y\", \"@example/shared-tools-server\"]\nenv = { EXAMPLE_TOKEN = \"user-level-placeholder-not-a-real-secret\" }\n\n[mcp_servers.user-only-server]\ncommand = \"npx\"\nargs = [\"-y\", \"@example/user-only-server\"]\n"
+            }
+          }
+        },
+        {
+          "apiVersion": "omca.dev/v1alpha1",
+          "kind": "Observation",
+          "metadata": {
+            "id": "codex:policy:/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml"
+          },
+          "spec": {
+            "host": {
+              "id": "codex",
+              "version": "0.144.5"
+            },
+            "surface": "cli",
+            "concept": "policy",
+            "source": {
+              "kind": "file",
+              "path": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml",
+              "digest": "sha256:7c9a757f3e50c22e8ca5e598d11bf880809da47f973e163afd6263aa6793e930"
+            },
+            "scope": {
+              "kind": "workspace",
+              "root": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project"
+            },
+            "disposition": "DISCOVERED",
+            "evidenceLevel": "E1",
+            "rawDigest": "sha256:7c9a757f3e50c22e8ca5e598d11bf880809da47f973e163afd6263aa6793e930",
+            "parsedDigest": "sha256:8ad0e090bfec17e54b9c24d26f92fb2b06a3f53dd45a6381c2acf2cba58b868e",
+            "opaqueVendorFields": {
+              "content": "# Project-level Codex config (synthetic fixture, not a real project).\n# \u003cproject-root\u003e/.codex/config.toml\n\n[mcp_servers.shared-tools]\ncommand = \"./scripts/run-shared-tools.sh\"\nargs = [\"--project-mode\"]\n\n[mcp_servers.project-only-server]\ncommand = \"npx\"\nargs = [\"-y\", \"@example/project-only-server\"]\n"
+            }
+          }
+        }
+      ],
+      "desired": {
+        "host": "codex"
+      },
+      "knowledgeEvidence": [
+        {
+          "id": "codex-environment-variables-doc",
+          "kind": "official-doc",
+          "url": "https://learn.chatgpt.com/docs/config-file/environment-variables"
+        },
+        {
+          "id": "codex-cli-doc",
+          "kind": "official-doc",
+          "url": "https://learn.chatgpt.com/docs/codex/cli"
+        },
+        {
+          "id": "codex-agents-md-doc",
+          "kind": "official-doc",
+          "url": "https://learn.chatgpt.com/docs/agent-configuration/agents-md"
+        },
+        {
+          "id": "codex-skills-doc",
+          "kind": "official-doc",
+          "url": "https://learn.chatgpt.com/docs/build-skills"
+        },
+        {
+          "id": "codex-cli-0.144.5-local-binary-fingerprint",
+          "kind": "maintainer-observation",
+          "path": "fixtures/README.md",
+          "digest": "sha256:5e29ab10ca1171be158f7335dd6bd8ce1aaf9af1556939db36a5ee338be6f5f2"
+        },
+        {
+          "id": "codex-home-skills-undocumented-root-static-inspection",
+          "kind": "maintainer-observation",
+          "path": "fixtures/README.md"
+        },
+        {
+          "id": "codex-skill-collision-fixture",
+          "kind": "executable-fixture",
+          "path": "fixtures/codex/0.144.5/skill-collision"
+        },
+        {
+          "id": "codex-instructions-collision-fixture",
+          "kind": "executable-fixture",
+          "path": "fixtures/codex/0.144.5/instructions-collision"
+        },
+        {
+          "id": "codex-mcp-merge-fixture",
+          "kind": "executable-fixture",
+          "path": "fixtures/codex/0.144.5/mcp-merge"
+        }
+      ],
+      "evidence": [
+        {
+          "apiVersion": "omca.dev/v1alpha1",
+          "kind": "Evidence",
+          "metadata": {
+            "id": "evidence:codex:mcp_server:stdio|project-only-server"
+          },
+          "spec": {
+            "subject": {
+              "concept": "mcp_server",
+              "logicalId": "stdio|project-only-server"
+            },
+            "level": "E1",
+            "guarantee": "OBSERVED",
+            "method": "only one physical source for \"stdio|project-only-server\"",
+            "observedAt": "2026-01-01T00:00:00Z",
+            "source": {},
+            "knowledgeRef": {
+              "id": "codex:cli:0.144",
+              "digest": "sha256:ab65752792f183823a73f0d12a568d952a629983c6b55e68b7762cd30d4143c3"
+            }
+          }
+        },
+        {
+          "apiVersion": "omca.dev/v1alpha1",
+          "kind": "Evidence",
+          "metadata": {
+            "id": "evidence:codex:mcp_server:stdio|user-only-server"
+          },
+          "spec": {
+            "subject": {
+              "concept": "mcp_server",
+              "logicalId": "stdio|user-only-server"
+            },
+            "level": "E1",
+            "guarantee": "OBSERVED",
+            "method": "only one physical source for \"stdio|user-only-server\"",
+            "observedAt": "2026-01-01T00:00:00Z",
+            "source": {},
+            "knowledgeRef": {
+              "id": "codex:cli:0.144",
+              "digest": "sha256:ab65752792f183823a73f0d12a568d952a629983c6b55e68b7762cd30d4143c3"
+            }
+          }
+        },
+        {
+          "apiVersion": "omca.dev/v1alpha1",
+          "kind": "Evidence",
+          "metadata": {
+            "id": "evidence:codex:mcp_server:stdio|shared-tools"
+          },
+          "spec": {
+            "subject": {
+              "concept": "mcp_server",
+              "logicalId": "stdio|shared-tools"
+            },
+            "level": "E1",
+            "method": "precedence program \"mcp_server.union-by-id\" declares operator UNION_BY_ID for concept \"mcp_server\", but the Knowledge Pack's resolve capability is \"UNKNOWN\" (not EXACT/COMPATIBLE); 2 sources disagree and this package refuses to guess a winner",
+            "observedAt": "2026-01-01T00:00:00Z",
+            "source": {},
+            "knowledgeRef": {
+              "id": "codex:cli:0.144",
+              "digest": "sha256:ab65752792f183823a73f0d12a568d952a629983c6b55e68b7762cd30d4143c3"
+            }
+          }
+        },
+        {
+          "apiVersion": "omca.dev/v1alpha1",
+          "kind": "Evidence",
+          "metadata": {
+            "id": "evidence:codex:host:codex"
+          },
+          "spec": {
+            "subject": {
+              "concept": "host",
+              "logicalId": "codex",
+              "field": "version"
+            },
+            "level": "E3",
+            "method": " --version (internal/context/host.go's probeVersion; see docs/architecture/evidence-ceiling.md)",
+            "observedAt": "2026-01-01T00:00:00Z",
+            "source": {},
+            "knowledgeRef": {}
+          }
+        }
+      ],
+      "currentSources": [
+        {
+          "concept": "hook",
+          "source": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml",
+          "scope": "user",
+          "host": "codex",
+          "included": false,
+          "reason": "excluded: native user-global source; the M1 bootstrap policy never inherits user-global config (docs/architecture/runtime.md §3, docs/project/roadmap.md M1)"
+        },
+        {
+          "concept": "hook",
+          "source": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml",
+          "scope": "workspace",
+          "host": "codex",
+          "included": false,
+          "reason": "excluded: repository-scope Skill/MCP source, not yet activated by any desired state (no Profile exists before PR-12)"
+        },
+        {
+          "concept": "mcp_server",
+          "source": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml",
+          "scope": "user",
+          "host": "codex",
+          "included": false,
+          "reason": "excluded: native user-global source; the M1 bootstrap policy never inherits user-global config (docs/architecture/runtime.md §3, docs/project/roadmap.md M1)"
+        },
+        {
+          "concept": "mcp_server",
+          "source": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml",
+          "scope": "workspace",
+          "host": "codex",
+          "included": false,
+          "reason": "excluded: repository-scope Skill/MCP source, not yet activated by any desired state (no Profile exists before PR-12)"
+        },
+        {
+          "concept": "policy",
+          "source": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml",
+          "scope": "user",
+          "host": "codex",
+          "included": false,
+          "reason": "excluded: native user-global source; the M1 bootstrap policy never inherits user-global config (docs/architecture/runtime.md §3, docs/project/roadmap.md M1)"
+        },
+        {
+          "concept": "policy",
+          "source": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml",
+          "scope": "workspace",
+          "host": "codex",
+          "included": false,
+          "reason": "excluded: repository-scope Skill/MCP source, not yet activated by any desired state (no Profile exists before PR-12)"
+        }
+      ],
+      "pendingSources": [
+        {
+          "concept": "hook",
+          "source": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml",
+          "scope": "user",
+          "host": "codex",
+          "included": false,
+          "reason": "excluded: native user-global source; the M1 bootstrap policy never inherits user-global config (docs/architecture/runtime.md §3, docs/project/roadmap.md M1)"
+        },
+        {
+          "concept": "hook",
+          "source": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml",
+          "scope": "workspace",
+          "host": "codex",
+          "included": false,
+          "reason": "excluded: repository-scope Skill/MCP source, not yet activated by any desired state (no Profile exists before PR-12)"
+        },
+        {
+          "concept": "mcp_server",
+          "source": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml",
+          "scope": "user",
+          "host": "codex",
+          "included": false,
+          "reason": "excluded: native user-global source; the M1 bootstrap policy never inherits user-global config (docs/architecture/runtime.md §3, docs/project/roadmap.md M1)"
+        },
+        {
+          "concept": "mcp_server",
+          "source": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml",
+          "scope": "workspace",
+          "host": "codex",
+          "included": false,
+          "reason": "excluded: repository-scope Skill/MCP source, not yet activated by any desired state (no Profile exists before PR-12)"
+        },
+        {
+          "concept": "policy",
+          "source": "/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml",
+          "scope": "user",
+          "host": "codex",
+          "included": false,
+          "reason": "excluded: native user-global source; the M1 bootstrap policy never inherits user-global config (docs/architecture/runtime.md §3, docs/project/roadmap.md M1)"
+        }
+      ],
+      "currentGenerationId": "generation:sha256:b1e22c7407009982969e6f45e56ed2ff36f8432b122f00a2df817f597283b3a3",
+      "pendingGenerationId": "generation:sha256:b7396242bef2dd0e1d50b471e07e135ba9110f867b301dc11df8be4104e6cda8"
+    }
+  }
+}
