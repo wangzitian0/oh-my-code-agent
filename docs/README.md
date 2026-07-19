@@ -19,6 +19,7 @@ single global priority:
 | Bootstrap, isolation, generations, and restart behavior | [`architecture/runtime.md`](architecture/runtime.md) |
 | Drift, evidence, report UX, MCP queries, and debugging | [`architecture/reporting.md`](architecture/reporting.md) |
 | Frozen cross-cutting decisions (isolation, ownership, credentials, knowledge update, plugin distribution) | [`adr/`](adr/) |
+| Building and qualifying a host adapter plugin | [`plugin/authoring-guide.md`](plugin/authoring-guide.md) |
 | Implementation order and milestone exit gates | [`project/roadmap.md`](project/roadmap.md) |
 
 The ontology defines meaning. Knowledge Packs define versioned host facts.
@@ -36,7 +37,8 @@ them.
 6. [Ontology](ontology/README.md)
 7. [Knowledge lifecycle](knowledge/README.md)
 8. [Architecture decision records](adr/)
-9. [Roadmap](project/roadmap.md)
+9. [Plugin authoring guide](plugin/authoring-guide.md)
+10. [Roadmap](project/roadmap.md)
 
 ## Change Rules
 

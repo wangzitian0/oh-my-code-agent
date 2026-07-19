@@ -259,8 +259,12 @@ First-party adapters (`claude-code`, `codex`) compile into the `omca` binary
 but may use only the plugin contract — no private core APIs. The same contract
 is designed to run out of process (a separate executable speaking the versioned
 protocol over stdio), so an external plugin can qualify a new host without
-forking the core. The out-of-process transport becomes a qualified feature in
-M6; until then it is a design constraint, not a shipped mechanism.
+forking the core. `internal/plugin/transport` (M6, issue #29) is that
+mechanism: `transport.Serve` wraps an adapter behind the wire protocol from
+its own binary's `main()`, and `transport.RemoteAdapter` implements
+`HostAdapter` on the core side by speaking to an already-started subprocess.
+See [`docs/plugin/authoring-guide.md`](../plugin/authoring-guide.md) for how
+a third party builds and qualifies an adapter against it.
 
 ```go
 type HostAdapter interface {
@@ -334,4 +338,5 @@ end-to-end path.
 - [Trusted reporting](reporting.md)
 - [Ontology](../ontology/README.md)
 - [Knowledge lifecycle](../knowledge/README.md)
+- [Plugin authoring guide](../plugin/authoring-guide.md)
 - [Roadmap](../project/roadmap.md)

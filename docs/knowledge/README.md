@@ -244,7 +244,10 @@ future debugging does not depend on the current repository head.
   fixtures green. Tier 2 (knowledge-only): every other host stays at the
   observation tier; its Packs may go `DUE` or `STALE` without blocking a
   release, and promoting a capability requires an adapter plugin with fixtures
-  from a maintainer or the community.
+  from a maintainer or the community. See
+  [`docs/plugin/authoring-guide.md`](../plugin/authoring-guide.md) for how a
+  third party builds and qualifies the Tier 2 adapter this promotion path
+  starts from.
 - Repository maintainers approve Knowledge PRs.
 - Evidence URLs must be allowlisted official domains or pinned official source repositories.
 - Generated candidates identify automation and collection time.
