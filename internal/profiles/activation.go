@@ -1,8 +1,10 @@
 package profiles
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/wangzitian0/oh-my-code-agent/internal/domain"
 )
@@ -35,4 +37,99 @@ func LoadActivation(path string) (domain.Activation, bool, error) {
 		return domain.Activation{}, false, fmt.Errorf("profiles: %s: %w", path, err)
 	}
 	return a, true, nil
+}
+
+// PersistActivation writes a to path (<worktree state dir>/desired/
+// activation.yaml) as a schema-valid Activation document -- the write-side
+// counterpart LoadActivation's own doc comment describes this file as
+// needing but this package never previously implemented (activation.yaml
+// was, until this function, read-only: authored by hand, or not at all).
+//
+// A caller (issue #35's TUI action layer, cmd/omca/mcp.go's compileFuncForMCP
+// today only ever merges an ActivationSelection in memory for the ONE
+// CompileRequest it is about to compile) that wants a host's Enable/Disable
+// selection to survive across a LATER, independent profiles.Compose call
+// (activate.go's composeFreshCompileRequest, which reads this exact file)
+// needs this durably written first: without it, a generation staged with an
+// in-memory-only merged Activation can never pass a later Activate call's
+// own CAS check (activate.go's freshSourceDigest), which recomposes desired
+// state fresh from disk and has no way to see a choice that was only ever
+// held in one caller's memory.
+//
+// a is validated (domain.ValidateActivation) before writing — this function
+// refuses to durably persist a document its own reader would then reject.
+// The write is atomic (temp file + rename within the same directory),
+// matching PersistSelection's identical discipline for worktree-local
+// state.
+//
+// Encoded as JSON, not gopkg.in/yaml.v3's own Marshal: domain.Activation is
+// a JSON-tagged struct (`json:"apiVersion"`, not `yaml:"apiVersion"`), and
+// decodeYAMLDocument's own doc comment explains why a direct yaml.Marshal/
+// Unmarshal round-trip would silently drop every field for exactly that
+// reason. Valid JSON is valid YAML (a JSON document parses as a YAML flow
+// mapping), so writing json.MarshalIndent's own output to activation.yaml
+// round-trips correctly through decodeYAMLDocument's
+// yaml.Unmarshal-into-generic-then-json.Marshal-then-json.Unmarshal path —
+// the same round-trip idiom this package already establishes, applied in
+// the write direction instead of the read direction.
+func PersistActivation(worktreeStateDir string, a domain.Activation) error {
+	if worktreeStateDir == "" {
+		return fmt.Errorf("profiles: PersistActivation: worktreeStateDir is required")
+	}
+	if err := domain.ValidateActivation(a); err != nil {
+		return fmt.Errorf("profiles: PersistActivation: refusing to persist an invalid Activation: %w", err)
+	}
+
+	desiredDir := filepath.Join(worktreeStateDir, "desired")
+	if err := os.MkdirAll(desiredDir, 0o755); err != nil {
+		return fmt.Errorf("profiles: PersistActivation: %w", err)
+	}
+
+	data, err := json.MarshalIndent(a, "", "  ")
+	if err != nil {
+		return fmt.Errorf("profiles: PersistActivation: %w", err)
+	}
+	data = append(data, '\n')
+
+	// os.CreateTemp (not a PID-only suffix) guarantees a unique temp
+	// filename even across multiple PersistActivation calls racing within
+	// the same process -- a PID-only suffix collides on the same temp path
+	// for exactly that case, risking a lost update or write error (a real
+	// Copilot review finding on this PR).
+	tmpFile, err := os.CreateTemp(desiredDir, "activation-*.tmp")
+	if err != nil {
+		return fmt.Errorf("profiles: PersistActivation: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	_, writeErr := tmpFile.Write(data)
+	closeErr := tmpFile.Close()
+	if writeErr != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("profiles: PersistActivation: %w", writeErr)
+	}
+	if closeErr != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("profiles: PersistActivation: %w", closeErr)
+	}
+	if err := os.Chmod(tmpPath, 0o644); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("profiles: PersistActivation: %w", err)
+	}
+
+	finalPath := activationPath(worktreeStateDir)
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("profiles: PersistActivation: %w", err)
+	}
+	return nil
+}
+
+// activationPath computes the activation.yaml path under worktreeStateDir's
+// desired/ subdirectory -- the same path CompositionInput.ActivationPath
+// callers already build by hand (compositionDirsFor's own siblings,
+// cmd/omca/activate.go/cmd/omca/mcp.go, and this package's own mirror in
+// internal/tui/actions.go), factored out here so PersistActivation and any
+// future caller agree on exactly one path.
+func activationPath(worktreeStateDir string) string {
+	return filepath.Join(worktreeStateDir, "desired", "activation.yaml")
 }
