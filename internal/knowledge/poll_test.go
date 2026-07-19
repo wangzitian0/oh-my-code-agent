@@ -346,7 +346,50 @@ func TestHTTPGet_LocalHTTPTestServer_NonOKStatus_Errors(t *testing.T) {
 	}
 }
 
-func TestHTTPGet_LocalHTTPTestServer_BodyIsBoundedByMaxFetchBytes(t *testing.T) {
+// TestClientRefusingRedirects_DoesNotFollowToADifferentServer is a
+// regression test (Copilot review finding on this PR): HTTPFetcher.Fetch
+// previously used the caller's http.Client as-is, which follows Go's
+// default redirect policy (up to 10 redirects, to ANY host) -- an
+// allowlisted URL that responded with a redirect to a non-allowlisted
+// domain would still be silently fetched, weakening the entire "closed
+// allowlist" guarantee ValidateSource exists to provide. Two separate local
+// httptest servers stand in for "the allowlisted origin" and "a
+// non-allowlisted redirect target": the redirect must never be followed,
+// proven both by asserting an error and by proving the second server never
+// received a request at all.
+func TestClientRefusingRedirects_DoesNotFollowToADifferentServer(t *testing.T) {
+	var targetHit bool
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetHit = true
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("this must never be reached"))
+	}))
+	defer target.Close()
+
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer origin.Close()
+
+	client := clientRefusingRedirects(origin.Client())
+	if _, err := httpGet(context.Background(), client, origin.URL); err == nil {
+		t.Fatal("httpGet through a redirect-refusing client: want an error (the redirect response itself fails the 200-only check), got nil")
+	}
+	if targetHit {
+		t.Error("the redirect target server received a request -- the redirect was followed instead of refused")
+	}
+}
+
+// TestHTTPGet_OversizedBody_ErrorsRatherThanSilentlyTruncating is a
+// regression test (Copilot review finding on this PR): httpGet previously
+// silently truncated a response body larger than maxFetchBytes and
+// returned it as if it were the complete document -- computing a digest
+// over that silently truncated content could hide a real change past the
+// cutoff, or produce a spurious "changed" between two documents that are
+// actually identical up to the truncation point. An oversized response
+// must now be rejected with a clear error, never truncated and returned as
+// if complete.
+func TestHTTPGet_OversizedBody_ErrorsRatherThanSilentlyTruncating(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		buf := make([]byte, maxFetchBytes+1024)
@@ -354,9 +397,25 @@ func TestHTTPGet_LocalHTTPTestServer_BodyIsBoundedByMaxFetchBytes(t *testing.T) 
 	}))
 	defer ts.Close()
 
+	if _, err := httpGet(context.Background(), ts.Client(), ts.URL); err == nil {
+		t.Fatal("httpGet against a response larger than maxFetchBytes: want an error, got nil (was it silently truncated instead?)")
+	}
+}
+
+// TestHTTPGet_BodyExactlyAtLimit_Succeeds proves the boundary itself is
+// still accepted -- only responses that GENUINELY exceed maxFetchBytes are
+// rejected, not ones that land exactly on it.
+func TestHTTPGet_BodyExactlyAtLimit_Succeeds(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		buf := make([]byte, maxFetchBytes)
+		_, _ = w.Write(buf)
+	}))
+	defer ts.Close()
+
 	raw, err := httpGet(context.Background(), ts.Client(), ts.URL)
 	if err != nil {
-		t.Fatalf("httpGet: %v", err)
+		t.Fatalf("httpGet with a body exactly at maxFetchBytes: want success, got: %v", err)
 	}
 	if len(raw) != maxFetchBytes {
 		t.Errorf("len(raw) = %d, want exactly maxFetchBytes = %d", len(raw), maxFetchBytes)

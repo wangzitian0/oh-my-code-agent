@@ -56,6 +56,17 @@ func runKnowledge(stdout, stderr io.Writer, args []string) int {
 	return pollAllHostsAndRender(stdout, stderr, hostcontext.DetectedHostIDs, knowledge.HTTPFetcher{}, repo, jsonOut, time.Now())
 }
 
+// pollHostTimeout bounds how long pollAllHostsAndRender waits for one
+// host's entire poll pass (every allowlisted source for that host). A real
+// upstream source that hangs mid-response (or never completes a TCP
+// handshake) would otherwise block `omca knowledge poll` indefinitely,
+// since neither context.Background() nor http.DefaultClient impose any
+// deadline of their own -- a real Copilot review finding on this PR. Scoped
+// per host, not for the whole command, so one unresponsive host cannot
+// also starve every other host's own poll from ever running or being
+// reported.
+const pollHostTimeout = 30 * time.Second
+
 // pollAllHostsAndRender polls every host in hosts via fetcher against repo's
 // currently loaded Packs, then renders every detected KnowledgeCandidate to
 // stdout (JSON or human text per jsonOut). Separated from runKnowledge so a
@@ -69,7 +80,9 @@ func pollAllHostsAndRender(stdout, stderr io.Writer, hosts []string, fetcher kno
 		if p, ok := knowledge.PackForHost(repo, host); ok {
 			pack = &p
 		}
-		_, candidate, has, err := knowledge.PollHost(stdcontext.Background(), fetcher, host, pack, "omca knowledge poll", now)
+		ctx, cancel := stdcontext.WithTimeout(stdcontext.Background(), pollHostTimeout)
+		_, candidate, has, err := knowledge.PollHost(ctx, fetcher, host, pack, "omca knowledge poll", now)
+		cancel()
 		if err != nil {
 			fmt.Fprintf(stderr, "omca: knowledge poll: host %q: %v\n", host, err)
 			return 1

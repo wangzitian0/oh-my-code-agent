@@ -58,11 +58,32 @@ func (f HTTPFetcher) Fetch(ctx context.Context, s Source) ([]byte, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
+	client = clientRefusingRedirects(client)
 	raw, err := httpGet(ctx, client, s.URL)
 	if err != nil {
 		return nil, fmt.Errorf("knowledge: HTTPFetcher.Fetch: %w", err)
 	}
 	return raw, nil
+}
+
+// clientRefusingRedirects returns a shallow copy of base with CheckRedirect
+// set to refuse every redirect, whatever base's own CheckRedirect already
+// was: an allowlisted URL that responds with a redirect to a
+// non-allowlisted domain must not be silently followed and fetched anyway,
+// which is exactly what Go's default redirect policy (follow up to 10
+// redirects, to any host) would otherwise do -- a real Copilot review
+// finding on this PR, since ValidateSource only ever checks the ORIGINAL
+// request URL, never anywhere a 3xx response might redirect to.
+// http.ErrUseLastResponse makes the Client return the 3xx response itself
+// rather than follow it, which httpGet's own existing "200 only" status
+// check then rejects with a clear error -- no separate redirect-specific
+// error path is needed.
+func clientRefusingRedirects(base *http.Client) *http.Client {
+	c := *base
+	c.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	return &c
 }
 
 // httpGet performs the actual bounded HTTP GET + read: request construction,
@@ -84,9 +105,21 @@ func httpGet(ctx context.Context, client *http.Client, rawURL string) ([]byte, e
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GET %q: unexpected status %d", rawURL, resp.StatusCode)
 	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxFetchBytes))
+	// Read one byte past maxFetchBytes so a response that is actually
+	// LARGER than the limit is detected and rejected, rather than silently
+	// truncated -- computing a digest over a silently truncated body could
+	// produce an incorrect "changed"/"not changed" result whenever the
+	// upstream document's size crosses maxFetchBytes (a real Copilot
+	// review finding on this PR): the old and new digests would both be
+	// digests of the same truncated prefix, hiding a real change past the
+	// cutoff, or two genuinely-identical-up-to-the-cutoff documents could
+	// spuriously read as unchanged.
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxFetchBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("reading body of %q: %w", rawURL, err)
+	}
+	if len(raw) > maxFetchBytes {
+		return nil, fmt.Errorf("reading body of %q: response exceeds the %d byte limit, refusing to digest a truncated body", rawURL, maxFetchBytes)
 	}
 	return raw, nil
 }
