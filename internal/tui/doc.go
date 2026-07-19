@@ -35,12 +35,39 @@
 //
 // # Scope
 //
-// This package is the FOUNDATION layer only (issue #34): read-only
-// rendering of the four named views, plus basic navigation between them.
-// It never stages, activates, or rolls back anything — issue #35 ("TUI
-// actions": activation/restart/rollback/confirmations) and issue #36
-// ("TUI debug views": precedence trace/evidence) are separate, later PRs
-// that build on this Model rather than modifying its read-only contract.
+// PR-30 (issue #34) built the FOUNDATION layer: read-only rendering of the
+// four named views, plus basic navigation between them. PR-31 (issue #35,
+// this PR) adds the action layer on top, without changing that read-only
+// rendering contract: Model gained an optional ActionContext (see
+// actions.go) that, once attached (WithActionContext), unlocks 'a'
+// (activate an AVAILABLE asset), 'y'/'n' (approve/cancel a reviewed Change
+// Set), and 'r' (roll back) — every one of PR-30's own tests, and every
+// caller that never attaches an ActionContext, keeps behaving exactly as
+// before (ActionContext.enabled()'s doc comment). Issue #36 ("TUI debug
+// views": precedence trace/evidence) remains separate, later scope.
+//
+// # Action layer (issue #35)
+//
+// activate/rollback/confirmation are NOT reimplemented here: this package
+// calls the exact same internal/runtime functions cmd/omca's own
+// `omca activate`/`omca rollback` commands call (runtime.DiffProposedChanges,
+// runtime.ClassifyChange, runtime.RequireConfirmation, runtime.
+// ActivateAndVerify, runtime.Rollback — see actions.go's doc comments for
+// exactly where each one is used). The one thing this package genuinely
+// duplicates is a handful of SMALL, cmd/omca-private composition helpers
+// (compositionDirsFor, composeFreshCompileRequest, compileFuncForMCP's
+// staging sequence, buildArtifactForCLI) that cmd/omca/activate.go, cmd/
+// omca/mcp.go, and cmd/omca/reportbuild.go keep unexported — internal/tui
+// cannot import cmd/omca at all (it is `package main`), and cmd/omca
+// already imports internal/tui for its Model, so the dependency cannot run
+// the other way for this PR either. Each mirrored function in actions.go
+// carries its own doc comment naming its cmd/omca counterpart explicitly
+// and states the sequence is intentionally kept IDENTICAL (same
+// internal/profiles, internal/context, internal/observe, internal/runtime
+// calls, same order) — a reviewed, visible trade-off (see this PR's own
+// description) rather than a silent, driftable duplication. A future PR is
+// free to factor these into one shared package both cmd/omca and
+// internal/tui import; that refactor is out of scope here.
 //
 // # Default-view field discipline
 //

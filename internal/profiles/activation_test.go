@@ -1,9 +1,12 @@
 package profiles
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/wangzitian0/oh-my-code-agent/internal/domain"
 )
 
 const activationYAML = `
@@ -93,5 +96,113 @@ spec:
 	}
 	if !strings.Contains(err.Error(), path) {
 		t.Errorf("error %q does not name the file path %q", err.Error(), path)
+	}
+}
+
+// TestPersistActivation_RoundTripsThroughLoadActivation is PersistActivation's
+// core contract (issue #35): what it writes to
+// <worktree state dir>/desired/activation.yaml, LoadActivation reads back
+// byte-for-byte equivalent, including a host-scoped Enable/Disable
+// selection -- the exact round trip internal/tui's stageAssetActivation
+// depends on for a later, independent profiles.Compose call to see the
+// same merged Activation a pending generation was compiled from.
+func TestPersistActivation_RoundTripsThroughLoadActivation(t *testing.T) {
+	stateDir := t.TempDir()
+	a := domain.Activation{
+		APIVersion: domain.SupportedAPIVersion,
+		Kind:       "Activation",
+		Metadata:   domain.ActivationMetadata{Worktree: "worktree:sha256:persist-test"},
+		Spec: domain.ActivationSpec{
+			Hosts: map[string]domain.HostActivation{
+				"codex": {Enable: domain.ActivationSelection{Skills: []string{"code-review"}, MCPServers: []string{"internal-docs"}}},
+			},
+		},
+	}
+
+	if err := PersistActivation(stateDir, a); err != nil {
+		t.Fatalf("PersistActivation: %v", err)
+	}
+
+	got, ok, err := LoadActivation(filepath.Join(stateDir, "desired", "activation.yaml"))
+	if err != nil {
+		t.Fatalf("LoadActivation after PersistActivation: %v", err)
+	}
+	if !ok {
+		t.Fatal("ok = false after PersistActivation, want true")
+	}
+	if got.Metadata.Worktree != a.Metadata.Worktree {
+		t.Errorf("Metadata.Worktree = %q, want %q", got.Metadata.Worktree, a.Metadata.Worktree)
+	}
+	codex, present := got.Spec.Hosts["codex"]
+	if !present {
+		t.Fatal("spec.hosts.codex missing after round trip")
+	}
+	if len(codex.Enable.Skills) != 1 || codex.Enable.Skills[0] != "code-review" {
+		t.Errorf("hosts.codex.enable.skills = %+v, want [code-review]", codex.Enable.Skills)
+	}
+	if len(codex.Enable.MCPServers) != 1 || codex.Enable.MCPServers[0] != "internal-docs" {
+		t.Errorf("hosts.codex.enable.mcpServers = %+v, want [internal-docs]", codex.Enable.MCPServers)
+	}
+}
+
+// TestPersistActivation_Overwrites proves a second PersistActivation call
+// replaces the first document entirely (atomic rename, matching
+// PersistSelection's identical discipline) rather than merging with it --
+// the caller (stageAssetActivation) is responsible for merging onto a
+// freshly-loaded Activation before calling this function.
+func TestPersistActivation_Overwrites(t *testing.T) {
+	stateDir := t.TempDir()
+	first := domain.Activation{
+		APIVersion: domain.SupportedAPIVersion,
+		Kind:       "Activation",
+		Metadata:   domain.ActivationMetadata{Worktree: "worktree:sha256:overwrite-test"},
+		Spec:       domain.ActivationSpec{Hosts: map[string]domain.HostActivation{"codex": {Enable: domain.ActivationSelection{Skills: []string{"a"}}}}},
+	}
+	second := first
+	second.Spec.Hosts = map[string]domain.HostActivation{"codex": {Enable: domain.ActivationSelection{Skills: []string{"b"}}}}
+
+	if err := PersistActivation(stateDir, first); err != nil {
+		t.Fatalf("PersistActivation(first): %v", err)
+	}
+	if err := PersistActivation(stateDir, second); err != nil {
+		t.Fatalf("PersistActivation(second): %v", err)
+	}
+
+	got, _, err := LoadActivation(filepath.Join(stateDir, "desired", "activation.yaml"))
+	if err != nil {
+		t.Fatalf("LoadActivation: %v", err)
+	}
+	if skills := got.Spec.Hosts["codex"].Enable.Skills; len(skills) != 1 || skills[0] != "b" {
+		t.Errorf("hosts.codex.enable.skills = %+v, want [b] (second write must fully replace the first)", skills)
+	}
+}
+
+// TestPersistActivation_RejectsInvalidActivation proves PersistActivation
+// validates before writing (domain.ValidateActivation), refusing to
+// durably persist a document its own reader (LoadActivation) would then
+// reject -- e.g. an unknown host id.
+func TestPersistActivation_RejectsInvalidActivation(t *testing.T) {
+	stateDir := t.TempDir()
+	invalid := domain.Activation{
+		APIVersion: domain.SupportedAPIVersion,
+		Kind:       "Activation",
+		Metadata:   domain.ActivationMetadata{Worktree: "worktree:sha256:invalid-test"},
+		Spec:       domain.ActivationSpec{Hosts: map[string]domain.HostActivation{"not-a-real-host": {}}},
+	}
+	if err := PersistActivation(stateDir, invalid); err == nil {
+		t.Fatal("PersistActivation with an unknown host id: want an error, got nil")
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, "desired", "activation.yaml")); err == nil {
+		t.Error("activation.yaml was written despite a validation failure")
+	}
+}
+
+// TestPersistActivation_RequiresWorktreeStateDir proves the same
+// caller-must-supply-a-real-directory discipline PersistSelection already
+// enforces.
+func TestPersistActivation_RequiresWorktreeStateDir(t *testing.T) {
+	err := PersistActivation("", domain.Activation{APIVersion: domain.SupportedAPIVersion, Kind: "Activation", Metadata: domain.ActivationMetadata{Worktree: "x"}})
+	if err == nil {
+		t.Fatal("PersistActivation with an empty worktreeStateDir: want an error, got nil")
 	}
 }
