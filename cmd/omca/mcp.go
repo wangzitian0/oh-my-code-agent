@@ -123,6 +123,32 @@ func mergeHostActivation(dst, src domain.HostActivation) domain.HostActivation {
 // runtime.SetPendingGeneration -- never runtime.SetCurrentGeneration,
 // which is how this function keeps "current" untouched (mcp.CompileFunc's
 // own doc comment's MUST list).
+//
+// Metadata.Parent (issue #68): this function compiles ONE shared generation
+// for potentially several named hosts at once (hostIDs can be
+// ["codex", "claude-code"] in a single call), but domain.GenerationMetadata.
+// Parent is a single *string on that one generation, not per-host, while
+// each named host has its own independent "current" generation
+// (currentByHost, below, keyed the same way). The reviewed decision (this
+// issue's own recommended default, matching this project's "record real
+// state, don't guess or silently drop information" bias --
+// internal/profiles.AmbiguousIdentityError's identical stance of surfacing
+// ambiguity as data rather than picking arbitrarily): a host with no
+// current generation yet (its first-ever activation) does not count against
+// agreement, since there is nothing for it to diverge from. If every named
+// host that DOES have a current generation agrees on the same ID, that ID
+// becomes Parent. If two or more named hosts' current generations genuinely
+// differ, Parent is left nil, exactly like before this fix -- the
+// pre-existing, honest "nothing to roll back to" refusal
+// (internal/runtime/rollback.go's own nil-Parent doc comment), not a
+// regression. This closes "at least the common single-host-changed-at-a-
+// time case" (issue #68's exit gate), which is also the overwhelmingly
+// common real usage pattern -- one host reactivated at a time -- while
+// deliberately leaving the genuinely-diverged multi-host case unresolved
+// rather than guessing. A future per-host Parent (e.g. a map instead of one
+// *string) would close that case too, but that is a
+// domain.GenerationMetadata schema change belonging to whoever next needs
+// it, not an unreviewed judgment call folded into this fix.
 func compileFuncForMCP(stderr io.Writer) mcp.CompileFunc {
 	return func(hostActivations map[string]domain.HostActivation) (domain.Generation, map[string]domain.Generation, error) {
 		cwd, err := os.Getwd()
@@ -199,6 +225,33 @@ func compileFuncForMCP(stderr io.Writer) mcp.CompileFunc {
 			}
 		}
 
+		// Parent: see this function's own doc comment for the full reviewed
+		// decision. Walk hostIDs (sorted, so this is deterministic) and
+		// collect the current generation ID of every named host that has
+		// one; a host with no entry in currentByHost is skipped (first-ever
+		// activation, does not count against agreement). Agreement across
+		// every host that DOES have one -> that ID becomes Parent. Any two
+		// disagreeing -> Parent stays nil, the same honest
+		// "nothing to roll back to" state Rollback already refuses on.
+		var parent *string
+		diverged := false
+		for _, h := range hostIDs {
+			g, ok := currentByHost[h]
+			if !ok {
+				continue
+			}
+			if parent == nil {
+				id := g.Metadata.ID
+				parent = &id
+			} else if *parent != g.Metadata.ID {
+				diverged = true
+				break
+			}
+		}
+		if diverged {
+			parent = nil
+		}
+
 		req := runtime.CompileRequest{
 			Worktree:   wt,
 			Hosts:      hosts,
@@ -207,6 +260,7 @@ func compileFuncForMCP(stderr io.Writer) mcp.CompileFunc {
 			Exceptions: composition.Exceptions,
 			Now:        now,
 			Invocation: "omca_stage",
+			Parent:     parent,
 		}
 
 		genID, err := runtime.CompileGenerationID(req)
@@ -215,6 +269,15 @@ func compileFuncForMCP(stderr io.Writer) mcp.CompileFunc {
 		}
 		outputDir := filepath.Join(generationsDir, runtime.DirSafeID(genID))
 
+		// Note: genID (and therefore outputDir) deliberately excludes Parent
+		// (generationid.go's own doc comment -- Parent never changes the
+		// compiled artifact tree's content), so a cache hit below reuses
+		// whatever Parent that content was FIRST compiled with, not
+		// necessarily this call's freshly-recomputed req.Parent. This is an
+		// existing property of this compiler's content-addressed reuse
+		// design, not something this fix introduces or attempts to close --
+		// out of scope for issue #68, which is only about the "Parent is
+		// never threaded at all" gap.
 		gen, err := runtime.ReadGenerationManifest(outputDir)
 		if err != nil {
 			if !os.IsNotExist(err) {
