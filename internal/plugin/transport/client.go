@@ -37,6 +37,7 @@ var _ plugin.HostAdapter = (*RemoteAdapter)(nil)
 type RemoteAdapter struct {
 	mu      sync.Mutex
 	stdin   io.WriteCloser
+	stdout  io.Closer // closed to force-unblock a hung read on ctx cancellation
 	scanner *bufio.Scanner
 	closeFn func() error
 	nextID  int64
@@ -51,10 +52,10 @@ type RemoteAdapter struct {
 // no real binary needed) both use. closeFn releases whatever underlying
 // resource stdin/stdout are backed by (a real subprocess's pipes plus
 // cmd.Wait, or a test's io.Pipe ends); it may be nil.
-func newRemoteAdapter(stdin io.WriteCloser, stdout io.Reader, closeFn func() error) *RemoteAdapter {
+func newRemoteAdapter(stdin io.WriteCloser, stdout io.ReadCloser, closeFn func() error) *RemoteAdapter {
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 64*1024), maxLineBytes)
-	return &RemoteAdapter{stdin: stdin, scanner: scanner, closeFn: closeFn}
+	return &RemoteAdapter{stdin: stdin, stdout: stdout, scanner: scanner, closeFn: closeFn}
 }
 
 // NewRemoteAdapter starts cmd (its Path/Args/Dir/Env must already be fully
@@ -82,9 +83,16 @@ func NewRemoteAdapter(cmd *exec.Cmd) (*RemoteAdapter, error) {
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		// stdin was already created above -- close it rather than leaking
+		// the file descriptor (a real Copilot review finding on this PR).
+		_ = stdin.Close()
 		return nil, fmt.Errorf("transport: NewRemoteAdapter: stdout pipe: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
+		// Both pipes were already created -- close both rather than
+		// leaking them (same finding as above).
+		_ = stdin.Close()
+		_ = stdout.Close()
 		return nil, fmt.Errorf("transport: NewRemoteAdapter: starting subprocess: %w", err)
 	}
 
@@ -264,13 +272,49 @@ func (r *RemoteAdapter) call(ctx context.Context, method string, params, result 
 		return fmt.Errorf("transport: %s: writing request (subprocess may have exited): %w", method, err)
 	}
 
-	if !r.scanner.Scan() {
-		if err := r.scanner.Err(); err != nil {
-			return fmt.Errorf("transport: %s: reading response: %w", method, err)
-		}
-		return fmt.Errorf("transport: %s: subprocess closed its output before responding (crashed, exited, or wrote no response)", method)
+	// The read itself runs in a goroutine so ctx's deadline/cancellation can
+	// interrupt a hung, unresponsive subprocess -- without this, a broken or
+	// malicious external adapter that never writes a response (but never
+	// closes its stdout either) blocks scanner.Scan() forever, regardless of
+	// ctx, defeating the entire point of accepting a context on a call
+	// whose whole reason for existing is "the other end is untrusted code"
+	// (a real Copilot review finding on this PR). On timeout/cancellation,
+	// r.stdout is closed to force the still-blocked Scan() to return an
+	// error and let the goroutine exit -- this RemoteAdapter is not used
+	// again after that (matches this package's fail-closed discipline: a
+	// call forcibly unblocked mid-read leaves the wire framing in an
+	// unknown state, so every subsequent call failing fast against the now-
+	// closed stream is safer than silently resuming on a connection no
+	// longer trusted).
+	type scanOutcome struct {
+		line []byte
+		err  error
 	}
-	respLine := r.scanner.Bytes()
+	scanDone := make(chan scanOutcome, 1)
+	go func() {
+		if r.scanner.Scan() {
+			scanDone <- scanOutcome{line: append([]byte(nil), r.scanner.Bytes()...)}
+			return
+		}
+		scanDone <- scanOutcome{err: r.scanner.Err()}
+	}()
+
+	var respLine []byte
+	select {
+	case outcome := <-scanDone:
+		if outcome.line == nil {
+			if outcome.err != nil {
+				return fmt.Errorf("transport: %s: reading response: %w", method, outcome.err)
+			}
+			return fmt.Errorf("transport: %s: subprocess closed its output before responding (crashed, exited, or wrote no response)", method)
+		}
+		respLine = outcome.line
+	case <-ctx.Done():
+		if r.stdout != nil {
+			_ = r.stdout.Close()
+		}
+		return fmt.Errorf("transport: %s: %w (subprocess did not respond in time; this RemoteAdapter is no longer usable)", method, ctx.Err())
+	}
 
 	var resp jsonrpcResponse
 	if err := json.Unmarshal(respLine, &resp); err != nil {

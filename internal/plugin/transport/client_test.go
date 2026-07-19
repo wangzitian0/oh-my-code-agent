@@ -244,6 +244,42 @@ func TestRemoteAdapter_AlreadyCanceledContext(t *testing.T) {
 	}
 }
 
+// TestRemoteAdapter_HungSubprocess_ContextDeadlineInterruptsRead is a
+// regression test (Copilot review finding on this PR): before this fix,
+// RemoteAdapter.call only checked ctx before writing the request -- once the
+// blocking scanner.Scan() read started, a subprocess that accepted the
+// request but never wrote a response (and never closed its stdout, e.g.
+// hung or deadlocked rather than crashed) would block the call forever
+// regardless of ctx's deadline or cancellation. The scripted server here
+// deliberately does exactly that: it reads the request and returns no
+// response lines at all, simulating a hung (not crashed) external adapter.
+func TestRemoteAdapter_HungSubprocess_ContextDeadlineInterruptsRead(t *testing.T) {
+	srv := newScriptedServer(t, func(reqLine []byte) ([]string, bool) {
+		return nil, false // accept the request, never respond, never close
+	})
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := srv.client.Detect(ctx, plugin.DetectRequest{})
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("Detect against a hung subprocess: want an error once ctx's deadline passes, got nil")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Detect against a hung subprocess: error = %v, want it to wrap context.DeadlineExceeded", err)
+	}
+	// Generous upper bound (well above the 200ms deadline) that would still
+	// catch "this blocked forever" -- the actual bug this test guards
+	// against -- without being a flaky tight timing assertion.
+	if elapsed > 5*time.Second {
+		t.Errorf("Detect against a hung subprocess took %s to return after a 200ms context deadline -- the read did not respect ctx cancellation", elapsed)
+	}
+}
+
 // TestRemoteAdapter_ManyMalformedPayloads_NeverPanics is a small table of
 // deliberately hostile response bytes run through every typed HostAdapter
 // method at least once, asserting only that the call returns cleanly (no

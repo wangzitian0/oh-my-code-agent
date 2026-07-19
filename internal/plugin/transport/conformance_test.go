@@ -20,20 +20,29 @@ import (
 var fakeAdapterExternalBinary string
 
 func TestMain(m *testing.M) {
+	// os.Exit does not run deferred functions, so the actual cleanup-owning
+	// work runs in runTestMain below and this wrapper only exits once that
+	// function (and therefore its own deferred os.RemoveAll) has already
+	// returned -- otherwise the fixture temp directory leaks on every code
+	// path (a real Copilot review finding on this PR).
+	os.Exit(runTestMain(m))
+}
+
+func runTestMain(m *testing.M) int {
 	tmp, err := os.MkdirTemp("", "omca-plugin-transport-fixtures")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "omca-plugin-transport-fixtures: MkdirTemp:", err)
-		os.Exit(1)
+		return 1
 	}
 	defer os.RemoveAll(tmp)
 
 	fakeAdapterExternalBinary = filepath.Join(tmp, "fakeadapterexternal")
 	if err := buildFixtureBinary(packageDir(), "./testdata/fakeadapterexternal", fakeAdapterExternalBinary); err != nil {
 		fmt.Fprintln(os.Stderr, "omca-plugin-transport-fixtures: building fakeadapterexternal:", err)
-		os.Exit(1)
+		return 1
 	}
 
-	os.Exit(m.Run())
+	return m.Run()
 }
 
 // packageDir locates this package's own source directory via runtime.Caller
