@@ -1,0 +1,20 @@
+                               ┌─────────────┐
+  Overview    Drift    Assets  │ Generations │
+                               └─────────────┘
+
+Generations — codex
+  Current: generation:sha256:b1e22c7407009982969e6f45e56ed2ff36f8432b122f00a2df817f597283b3a3
+    6 source(s): 0 included, 6 excluded
+      hook         excluded excluded: native user-global source; the M1 bootstrap policy never inherits user-global config (docs/architecture/runtime.md §3, docs/project/roadmap.md M1)
+      hook         excluded excluded: repository-scope Skill/MCP source, not yet activated by any desired state (no Profile exists before PR-12)
+      mcp_server   excluded excluded: native user-global source; the M1 bootstrap policy never inherits user-global config (docs/architecture/runtime.md §3, docs/project/roadmap.md M1)
+      mcp_server   excluded excluded: repository-scope Skill/MCP source, not yet activated by any desired state (no Profile exists before PR-12)
+      policy       excluded excluded: native user-global source; the M1 bootstrap policy never inherits user-global config (docs/architecture/runtime.md §3, docs/project/roadmap.md M1)
+      policy       excluded excluded: repository-scope Skill/MCP source, not yet activated by any desired state (no Profile exists before PR-12)
+  Pending: generation:sha256:b7396242bef2dd0e1d50b471e07e135ba9110f867b301dc11df8be4104e6cda8
+    5 source(s): 0 included, 5 excluded
+      hook         excluded excluded: native user-global source; the M1 bootstrap policy never inherits user-global config (docs/architecture/runtime.md §3, docs/project/roadmap.md M1)
+      hook         excluded excluded: repository-scope Skill/MCP source, not yet activated by any desired state (no Profile exists before PR-12)
+      mcp_server   excluded excluded: native user-global source; the M1 bootstrap policy never inherits user-global config (docs/architecture/runtime.md §3, docs/project/roadmap.md M1)
+      mcp_server   excluded excluded: repository-scope Skill/MCP source, not yet activated by any desired state (no Profile exists before PR-12)
+      policy       excluded excluded: native user-global source; the M1 bootstrap policy never inherits user-global config (docs/architecture/runtime.md §3, docs/project/roadmap.md M1)

@@ -27,10 +27,26 @@ import (
 // and never returns, so os.Exit below it is unreachable on that path; it
 // only executes if shim dispatch itself failed before ever reaching exec
 // (e.g. no managed generation for this host yet).
+//
+// The bare `omca` invocation (no subcommand at all) opens the management
+// TUI (docs/product/requirements.md §5.3: "The omca command opens the
+// management TUI") — checked here, in main(), rather than inside run()'s
+// own dispatch table: run(args, stdout, stderr) is this binary's testable
+// core (main_test.go exercises it directly with in-memory buffers), and
+// its own well-established "run(nil, ...) prints usage and exits 2"
+// contract (TestRunNoArgs) is a real, independently useful behavior for
+// any future caller of run() itself (e.g. a library embedding, or a test)
+// that never launches a real terminal. main() intercepts the true
+// no-argument case before it ever reaches run(), so `omca` from a shell
+// opens the TUI while `run(nil, ...)` continues to mean exactly what it
+// always has.
 func main() {
 	prog := filepath.Base(os.Args[0])
 	if shim.IsShimInvocation(prog) {
 		os.Exit(runShim(prog, os.Args[1:], os.Environ()))
+	}
+	if len(os.Args) == 1 {
+		os.Exit(runTUI(os.Stdin, os.Stdout, os.Stderr))
 	}
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
