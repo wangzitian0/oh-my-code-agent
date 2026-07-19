@@ -287,6 +287,35 @@ func runIsolated(stderr io.Writer, host string, realEnv hostcontext.Environment,
 		return 1
 	}
 
+	// execBinaryPath is the binary Exec below actually replaces this process
+	// with -- normally identical to hd.BinaryPath, except when hd.BinaryPath
+	// is an asdf-managed shim script (issue #69). An asdf shim's own
+	// dispatch needs a real, resolvable HOME to find asdf's own
+	// ~/.tool-versions-derived state, and fails outright (exit 126,
+	// "cannot execute") the moment HOME below is overridden to
+	// virtualHomeDir -- a failure that happens strictly inside the asdf
+	// shim script itself, strictly after this process's own image has
+	// already been replaced, so no error from this process could ever
+	// explain it. shim.ResolveASDFShimTarget resolves straight past the
+	// shim to the concrete, per-version real binary asdf's own `asdf
+	// reshim` step already recorded (its shim-generation metadata comment),
+	// entirely without invoking asdf or depending on HOME, so the exec
+	// below can safely proceed under the fully virtualized HOME the rest of
+	// this function requires (see hd.BinaryPath's own doc trail above for
+	// why HOME cannot simply be left real). hd.BinaryPath itself is left
+	// untouched -- only the actual exec target changes -- so detection,
+	// generation compilation, and every other decision already made above
+	// this point are unaffected by this substitution.
+	execBinaryPath := hd.BinaryPath
+	if shim.IsASDFShim(hd.BinaryPath) {
+		resolved, asdfErr := shim.ResolveASDFShimTarget(hd.BinaryPath)
+		if asdfErr != nil {
+			fmt.Fprintf(stderr, "omca: run: %s resolves to %s, a path under an asdf shims directory, but isolated mode could not resolve it to a concrete asdf-installed binary: %v\nisolated mode virtualizes HOME (docs/architecture/runtime.md §7.1), which asdf's own shim resolution needs a real, resolvable HOME to complete -- install %s outside asdf (e.g. a plain global npm/brew install, not asdf-managed), or run `omca run --mode native %s` instead\n", host, hd.BinaryPath, asdfErr, host, host)
+			return 1
+		}
+		execBinaryPath = resolved
+	}
+
 	overrides := map[string]string{
 		envVar:             nativeHomeDir,
 		"HOME":             virtualHomeDir,
@@ -296,8 +325,8 @@ func runIsolated(stderr io.Writer, host string, realEnv hostcontext.Environment,
 		"OMCA_WORKTREE_ID": wt.ID,
 	}
 	envp := shim.InjectEnv(os.Environ(), overrides)
-	argv := append([]string{hd.BinaryPath}, passthrough...)
-	if err := shim.ExecReplace(hd.BinaryPath, argv, envp); err != nil {
+	argv := append([]string{execBinaryPath}, passthrough...)
+	if err := shim.ExecReplace(execBinaryPath, argv, envp); err != nil {
 		fmt.Fprintf(stderr, "omca: run: %v\n", err)
 		return 1
 	}

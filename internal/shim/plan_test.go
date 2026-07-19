@@ -3,6 +3,7 @@ package shim
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -142,6 +143,89 @@ func TestBuild_ResolvesRealBinaryAndInjectsGenerationEnv(t *testing.T) {
 	}
 	if plan.RealHomeDir != realHome {
 		t.Errorf("RealHomeDir = %q, want %q", plan.RealHomeDir, realHome)
+	}
+}
+
+// TestBuild_ResolvesPastASDFShim is issue #69's own regression proof for
+// the PATH-shim launch path (the "or the PATH-shim launch path" half of the
+// issue's exit gate; cmd/omca/run_exec_test.go separately covers `omca run
+// --mode isolated`'s own equivalent). When ResolveReal's PATH search lands
+// on an asdf-managed shim script (per IsASDFShim's location heuristic),
+// Build must resolve RealBinaryPath straight past it to the concrete,
+// per-version real binary asdf's own shim-generation metadata names --
+// never the shim script itself, which Exec (exec.go) would go on to fail
+// exec'ing once HOME is overridden to this generation's virtual-home
+// directory (an asdf shim's own dispatch needs a real, resolvable HOME).
+func TestBuild_ResolvesPastASDFShim(t *testing.T) {
+	stateDir := t.TempDir()
+	buildFixtureGeneration(t, stateDir)
+
+	shimDir := t.TempDir()
+	writeFakeExecutable(t, shimDir, "codex")
+
+	asdfDataDir := filepath.Join(t.TempDir(), ".asdf")
+	writeASDFShim(t, asdfDataDir, "codex", [][2]string{{"nodejs", "20.19.0"}})
+	wantReal := writeASDFInstalledBinary(t, asdfDataDir, "nodejs", "20.19.0", "codex")
+
+	environ := []string{
+		"PATH=" + shimDir + string(os.PathListSeparator) + filepath.Join(asdfDataDir, "shims"),
+		"OMCA_SHIM_DIR=" + shimDir,
+		"OMCA_STATE_DIR=" + stateDir,
+		"HOME=" + t.TempDir(),
+	}
+
+	plan, err := Build("codex", environ)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if plan.RealBinaryPath != wantReal {
+		t.Errorf("RealBinaryPath = %q, want %q (the resolved real binary, not the asdf shim script at %s)", plan.RealBinaryPath, wantReal, filepath.Join(asdfDataDir, "shims", "codex"))
+	}
+}
+
+// TestBuild_AmbiguousASDFShim_FailsWithActionableError proves Build refuses
+// to guess when the resolved binary is an asdf shim naming two or more
+// plugin versions (ResolveASDFShimTarget's own refusal to replicate asdf's
+// .tool-versions precedence), and that the resulting error is actionable --
+// names the asdf shim and points at a workaround -- rather than a bare
+// propagated "not found"/"cannot execute".
+func TestBuild_AmbiguousASDFShim_FailsWithActionableError(t *testing.T) {
+	stateDir := t.TempDir()
+	buildFixtureGeneration(t, stateDir)
+
+	shimDir := t.TempDir()
+	writeFakeExecutable(t, shimDir, "codex")
+
+	asdfDataDir := filepath.Join(t.TempDir(), ".asdf")
+	writeASDFShim(t, asdfDataDir, "codex", [][2]string{
+		{"nodejs", "20.19.0"},
+		{"nodejs", "18.20.0"},
+	})
+	writeASDFInstalledBinary(t, asdfDataDir, "nodejs", "20.19.0", "codex")
+	writeASDFInstalledBinary(t, asdfDataDir, "nodejs", "18.20.0", "codex")
+
+	environ := []string{
+		"PATH=" + shimDir + string(os.PathListSeparator) + filepath.Join(asdfDataDir, "shims"),
+		"OMCA_SHIM_DIR=" + shimDir,
+		"OMCA_STATE_DIR=" + stateDir,
+		"HOME=" + t.TempDir(),
+	}
+
+	_, err := Build("codex", environ)
+	if err == nil {
+		t.Fatal("Build against an ambiguous asdf shim: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "asdf") {
+		t.Errorf("Build error does not mention asdf, want an actionable message naming the problem: %v", err)
+	}
+	// Regression test (Copilot review finding on this PR): the message must
+	// describe the resolved path's LOCATION, not assert it is a confirmed
+	// asdf shim -- IsASDFShim's location heuristic can match a path that
+	// ResolveASDFShimTarget then fails to resolve for a reason other than
+	// "genuinely asdf-managed" (e.g. an unrecognized/foreign shim format),
+	// so claiming confirmed asdf-ness here would be misleading in that case.
+	if strings.Contains(err.Error(), "resolves to an asdf-managed shim") {
+		t.Errorf("Build error overclaims confirmed asdf-shim identity instead of describing the path's location: %v", err)
 	}
 }
 
