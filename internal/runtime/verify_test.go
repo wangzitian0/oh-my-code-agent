@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/wangzitian0/oh-my-code-agent/internal/domain"
+	"github.com/wangzitian0/oh-my-code-agent/internal/effective"
 )
 
 // codexConfigTOMLRelPath is the one artifact every codex generation always
@@ -153,6 +155,136 @@ func TestVerifyActivation_MissingArtifact_FailedArtifactsIsPathOnly(t *testing.T
 		// The error detail must still be discoverable somewhere -- just not
 		// smuggled inside FailedArtifacts. Detail is the right place for it.
 		t.Errorf("Detail = %q, want it to still explain the underlying read error somewhere", result.Detail)
+	}
+}
+
+// TestVerifyActivation_EffectiveGraphCatchesUndiscoverableRendering is issue
+// #70's own regression proof: a generation manifest that is perfectly
+// internally consistent -- every artifact digest matches its own recorded
+// content -- can still misrepresent what activation actually produced, when
+// a (simulated) compiler bug renders an Included:true source at a path
+// internal/observe's real discovery rules would never recognize as that
+// concept again. The artifact-digest check alone (proven insufficient by
+// this test's own mid-test assertion) cannot catch this; only the
+// EffectiveGraph re-derivation this file adds can.
+//
+// The scenario: compile and activate a real generation carrying a genuine,
+// correctly-rendered repository Instructions source (AGENTS.md, which
+// internal/observe/rules.go's codexWorkspaceRules recognizes). Then, from
+// OUTSIDE Compile -- the same "simulate the failure mode directly" approach
+// tamperArtifact already uses for disk corruption -- rename the rendered
+// file to a name codexWorkspaceRules does NOT recognize for the instruction
+// concept (it only ever looks for "AGENTS.override.md"/"AGENTS.md", never
+// an arbitrary filename) and update the manifest's own recorded artifact
+// Path to match, keeping the artifact digest perfectly self-consistent
+// throughout (identical bytes, identical digest, just a different,
+// undiscoverable path). The manifest's Sources list still says, truthfully
+// from the original compile, that this instruction was Included:true --
+// nothing about the rename touches that entry, exactly the "internally
+// consistent but wrong" scenario issue #70 describes.
+func TestVerifyActivation_EffectiveGraphCatchesUndiscoverableRendering(t *testing.T) {
+	now := time.Date(2026, 7, 18, 9, 0, 0, 0, time.UTC)
+	worktreeStateDir := t.TempDir()
+
+	fx := compileFixture(t, worktreeStateDir, nil, nil, now)
+	if err := SetPendingGeneration(worktreeStateDir, "codex", fx.outputDir, fx.gen, fx.req.Hosts[0].Detection, now); err != nil {
+		t.Fatalf("SetPendingGeneration: %v", err)
+	}
+	if _, err := Activate(ActivateRequest{WorktreeStateDir: worktreeStateDir, Host: "codex", Fresh: fx.req, Now: now}); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
+	// Sanity: the compiled generation really did include a genuine
+	// instruction source, Included:true -- otherwise this test would prove
+	// nothing.
+	foundInstructionSource := false
+	for _, s := range fx.gen.Spec.Sources {
+		if s.Host == "codex" && s.Concept == "instruction" && s.Included {
+			foundInstructionSource = true
+		}
+	}
+	if !foundInstructionSource {
+		t.Fatal("fixture generation has no Included=true instruction source -- test setup is broken")
+	}
+
+	oldRel := filepath.Join("hosts", "codex", "cli", "instructions", "AGENTS.md")
+	newRel := filepath.Join("hosts", "codex", "cli", "instructions", "NOTES-not-a-recognized-instructions-filename.md")
+	oldFull := filepath.Join(fx.outputDir, oldRel)
+	newFull := filepath.Join(fx.outputDir, newRel)
+
+	content, err := os.ReadFile(oldFull)
+	if err != nil {
+		t.Fatalf("reading original rendered instruction file: %v", err)
+	}
+	if err := os.Chmod(filepath.Dir(oldFull), 0o755); err != nil {
+		t.Fatalf("chmod instructions dir writable: %v", err)
+	}
+	if err := os.Rename(oldFull, newFull); err != nil {
+		t.Fatalf("renaming rendered instruction file: %v", err)
+	}
+
+	manifestPath := filepath.Join(fx.outputDir, "manifest.json")
+	if err := os.Chmod(manifestPath, 0o644); err != nil {
+		t.Fatalf("chmod manifest.json writable: %v", err)
+	}
+	gen, err := ReadGenerationManifest(fx.outputDir)
+	if err != nil {
+		t.Fatalf("re-reading manifest: %v", err)
+	}
+	entry := gen.Spec.Hosts["codex"]
+	renamedArtifact := false
+	for i := range entry.Artifacts {
+		if entry.Artifacts[i].Path == oldRel {
+			entry.Artifacts[i].Path = newRel
+			renamedArtifact = true
+		}
+	}
+	if !renamedArtifact {
+		t.Fatalf("manifest has no artifact entry for %s -- test setup assumption is wrong", oldRel)
+	}
+	gen.Spec.Hosts["codex"] = entry
+	manifestBytes, err := json.MarshalIndent(gen, "", "  ")
+	if err != nil {
+		t.Fatalf("re-marshaling manifest: %v", err)
+	}
+	if err := os.WriteFile(manifestPath, manifestBytes, 0o644); err != nil {
+		t.Fatalf("writing edited manifest: %v", err)
+	}
+
+	// Confirm the artifact-digest check ALONE would still pass here: the
+	// renamed file's content is byte-identical, and the manifest's own
+	// artifact entry now points at its new path with the SAME recorded
+	// digest -- exactly the "internally consistent" property this whole
+	// issue is about. domain.CanonicalDigest mirrors Compile's (and
+	// VerifyActivation's digest loop's) own computation.
+	renamedDigest, err := domain.CanonicalDigest(string(content))
+	if err != nil {
+		t.Fatalf("computing renamed file's digest: %v", err)
+	}
+	var recordedDigest string
+	for _, a := range gen.Spec.Hosts["codex"].Artifacts {
+		if a.Path == newRel {
+			recordedDigest = a.Digest
+		}
+	}
+	if recordedDigest != renamedDigest {
+		t.Fatalf("recorded digest %q != renamed file's actual digest %q -- test setup did not keep the manifest internally consistent", recordedDigest, renamedDigest)
+	}
+
+	result, err := VerifyActivation(worktreeStateDir, "codex", now)
+	if err != nil {
+		t.Fatalf("VerifyActivation: %v", err)
+	}
+	if result.Passed {
+		t.Fatal("Passed = true for a generation whose manifest claims an Included=true instruction source that internal/observe's real discovery rules can no longer find -- want false")
+	}
+	for _, p := range result.FailedArtifacts {
+		if p == newRel || p == oldRel {
+			t.Errorf("FailedArtifacts contains an artifact-digest-style path entry (%q) -- this scenario is specifically constructed so the artifact-digest check alone passes; only the effective-graph check should report a failure here", p)
+		}
+	}
+	if !strings.Contains(result.Detail, "effective") && !strings.Contains(result.Detail, "graph") {
+		t.Errorf("Detail = %q, want it to mention the effective-graph check as the source of this failure", result.Detail)
 	}
 }
 
@@ -343,5 +475,58 @@ func TestActivateAndVerify_FailedVerification_NoParent_LedgersFailureReturnsErro
 	}
 	if !found {
 		t.Errorf("ledger has no 'verification-failed' entry even though rollback could not proceed: %+v", entries)
+	}
+}
+
+// TestCrossCheckEffectiveGraph_PartialConceptLoss_DetectedByCount is a
+// regression test (Copilot review finding on this PR) directly against
+// crossCheckEffectiveGraph, isolated from the full compile/activate
+// machinery: an earlier version of this function reported a concept as
+// "verified" the moment ANY entry/conflict of that concept existed anywhere
+// in the re-derived graph, so a manifest naming TWO Included=true
+// instruction sources with only ONE surviving in the re-derived graph
+// (the other became undiscoverable) would incorrectly pass -- the
+// surviving source's mere presence satisfied the old boolean check. The
+// fixed, count-based comparison must catch this: 1 found < 2 included.
+func TestCrossCheckEffectiveGraph_PartialConceptLoss_DetectedByCount(t *testing.T) {
+	sources := []domain.GenerationSourceEntry{
+		{Host: "codex", Concept: "instruction", Source: "workspace/AGENTS.md", Included: true},
+		{Host: "codex", Concept: "instruction", Source: "user/AGENTS.md", Included: true},
+	}
+	// Only ONE instruction entity is actually discoverable in the
+	// re-derived graph, even though the manifest recorded two.
+	graph := effective.EffectiveGraph{
+		Entries: []effective.EffectiveEntry{
+			{Concept: "instruction", LogicalID: "workspace/AGENTS.md"},
+		},
+	}
+
+	failed, reasons := crossCheckEffectiveGraph("codex", sources, graph)
+	if len(failed) == 0 {
+		t.Fatal("crossCheckEffectiveGraph with 1 of 2 included instruction sources discoverable: want a failure, got none (partial concept loss was not detected)")
+	}
+	if len(reasons) == 0 || !strings.Contains(reasons[0], "2") || !strings.Contains(reasons[0], "1") {
+		t.Errorf("reasons = %v, want an explanation naming both the included count (2) and the found count (1)", reasons)
+	}
+}
+
+// TestCrossCheckEffectiveGraph_ConflictCountsAsFound proves a Conflict (not
+// just a resolved EffectiveEntry) counts toward a concept's found total --
+// unresolved-but-recognized content still proves the physical source was
+// rediscoverable, this check's whole question (crossCheckEffectiveGraph's
+// own doc comment).
+func TestCrossCheckEffectiveGraph_ConflictCountsAsFound(t *testing.T) {
+	sources := []domain.GenerationSourceEntry{
+		{Host: "codex", Concept: "skill", Source: "workspace/skills/a", Included: true},
+	}
+	graph := effective.EffectiveGraph{
+		Conflicts: []effective.Conflict{
+			{Concept: "skill", LogicalID: "workspace/skills/a"},
+		},
+	}
+
+	failed, _ := crossCheckEffectiveGraph("codex", sources, graph)
+	if len(failed) != 0 {
+		t.Errorf("crossCheckEffectiveGraph with the sole included source's concept present only as a Conflict: want no failure, got %v", failed)
 	}
 }

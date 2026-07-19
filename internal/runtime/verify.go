@@ -4,9 +4,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
+	"github.com/wangzitian0/oh-my-code-agent/internal/assurance"
+	hostcontext "github.com/wangzitian0/oh-my-code-agent/internal/context"
 	"github.com/wangzitian0/oh-my-code-agent/internal/domain"
+	"github.com/wangzitian0/oh-my-code-agent/internal/effective"
+	"github.com/wangzitian0/oh-my-code-agent/internal/knowledge"
+	"github.com/wangzitian0/oh-my-code-agent/internal/observe"
 )
 
 // VerificationResult is [VerifyActivation]'s outcome for one host's current
@@ -18,12 +24,29 @@ type VerificationResult struct {
 	// generation at the moment VerifyActivation ran.
 	GenerationID string
 	// Passed is true when every recorded artifact digest still matches the
-	// on-disk content.
+	// on-disk content AND every Observation-derived source the manifest
+	// recorded as Included:true is still discoverable in a freshly
+	// re-derived EffectiveGraph (issue #70) -- see VerifyActivation's own
+	// doc comment for the full two-check design.
 	Passed bool
-	// FailedArtifacts lists every artifact path (relative to the
-	// generation directory) that failed verification -- either missing/
-	// unreadable, or present with content that no longer digests to what
-	// the manifest recorded. Empty when Passed.
+	// FailedArtifacts lists every entry (a real artifact path, relative to
+	// the generation directory, for the artifact-digest check; a
+	// GenerationSourceEntry's own Source -- or, when empty, its Concept --
+	// for the effective-graph check) that failed verification: an artifact
+	// missing/unreadable, present with content that no longer digests to
+	// what the manifest recorded, or a manifest-recorded Included:true
+	// source that a fresh re-observation of the activated generation could
+	// no longer discover. Bare identifiers only, never a formatted
+	// "identifier: error text" string -- see Detail for the human-readable
+	// explanation. Empty when Passed.
+	//
+	// One documented exception: if the effective-graph check itself cannot
+	// even run (an unsupported host, a malformed synthetic detection, a
+	// re-observation or graph-computation failure -- none of which is "a
+	// source failed to verify", but "verification itself could not be
+	// performed"), FailedArtifacts contains exactly the sentinel string
+	// "effective-graph-verification" rather than any GenerationSourceEntry
+	// identifier. Detail always explains which case occurred.
 	FailedArtifacts []string
 	// Detail is a human-readable summary, always non-empty.
 	Detail string
@@ -71,38 +94,71 @@ type VerificationResult struct {
 // for exactly the cases where something is already wrong would defeat the
 // whole point of this function.
 //
-// # Why artifact-digest integrity, not internal/assurance's EffectiveGraph
+// # Artifact-digest integrity, plus a re-derived EffectiveGraph (issue #70)
 //
-// internal/assurance.VerifyGraph re-derives EvidenceLevel for an
-// ALREADY-COMPUTED effective.EffectiveGraph against the committed evidence-
-// ceiling table -- a report-time concern (internal/report/build.go is its
-// only production caller) that answers "how much do we trust this already-
-// resolved value," not "did this specific activation actually take." Using
-// it here would require re-observing the activated generation's own
-// compiled tree as a synthetic host home (pointing a fresh
-// hostcontext.HostDetection's NativeHomes at
-// generationDir/hosts/<host>/<surface>/<nativeHomeDir>), resolving a
-// HostKnowledge Pack for it, and computing a fresh EffectiveGraph -- real,
-// valuable, but a materially larger, differently-scoped verification
-// surface (internal/runtime has no existing dependency on
-// internal/knowledge/internal/effective/internal/assurance at all) than
-// this PR's own time and risk budget allows to introduce, test, and prove
-// safe alongside Bisect in the same change.
+// VerifyActivation runs two layered checks, in order, and reports both:
+// the artifact-digest check above -- "is the generation directory Activate
+// just switched 'current' to, byte for byte, still what Compile actually
+// produced" -- and, additionally, a re-derivation of this host's
+// effective.EffectiveGraph from the activated generation's OWN compiled
+// tree, verified with internal/assurance.VerifyGraph and cross-checked
+// against every GenerationSourceEntry the generation's own manifest
+// recorded as Included:true (crossCheckEffectiveGraph, below).
 //
-// Artifact-digest integrity is deliberately the narrower, structurally
-// simpler question this function answers instead: "is the generation
-// directory Activate just switched 'current' to, byte for byte, still what
-// Compile actually produced." It is a real, non-trivial check (proven by
-// TestVerifyActivation_DetectsTamperedArtifact) and a genuine instance of
-// "a compiled generation's effective state not matching what activation
-// was supposed to produce" -- just a narrower slice of that question than
-// a full EffectiveGraph re-derivation would cover (e.g. it cannot catch a
-// compiler bug where Compile's own manifest claims a source is included
-// but renders it somewhere internal/observe's rules would never discover
-// it as that source again). That richer, EffectiveGraph-based check is a
-// reasonable enhancement, tracked as a follow-up
-// (github.com/wangzitian0/oh-my-code-agent/issues/70) rather than folded
-// into this PR unreviewed.
+// The artifact-digest check alone cannot catch a real, different failure
+// class: a compiler bug where Compile's own manifest claims a source is
+// included but renders it in a way internal/observe's discovery rules would
+// never recognize as that source again if the generation directory were
+// re-observed as a host home -- internally-consistent-but-wrong output. The
+// digest check only ever proves "the bytes Compile wrote are still the
+// bytes on disk"; it says nothing about whether those bytes are actually
+// DISCOVERABLE the way a real host launch (via internal/shim's native-home
+// redirection) would expect them to be. This second check closes exactly
+// that gap: it points a synthetic hostcontext.HostDetection's NativeHomes
+// at generationDir/hosts/<host>/<surface>/<NativeHomeDirName> (the exact
+// directory layout compile_full.go's Compile already writes, and a real
+// launch's native-home redirection already points a host binary at) and its
+// WorktreeRoot at generationDir/hosts/<host>/<surface>/instructions (the
+// exact directory compileHostTree renders repository-scope Instructions
+// sources into, preserving each one's original repository-relative path --
+// compile.go's compileHostTree), re-runs internal/observe.Observe against
+// that synthetic detection exactly as a real launch's own observation pass
+// would, resolves this host's domain.HostKnowledge Pack the same way
+// internal/report/build.go's Build already does (knowledge.Default plus
+// Repository.Resolve/Packs -- this file's knowledgePackByID), computes a
+// fresh effective.EffectiveGraph (internal/effective.ComputeEffectiveGraph),
+// and verifies it (internal/assurance.VerifyGraph) -- failing when, for any
+// concept, the manifest's own Sources list records more Included:true
+// Observation-derived entries than that fresh graph actually contains of
+// that concept (crossCheckEffectiveGraph's own doc comment: a per-concept
+// COUNT comparison, not a bare "was anything of this concept found at all"
+// check, so a partial loss among two-or-more same-concept sources cannot
+// hide behind one surviving sibling).
+//
+// This second check is deliberately restricted to Observation-derived
+// Sources entries -- compileHostTree's own records, distinguishable from
+// resolvedAssetSources' desired-state audit trail by Scope !=
+// desiredStateScope (compile_full.go) -- and never resolvedAssetSources'
+// own entries: those record what internal/resolve.Resolve's pure intent
+// resolution decided (ResolvedAsset.Active), which this codebase can
+// honestly confirm has no necessary physical rendering to re-observe at all
+// (no Identity Matcher connects a resolved asset to a discovered Observation
+// yet -- compile_full.go's own "Why Compile reuses Bootstrap's exact
+// Observation-classification policy" section). Cross-checking those would
+// produce false failures unrelated to any real compiler bug.
+//
+// Both checks run unconditionally and independently: neither one's failure
+// masks or short-circuits the other, and a VerificationResult reports every
+// artifact-digest AND effective-graph failure together when both occur.
+//
+// Like the artifact-digest check, this is a pure, safe, read-only operation
+// confined entirely to worktreeStateDir/generations/<current generation>:
+// the synthetic HostDetection this builds is pointed exclusively at paths
+// inside that already-isolated tree, never a real host's real native home,
+// and internal/observe.Observe itself performs no writes and no subprocess
+// execution (internal/observe/doc.go's own safety-properties list) -- so
+// this check inherits exactly the same safety guarantee VerifyActivation's
+// own doc comment above already documents.
 func VerifyActivation(worktreeStateDir, host string, now time.Time) (VerificationResult, error) {
 	if worktreeStateDir == "" {
 		return VerificationResult{}, fmt.Errorf("runtime: VerifyActivation: worktreeStateDir is required")
@@ -157,21 +213,227 @@ func VerifyActivation(worktreeStateDir, host string, now time.Time) (Verificatio
 		}
 	}
 
+	// Second, independent check (issue #70): re-derive an EffectiveGraph
+	// from the activated generation's own compiled tree and cross-check it
+	// against every Observation-derived source the manifest itself recorded
+	// as Included:true. Runs unconditionally -- even when the digest loop
+	// above already found failures -- so neither check can mask the other;
+	// see this function's own doc comment for the full design.
+	egFailed, egReasons := verifyEffectiveGraphAgainstManifest(worktreeStateDir, currentDir, host, entry, gen.Spec.Sources)
+	failed = append(failed, egFailed...)
+	failReasons = append(failReasons, egReasons...)
+
 	if len(failed) > 0 {
 		return VerificationResult{
 			Host:            host,
 			GenerationID:    gen.Metadata.ID,
 			Passed:          false,
 			FailedArtifacts: failed,
-			Detail:          fmt.Sprintf("%d of %d artifact(s) for %s no longer match generation %s's recorded manifest digests: %v", len(failed), len(entry.Artifacts), host, gen.Metadata.ID, failReasons),
+			Detail:          fmt.Sprintf("%d issue(s) found verifying %s's generation %s (artifact-digest integrity and/or a re-derived effective graph): %v", len(failed), host, gen.Metadata.ID, failReasons),
 		}, nil
 	}
 	return VerificationResult{
 		Host:         host,
 		GenerationID: gen.Metadata.ID,
 		Passed:       true,
-		Detail:       fmt.Sprintf("%d artifact(s) for %s match generation %s's recorded manifest digests", len(entry.Artifacts), host, gen.Metadata.ID),
+		Detail:       fmt.Sprintf("%d artifact(s) for %s match generation %s's recorded manifest digests, and its effective graph re-derives cleanly from the compiled tree", len(entry.Artifacts), host, gen.Metadata.ID),
 	}, nil
+}
+
+// effectiveGraphSourceConcepts are the GenerationSourceEntry.Concept values
+// verifyEffectiveGraphAgainstManifest knows how to cross-reference against a
+// fresh effective.EffectiveGraph -- the exact three concepts
+// internal/effective.ExtractCandidates itself understands (extract.go's own
+// doc comment: "this package's scope is the three concepts... instruction,
+// skill, mcp_server"). A GenerationSourceEntry naming any other concept
+// (e.g. compile.go's "permission", a compile-time-only vocabulary with no
+// ontology or EffectiveGraph counterpart at all) is outside what a
+// re-derived EffectiveGraph could ever honestly confirm or refute, so it is
+// simply not compared.
+var effectiveGraphSourceConcepts = map[string]bool{
+	"instruction": true,
+	"skill":       true,
+	"mcp_server":  true,
+}
+
+// knowledgePackByID returns the loaded Pack named packID from repo, if any.
+// Mirrors internal/report/build.go's identical findPack: Resolution already
+// carries an in-process pointer to the matched Pack, but that field stays
+// unexported inside internal/knowledge, so both callers look it back up by
+// ID from Repository's own exported Packs() accessor instead of reaching
+// into Resolution's internals.
+func knowledgePackByID(repo knowledge.Repository, packID string) (knowledge.Pack, bool) {
+	for _, p := range repo.Packs() {
+		if p.Knowledge.Metadata.ID == packID {
+			return p, true
+		}
+	}
+	return knowledge.Pack{}, false
+}
+
+// verifyEffectiveGraphAgainstManifest is [VerifyActivation]'s second check
+// (issue #70, see that function's own doc comment for the full design): it
+// builds a synthetic hostcontext.HostDetection pointed entirely at paths
+// inside generationDir, re-runs internal/observe.Observe against it,
+// resolves this host's domain.HostKnowledge Pack, computes and verifies a
+// fresh effective.EffectiveGraph, and cross-checks it against sources
+// (normally gen.Spec.Sources) via crossCheckEffectiveGraph.
+//
+// hostVersion is read from worktreeStateDir's own CurrentRecord sidecar
+// (ReadCurrentRecord -- the same "current" pointer SetCurrentGeneration
+// wrote host's real detected version into at activation time), not from the
+// Generation document itself: domain.GenerationHostEntry records no host
+// version field (only Surface/AdapterID/Ownership/Artifacts), so this is the
+// one place that fact is still available. A missing or unreadable
+// CurrentRecord degrades hostVersion to "" rather than failing this check
+// outright: knowledge.Repository.Resolve's own "zero matches degrades
+// honestly" contract turns an empty version into an unqualified Resolution
+// (hk stays domain.HostKnowledge{}), which still lets
+// effective.ComputeEffectiveGraph run and extract/match candidates -- this
+// check's cross-check step only cares about identity/discoverability, never
+// evidence level, so it stays meaningful even without a resolved Pack.
+//
+// Any internal error while re-observing or re-computing the graph (an
+// unsupported host, a malformed synthetic detection, etc.) is folded into a
+// failure the same way the artifact-digest loop above folds a read/digest
+// error into FailedArtifacts/Detail, rather than returned as a VerifyActivation-level
+// error: this function's whole contract, like the digest check's, is that an
+// inability to positively confirm integrity is itself a verification
+// failure, not a caller-visible exception.
+func verifyEffectiveGraphAgainstManifest(worktreeStateDir, generationDir, host string, entry domain.GenerationHostEntry, sources []domain.GenerationSourceEntry) (failed []string, reasons []string) {
+	const setupFailureIdent = "effective-graph-verification"
+
+	surface := entry.Surface
+	if surface == "" {
+		surface = defaultSurface
+	}
+
+	nativeHomeDirName, err := NativeHomeDirName(host)
+	if err != nil {
+		return []string{setupFailureIdent}, []string{fmt.Sprintf("effective-graph re-derivation: %v", err)}
+	}
+	nativeHomeEnvVar, err := NativeHomeEnvVar(host)
+	if err != nil {
+		return []string{setupFailureIdent}, []string{fmt.Sprintf("effective-graph re-derivation: %v", err)}
+	}
+
+	var hostVersion string
+	if rec, recErr := ReadCurrentRecord(worktreeStateDir, host); recErr == nil {
+		hostVersion = rec.HostVersion
+	}
+
+	hostPrefix := filepath.Join(generationDir, "hosts", host, surface)
+	detection := hostcontext.HostDetection{
+		Host:    host,
+		Surface: surface,
+		Version: hostVersion,
+		NativeHomes: []hostcontext.NativeHome{
+			{Name: nativeHomeEnvVar, Path: filepath.Join(hostPrefix, nativeHomeDirName)},
+		},
+	}
+
+	obs, obsErr := observe.Observe(observe.Request{
+		Detection:    detection,
+		WorktreeRoot: filepath.Join(hostPrefix, "instructions"),
+	})
+	if obsErr != nil {
+		return []string{setupFailureIdent}, []string{fmt.Sprintf("effective-graph re-derivation: re-observing the activated generation's own compiled tree failed: %v", obsErr)}
+	}
+
+	var hk domain.HostKnowledge
+	if repo, repoErr := knowledge.Default(); repoErr == nil {
+		resolution := repo.Resolve(host, surface, hostVersion)
+		if resolution.Qualified {
+			if pack, ok := knowledgePackByID(repo, resolution.PackID); ok {
+				hk = pack.Knowledge
+			}
+		}
+	}
+
+	graph, geErr := effective.ComputeEffectiveGraph(host, hostVersion, obs, hk, effective.Options{}, nil)
+	if geErr != nil {
+		return []string{setupFailureIdent}, []string{fmt.Sprintf("effective-graph re-derivation: computing the effective graph failed: %v", geErr)}
+	}
+	graph = assurance.VerifyGraph(host, graph, hk)
+
+	return crossCheckEffectiveGraph(host, sources, graph)
+}
+
+// crossCheckEffectiveGraph reports, for every concept named by at least one
+// GenerationSourceEntry in sources that belongs to host, is Included:true,
+// is Observation-derived (Scope != desiredStateScope -- see that const's own
+// doc comment for why resolvedAssetSources' desired-state entries are never
+// checked here), and names one of effectiveGraphSourceConcepts, whether the
+// fresh graph found at least as many distinct things of that concept as the
+// manifest recorded Included=true sources for it -- counting BOTH resolved
+// EffectiveEntry values and unresolved Conflicts as "found" (a Conflict
+// still means the Identity Matcher and merge logic genuinely recognized
+// content of that concept and simply could not adjudicate a value for it,
+// which already proves the physical content was rediscoverable -- exactly
+// this check's whole question).
+//
+// Comparing COUNTS per concept, not a boolean "was anything of this concept
+// found at all" (an earlier version of this function, and a real Copilot
+// review finding on this PR): a boolean check silently passes when a
+// manifest records two-or-more Included=true sources of the same concept
+// and only SOME of them become undiscoverable, since any one surviving
+// source of that concept satisfies a bare presence check. Counting cannot
+// attribute a shortfall to one specific source either (see below), so when
+// the found count for a concept is less than the included count, every
+// source of that concept is reported -- an honest "at least one of these N
+// sources is missing, but which one cannot be determined," not a false
+// "nothing is wrong."
+//
+// This still cannot verify a one-entry-to-one-entity correspondence: a
+// GenerationSourceEntry's own Source field names the ORIGINAL path Compile
+// observed at compile time (a real worktree/native-home location), which
+// internal/effective's Identity Matcher folds into a LogicalID keyed on
+// that exact path (extract.go's extractInstructionCandidate, e.g.) -- a
+// value a re-observation of the compiled generation tree (a different
+// directory, by construction) can never reproduce. What this DOES honestly
+// prove is exactly the failure class issue #70 exists for: "Compile's
+// manifest claims N sources of concept X are included, but fewer than N
+// things of concept X are discoverable at all by re-observing what Compile
+// actually wrote" -- a compiler bug that rendered content at a path
+// internal/observe's own discovery rules would never find again.
+func crossCheckEffectiveGraph(host string, sources []domain.GenerationSourceEntry, graph effective.EffectiveGraph) (failed []string, reasons []string) {
+	foundCount := map[string]int{}
+	for _, e := range graph.Entries {
+		foundCount[e.Concept]++
+	}
+	for _, c := range graph.Conflicts {
+		foundCount[c.Concept]++
+	}
+
+	includedByConcept := map[string][]domain.GenerationSourceEntry{}
+	var concepts []string
+	for _, s := range sources {
+		if s.Host != host || !s.Included || s.Scope == desiredStateScope || !effectiveGraphSourceConcepts[s.Concept] {
+			continue
+		}
+		if _, seen := includedByConcept[s.Concept]; !seen {
+			concepts = append(concepts, s.Concept)
+		}
+		includedByConcept[s.Concept] = append(includedByConcept[s.Concept], s)
+	}
+	sort.Strings(concepts) // deterministic output order, independent of map iteration
+
+	for _, concept := range concepts {
+		included := includedByConcept[concept]
+		have, want := foundCount[concept], len(included)
+		if have >= want {
+			continue
+		}
+		reasons = append(reasons, fmt.Sprintf("effective-graph re-derivation: manifest records %d Included=true %q source(s) for %s, but re-observing the activated generation's own compiled tree found only %d of that concept in the re-derived effective graph", want, concept, host, have))
+		for _, s := range included {
+			ident := s.Source
+			if ident == "" {
+				ident = s.Concept
+			}
+			failed = append(failed, ident)
+		}
+	}
+	return failed, reasons
 }
 
 // ActivateAndVerifyResult is [ActivateAndVerify]'s success value.
