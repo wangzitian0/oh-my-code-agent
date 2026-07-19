@@ -282,6 +282,20 @@ func desiredStateRef(profiles []domain.Profile, activation domain.Activation, ex
 	return &domain.DesiredStateRef{Profiles: profileRefs, Activation: activationDigest, Exceptions: exceptionDigests}, nil
 }
 
+// desiredStateScope marks a GenerationSourceEntry as a resolvedAssetSources
+// audit record rather than an Observation-derived one (compileHostTree's own
+// entries always carry a real ontology Scope.Kind, e.g. "user"/"workspace").
+// Exported at package level (originally a resolvedAssetSources-local const)
+// so verify.go's post-activation EffectiveGraph cross-check
+// (crossCheckEffectiveGraph) can reliably tell the two kinds of entry apart
+// without duplicating this literal a second time: a desired-state entry's
+// Included:true reflects resolve.Resolve's own intent-resolution outcome
+// (ResolvedAsset.Active), which -- as this function's own doc comment below
+// explains -- has no necessary physical rendering to re-observe at all, so
+// it must never be fed into a check that re-derives an EffectiveGraph from
+// what was actually written to disk.
+const desiredStateScope = "desired-state"
+
 // resolvedAssetSources turns one host's resolve.ResolvedState into
 // GenerationSourceEntry audit records: one entry per decided ResolvedAsset
 // (Included mirrors Active, Reason carries the resolver's own Reason and
@@ -296,7 +310,6 @@ func desiredStateRef(profiles []domain.Profile, activation domain.Activation, ex
 // documented vocabularies for two different kinds of record, and unifying
 // them is out of this PR's scope.
 func resolvedAssetSources(resolved resolve.ResolvedState) []domain.GenerationSourceEntry {
-	const desiredStateScope = "desired-state"
 	entries := make([]domain.GenerationSourceEntry, 0, len(resolved.Assets)+len(resolved.Conflicts))
 	for _, a := range resolved.Assets {
 		entries = append(entries, domain.GenerationSourceEntry{
