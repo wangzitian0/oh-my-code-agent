@@ -1,0 +1,43 @@
+            ┌───────┐                         
+  Overview  │ Drift │  Assets    Generations  
+            └───────┘
+
+Debug > DR-8105bca2 > mcp_server/stdio|shared-tools  (host codex)
+
+Effective State & Precedence Trace
+mcp_server/stdio|shared-tools on codex: CONFLICT (precedence program "mcp_server.union-by-id" declares operator UNION_BY_ID for concept "mcp_server", but the Knowledge Pack's resolve capability is "UNKNOWN" (not EXACT/COMPATIBLE); 2 sources disagree and this package refuses to guess a winner)
+
+Resolver trace:
+  program:  mcp_server.union-by-id
+  constraint: UNRESOLVED: precedence program "mcp_server.union-by-id" declares operator UNION_BY_ID for concept "mcp_server", but the Knowledge Pack's resolve capability is "UNKNOWN" (not EXACT/COMPATIBLE); 2 sources disagree and this package refuses to guess a winner
+
+Physical sources:
+  E1       DISCOVERED /var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml#mcp_servers.shared-tools  (file, digest=sha256:899ca3e9cf41)
+  E1       DISCOVERED /var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml#mcp_servers.shared-tools  (file, digest=sha256:90a49615d470)
+
+Knowledge evidence:
+  codex-environment-variables-doc official-doc https://learn.chatgpt.com/docs/config-file/environment-variables
+  codex-cli-doc official-doc https://learn.chatgpt.com/docs/codex/cli
+  codex-agents-md-doc official-doc https://learn.chatgpt.com/docs/agent-configuration/agents-md
+  codex-skills-doc official-doc https://learn.chatgpt.com/docs/build-skills
+  codex-cli-0.144.5-local-binary-fingerprint maintainer-observation fixtures/README.md
+  codex-home-skills-undocumented-root-static-inspection maintainer-observation fixtures/README.md
+  codex-skill-collision-fixture executable-fixture fixtures/codex/0.144.5/skill-collision
+  codex-instructions-collision-fixture executable-fixture fixtures/codex/0.144.5/instructions-collision
+  codex-mcp-merge-fixture executable-fixture fixtures/codex/0.144.5/mcp-merge
+
+Evidence
+  evidence:codex:mcp_server:stdio|shared-tools   level=E1  guarantee=            method=precedence program "mcp_server.union-by-id" declares operator UNION_BY_ID for concept "mcp_server", but the Knowledge Pack's resolve capability is "UNKNOWN" (not EXACT/COMPATIBLE); 2 sources disagree and this package refuses to guess a winner
+      knowledgeRef: codex:cli:0.144 (sha256:ab65752792f183823a73f0d12a568d952a629983c6b55e68b7762cd30d4143c3)
+
+Native Artifacts
+  E1       DISCOVERED /var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml#mcp_servers.shared-tools
+      observation codex:hook:/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml disposition=DISCOVERED evidence=E1
+      observation codex:mcp_server:/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml disposition=DISCOVERED evidence=E1
+      observation codex:policy:/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml disposition=DISCOVERED evidence=E1
+  E1       DISCOVERED /var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml#mcp_servers.shared-tools
+      observation codex:hook:/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml disposition=DISCOVERED evidence=E1
+      observation codex:mcp_server:/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml disposition=DISCOVERED evidence=E1
+      observation codex:policy:/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml disposition=DISCOVERED evidence=E1
+
+esc/b: back to matrix   p: toggle Native vs Current vs Pending   q: quit

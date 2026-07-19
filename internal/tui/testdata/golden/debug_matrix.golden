@@ -1,0 +1,15 @@
+            ┌───────┐                         
+  Overview  │ Drift │  Assets    Generations  
+            └───────┘
+
+Debug > DR-8105bca2  SOURCE_DRIFT
+  Root cause   precedence program "mcp_server.union-by-id" declares operator UNION_BY_ID for concept "mcp_server", but the Knowledge Pack's resolve capability is "UNKNOWN" (not EXACT/COMPATIBLE); 2 sources disagree and this package refuses to guess a winner
+  Remediation  qualify a precedence program for this concept in the host's Knowledge Pack so the resolver can select a winner, or resolve the collision with an explicit Profile/Exception
+
+Host Matrix
+DR-8105bca2 matrix (1 row(s)):
+  worktree:sha256:tui-fixture / codex mcp_server/stdio|shared-tools selectedSource expected=single resolved source observed=[/var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/codex-home/config.toml#mcp_servers.shared-tools /var/folders/9s/ttf61vmx6f72r56ggq4_4rjr0000gq/T/TestRegenerateFixtureArtifact740799880/001/project/.codex/config.toml#mcp_servers.shared-tools] evidence=E1 guarantee=OBSERVED
+
+Selected [1/1]  mcp_server/stdio|shared-tools  host=codex
+
+up/down: select cell   enter: resolver trace   p: toggle Native vs Current vs Pending   esc/b: back to Drift   q: quit

@@ -38,16 +38,20 @@ var viewTitles = map[ViewKind]string{
 	ViewGenerations: "Generations",
 }
 
-// uiMode names Model's own two interaction modes (issue #35): modeBrowse is
-// PR-30's original read-only navigation; modeConfirm is the one-screen
-// "reviewed Change Set" a staged activation shows before a single approval
-// keypress applies it (see confirm.go's renderConfirmScreen and Model's own
-// approveReview).
+// uiMode names Model's own interaction modes: modeBrowse is PR-30's original
+// read-only navigation; modeConfirm is the one-screen "reviewed Change Set"
+// a staged activation shows before a single approval keypress applies it
+// (see confirm.go's renderConfirmScreen and Model's own approveReview);
+// modeDebug is issue #36's Debug drill-down, entered from the Drift view's
+// currently selected action card (enterDebug) and rendered by
+// renderDebugMatrix/renderDebugEntity (debug.go) according to Model's own
+// debugLevel stack depth.
 type uiMode int
 
 const (
 	modeBrowse uiMode = iota
 	modeConfirm
+	modeDebug
 )
 
 // Model is this package's bubbletea.Model: an immutable report.Artifact
@@ -89,6 +93,30 @@ type Model struct {
 	// restartStatuses is issue #35's "restart_required per host" AC:
 	// populated after a successful activation (restartStatusesForHosts).
 	restartStatuses []runtime.RestartStatus
+
+	// driftCursor selects which of Artifact.ActionCards the Drift view's
+	// own up/down navigation currently highlights (currentDriftCard) --
+	// issue #36's entry point into the Debug drill-down (enterDebug): only
+	// meaningful while active == ViewDrift, the same way hostCursor is only
+	// meaningful on the Assets/Generations views.
+	driftCursor int
+
+	// debugLevel/debugCardID/debugMatrixCursor/debugHost/debugConcept/
+	// debugLogicalID/debugShowPlanes are issue #36's Debug drill-down state,
+	// live only while mode == modeDebug (debug.go's renderDebugMatrix/
+	// renderDebugEntity, Model's own enterDebug/updateDebug/
+	// drillIntoSelectedCell). debugCardID is looked up fresh from
+	// m.Artifact.ActionCards on every render (findCardByID) rather than a
+	// stored report.DriftCard, so a refreshed Artifact (refreshArtifact,
+	// after an unrelated Assets/Generations action) never leaves this state
+	// pointing at a stale copy.
+	debugLevel        debugLevel
+	debugCardID       string
+	debugMatrixCursor int
+	debugHost         string
+	debugConcept      string
+	debugLogicalID    string
+	debugShowPlanes   bool
 }
 
 // NewModel constructs a Model over a already-built report.Artifact,
@@ -160,6 +188,23 @@ func (m Model) currentHost() (string, bool) {
 	return hosts[i], true
 }
 
+// currentDriftCard returns the ActionCard m.driftCursor currently selects
+// among m.Artifact.ActionCards -- the "which card would enter open the
+// Debug view for" question enterDebug and driftSelectionHintLine both need
+// answered. ok is false when there is no drift at all (an empty
+// ActionCards, e.g. "no drift" or a zero-valued Artifact).
+func (m Model) currentDriftCard() (report.DriftCard, bool) {
+	cards := m.Artifact.ActionCards
+	if len(cards) == 0 {
+		return report.DriftCard{}, false
+	}
+	i := m.driftCursor % len(cards)
+	if i < 0 {
+		i += len(cards)
+	}
+	return cards[i], true
+}
+
 // Active returns the currently selected view.
 func (m Model) Active() ViewKind {
 	return m.active
@@ -206,6 +251,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.mode == modeConfirm {
 		return m.updateConfirm(keyMsg)
 	}
+	if m.mode == modeDebug {
+		return m.updateDebug(keyMsg)
+	}
 
 	switch keyMsg.String() {
 	case "ctrl+c", "q":
@@ -223,15 +271,119 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "4":
 		m.active = ViewGenerations
 	case "up", "k":
-		m.hostCursor--
+		if m.active == ViewDrift {
+			m.driftCursor--
+		} else {
+			m.hostCursor--
+		}
 	case "down", "j":
-		m.hostCursor++
+		if m.active == ViewDrift {
+			m.driftCursor++
+		} else {
+			m.hostCursor++
+		}
 	case "a":
 		m = m.activateSelected()
 	case "r":
 		m = m.rollbackSelected()
+	case "enter":
+		if m.active == ViewDrift {
+			m = m.enterDebug()
+		}
 	}
 	return m, nil
+}
+
+// enterDebug implements issue #36's entry point into the Debug drill-down:
+// pressing enter on the Drift view opens debugLevelMatrix (Model.
+// renderDebugView -> renderDebugMatrix, debug.go) for the action card
+// driftCursor currently selects (currentDriftCard) -- "reachable from an
+// actual action card," never a dead-end standalone screen. A no-op (with an
+// explanatory message, matching activateSelected/rollbackSelected's own
+// "nothing to do" contract) when there is no drift to drill into at all.
+func (m Model) enterDebug() Model {
+	card, ok := m.currentDriftCard()
+	if !ok {
+		m.message = "no action card to drill into (no drift)"
+		return m
+	}
+	m.mode = modeDebug
+	m.debugLevel = debugLevelMatrix
+	m.debugCardID = card.ID
+	m.debugMatrixCursor = 0
+	m.debugShowPlanes = false
+	return m
+}
+
+// updateDebug handles keys while mode == modeDebug: issue #36's two-level
+// Debug drill-down stack on top of the Drift view. up/down (or k/j) move
+// the Host Matrix row cursor at debugLevelMatrix; enter drills into the
+// selected row's Effective State/Precedence Trace/Evidence/Native Artifacts
+// (drillIntoSelectedCell, moving to debugLevelEntity); p toggles the Native
+// vs Current vs Pending pane at either level; esc/b steps back one level
+// (debugLevelEntity -> debugLevelMatrix -> modeBrowse on the Drift view,
+// mirroring updateConfirm's own single-level "n/esc cancels back" pattern,
+// just with a second level); quit keys still quit mid-drill-down (matching
+// updateConfirm's own identical "quit always works" contract).
+func (m Model) updateDebug(keyMsg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch keyMsg.String() {
+	case "ctrl+c", "q":
+		return m, tea.Quit
+	case "p":
+		m.debugShowPlanes = !m.debugShowPlanes
+		return m, nil
+	case "esc", "b":
+		if m.debugLevel == debugLevelEntity {
+			m.debugLevel = debugLevelMatrix
+			return m, nil
+		}
+		m.mode = modeBrowse
+		return m, nil
+	case "up", "k":
+		if m.debugLevel == debugLevelMatrix {
+			m.debugMatrixCursor--
+		}
+		return m, nil
+	case "down", "j":
+		if m.debugLevel == debugLevelMatrix {
+			m.debugMatrixCursor++
+		}
+		return m, nil
+	case "enter":
+		if m.debugLevel == debugLevelMatrix {
+			return m.drillIntoSelectedCell(), nil
+		}
+		return m, nil
+	}
+	return m, nil
+}
+
+// drillIntoSelectedCell moves Model from debugLevelMatrix to
+// debugLevelEntity for the Host Matrix row m.debugMatrixCursor currently
+// selects -- splitEntityID (debug.go) recovers the (concept, logicalID)
+// pair the row's own EntityID encodes. A no-op when the card no longer
+// resolves (should not happen in practice: enterDebug only ever sets
+// debugCardID to a card m.Artifact.ActionCards actually contains) or has no
+// Matrix rows to drill into.
+func (m Model) drillIntoSelectedCell() Model {
+	card, ok := findCardByID(m.Artifact, m.debugCardID)
+	if !ok || len(card.Matrix) == 0 {
+		return m
+	}
+	i := m.debugMatrixCursor % len(card.Matrix)
+	if i < 0 {
+		i += len(card.Matrix)
+	}
+	row := card.Matrix[i]
+	concept, logicalID, ok := splitEntityID(row.EntityID)
+	if !ok {
+		return m
+	}
+	m.debugLevel = debugLevelEntity
+	m.debugHost = row.Host
+	m.debugConcept = concept
+	m.debugLogicalID = logicalID
+	return m
 }
 
 // updateConfirm handles keys while mode == modeConfirm: 'y'/enter approves
@@ -409,6 +561,9 @@ func (m Model) View() string {
 	if m.mode == modeConfirm && m.review != nil {
 		return renderTabBar(m.active) + "\n\n" + renderConfirmScreen(*m.review)
 	}
+	if m.mode == modeDebug {
+		return renderTabBar(m.active) + "\n\n" + m.renderDebugView()
+	}
 
 	out := renderTabBar(m.active) + "\n\n"
 	if m.message != "" {
@@ -420,7 +575,42 @@ func (m Model) View() string {
 			out += "\n" + selectionHintLine(m.Artifact, host)
 		}
 	}
+	if m.active == ViewDrift {
+		if hint := driftSelectionHintLine(m); hint != "" {
+			out += "\n" + hint
+		}
+	}
 	return out
+}
+
+// renderDebugView dispatches to renderDebugMatrix/renderDebugEntity
+// (debug.go) according to m.debugLevel -- the modeDebug half of View(),
+// mirroring renderActive's own dispatch-by-enum shape for the four
+// read-only views.
+func (m Model) renderDebugView() string {
+	if m.debugLevel == debugLevelEntity {
+		return renderDebugEntity(m.Artifact, m.debugCardID, m.debugHost, m.debugConcept, m.debugLogicalID, m.debugShowPlanes)
+	}
+	card, ok := findCardByID(m.Artifact, m.debugCardID)
+	if !ok {
+		return "Debug: action card " + m.debugCardID + " no longer exists in the current report"
+	}
+	return renderDebugMatrix(m.Artifact, card, m.debugMatrixCursor, m.debugShowPlanes)
+}
+
+// driftSelectionHintLine tells the operator which action card up/down
+// currently selects and how to open its Debug view -- shown unconditionally
+// on the Drift view (unlike selectionHintLine's own ActionContext gate:
+// drilling into Debug is read-only navigation, never a mutating action, so
+// it needs no ActionContext attached to be meaningful). Empty when there is
+// no drift at all, so the "No drift" empty-state message (RenderDrift) is
+// not followed by a confusing "nothing to select" line.
+func driftSelectionHintLine(m Model) string {
+	card, ok := m.currentDriftCard()
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf("Selected %s -- press enter to open its Debug view (Host Matrix -> resolver trace -> evidence) -- up/down to change card", card.ID)
 }
 
 func (m Model) renderActive() string {
