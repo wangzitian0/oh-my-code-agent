@@ -11,3 +11,5 @@ DR-8105bca2  SOURCE_DRIFT
   Guarantee   OBSERVED
   Samples
     mcp_server/stdio|shared-tools  worktree:sha256:tui-fixture / codex
+
+Selected DR-8105bca2 -- press enter to open its Debug view (Host Matrix -> resolver trace -> evidence) -- up/down to change card

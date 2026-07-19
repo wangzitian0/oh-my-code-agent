@@ -19,8 +19,11 @@
 // the resulting string against a committed golden file — no real
 // terminal, no interactive event loop, no flaky ANSI-escape-sequence
 // timing in CI. See fixture_test.go/golden_test.go for the harness this
-// enables, and overview_test.go/drift_test.go/assets_test.go/
-// generations_test.go for the four views' own golden tests.
+// enables, overview_test.go/drift_test.go/assets_test.go/
+// generations_test.go for the four views' own golden tests, and
+// debug_test.go for the Debug drill-down's own golden tests plus its
+// scripted, invariant-proving end-to-end test (issue #36's own explicit,
+// non-negotiable bar).
 //
 // Every exported Render* function in this package (RenderOverview,
 // RenderDrift, RenderAssets, RenderGenerations) deliberately renders plain
@@ -36,15 +39,58 @@
 // # Scope
 //
 // PR-30 (issue #34) built the FOUNDATION layer: read-only rendering of the
-// four named views, plus basic navigation between them. PR-31 (issue #35,
-// this PR) adds the action layer on top, without changing that read-only
-// rendering contract: Model gained an optional ActionContext (see
-// actions.go) that, once attached (WithActionContext), unlocks 'a'
-// (activate an AVAILABLE asset), 'y'/'n' (approve/cancel a reviewed Change
-// Set), and 'r' (roll back) — every one of PR-30's own tests, and every
-// caller that never attaches an ActionContext, keeps behaving exactly as
-// before (ActionContext.enabled()'s doc comment). Issue #36 ("TUI debug
-// views": precedence trace/evidence) remains separate, later scope.
+// four named views, plus basic navigation between them. PR-31 (issue #35)
+// added the action layer on top, without changing that read-only rendering
+// contract: Model gained an optional ActionContext (see actions.go) that,
+// once attached (WithActionContext), unlocks 'a' (activate an AVAILABLE
+// asset), 'y'/'n' (approve/cancel a reviewed Change Set), and 'r' (roll
+// back) — every one of PR-30's own tests, and every caller that never
+// attaches an ActionContext, keeps behaving exactly as before
+// (ActionContext.enabled()'s doc comment). PR-32 (issue #36, this PR) adds
+// the Debug drill-down described below; neither PR-30's four views nor
+// PR-31's action layer change shape because of it.
+//
+// # Debug drill-down (issue #36)
+//
+// docs/architecture/reporting.md §9's Debug tree (Native vs Current vs
+// Pending, Effective State, Host Matrix, Precedence Trace, Evidence, Native
+// Artifacts) and §14's debug invariants ("every action card expands to all
+// affected cells," "every cell expands to desired and observed values,"
+// "every effective value expands to its resolver trace," "every resolver
+// trace expands to physical sources and Knowledge evidence") are made
+// navigable by a third uiMode, modeDebug (model.go), entered from the Drift
+// view by pressing enter on the action card driftCursor currently selects
+// (Model.enterDebug) — reachable from an actual action card, never a
+// dead-end standalone screen, and layered on top of the base tab navigation
+// the same way modeConfirm already is.
+//
+// modeDebug is a genuine two-level drill-down stack (debugLevel, debug.go),
+// not a single flat screen: debugLevelMatrix shows the selected action
+// card's complete Host Matrix (report.RenderMatrixHuman) with a row cursor;
+// pressing enter on a row (Model.drillIntoSelectedCell) moves to
+// debugLevelEntity, which shows that row's Effective State + Precedence
+// Trace (report.Explain with trace=true, report.RenderExplainHuman — both
+// already exist, both called verbatim), plus this Debug tree's own Evidence
+// (a.Debug[host].Evidence, filtered to the entity) and Native Artifacts
+// (the trace's own PhysicalSources joined against a.Debug[host].
+// Observations by source path) panes. A 'p' key toggles a Native vs
+// Current vs Pending comparison (report.ComparePlanes/
+// report.RenderCompareHuman, called twice: NATIVE-vs-CURRENT and
+// CURRENT-vs-PENDING) onto either level. 'esc'/'b' steps back one level at
+// a time (debugLevelEntity -> debugLevelMatrix -> modeBrowse on the Drift
+// view), mirroring updateConfirm's own "n/esc cancels back" convention;
+// quit keys still quit mid-drill-down.
+//
+// Every pane here calls the exact report.* function/field the Debug tree
+// needs — report.RenderMatrixHuman, report.Explain/report.
+// RenderExplainHuman, report.ComparePlanes/report.RenderCompareHuman,
+// a.Debug[host].Evidence/Candidates/Observations — never a second,
+// independently computed projection of drift/effective/resolver state
+// (debug.go's own package doc comment). This is possible here in a way it
+// was not for PR-31's action layer: internal/report is a normal,
+// importable package (unlike cmd/omca, package main), so there is no
+// mirrored-helper trade-off to document for this PR the way actions.go
+// documents one for stage/activate/rollback.
 //
 // # Action layer (issue #35)
 //
