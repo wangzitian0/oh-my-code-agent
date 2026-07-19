@@ -260,14 +260,6 @@ func runKnowledgePropose(stdout, stderr io.Writer, args []string) int {
 		return 1
 	}
 
-	runFixtures := func(ctx stdcontext.Context, host string) ([]domain.FixtureResult, error) {
-		packages, err := knowledge.AffectedPackages(ctx, opts.RepoDir, host)
-		if err != nil {
-			return nil, fmt.Errorf("determining affected packages: %w", err)
-		}
-		return knowledge.RunAffectedFixtures(ctx, opts.RepoDir, packages)
-	}
-
 	cfg := knowledge.ProposeConfig{
 		RepoDir: opts.RepoDir, RemoteName: opts.Remote, BaseRef: opts.Base,
 		AuthorName: opts.AuthorName, AuthorEmail: opts.AuthorEmail,
@@ -275,7 +267,32 @@ func runKnowledgePropose(stdout, stderr io.Writer, args []string) int {
 	publisher := knowledge.CLIGitPublisher{}
 	opener := knowledge.GHCLIPullRequestOpener{RepoDir: opts.RepoDir}
 
-	return proposeCandidatePRForHost(stdout, stderr, opts.Host, knowledge.HTTPFetcher{}, repo, cfg, runFixtures, publisher, opener, time.Now(), opts.JSONOut)
+	return proposeCandidatePRForHost(stdout, stderr, opts.Host, knowledge.HTTPFetcher{}, repo, cfg, buildRunFixtures(stderr, opts.RepoDir), publisher, opener, time.Now(), opts.JSONOut)
+}
+
+// buildRunFixtures returns the fixture-running closure runKnowledgePropose
+// passes to proposeCandidatePRForHost. Factored out to its own, directly
+// testable function (rather than an inline closure) so a test can prove
+// its fallback behavior without needing to invoke runKnowledgePropose's own
+// real, non-test-safe CLIGitPublisher/GHCLIPullRequestOpener wiring.
+//
+// A failure to determine the affected package set falls back to
+// RunAffectedFixtures' own documented nil-packages behavior ("./..." as the
+// honest full-suite fallback), rather than aborting the whole `omca
+// knowledge propose` command -- a real Copilot review finding on this PR:
+// this fallback was already documented (this file's own doc comment, and
+// fixtures.go's) but not actually wired up, so a `go list` failure
+// previously prevented a candidate from being created at all instead of
+// degrading to a slower-but-honest full-suite run.
+func buildRunFixtures(stderr io.Writer, repoDir string) func(ctx stdcontext.Context, host string) ([]domain.FixtureResult, error) {
+	return func(ctx stdcontext.Context, host string) ([]domain.FixtureResult, error) {
+		packages, err := knowledge.AffectedPackages(ctx, repoDir, host)
+		if err != nil {
+			fmt.Fprintf(stderr, "omca: knowledge propose: determining affected packages for %s: %v (falling back to the full suite)\n", host, err)
+			packages = nil
+		}
+		return knowledge.RunAffectedFixtures(ctx, repoDir, packages)
+	}
 }
 
 // proposeCandidatePRResult is `omca knowledge propose --json`'s output

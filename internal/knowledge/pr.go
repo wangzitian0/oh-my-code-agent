@@ -257,6 +257,9 @@ func validateBranchPublishRequest(req BranchPublishRequest) error {
 		return fmt.Errorf("BranchPublishRequest.AuthorEmail is empty")
 	}
 	for p := range req.Files {
+		if err := validateSafeRepoRelativePath(p); err != nil {
+			return fmt.Errorf("BranchPublishRequest.Files key %q: %w", p, err)
+		}
 		if strings.HasPrefix(path.Clean(p), "knowledge/hosts/") || path.Clean(p) == "knowledge/hosts" {
 			// Structural, load-bearing guard, not just documentation: even
 			// if a future caller of this package ever tried to write a file
@@ -268,6 +271,29 @@ func validateBranchPublishRequest(req BranchPublishRequest) error {
 			// TestProposeCandidatePR_PushedBranchNeverTouchesKnowledgeHosts.
 			return fmt.Errorf("refusing to publish a file under knowledge/hosts/ (%q): automation may propose a candidate, it may never write the published Pack location directly (ADR-0004 decision 4)", p)
 		}
+	}
+	return nil
+}
+
+// validateSafeRepoRelativePath rejects any BranchPublishRequest.Files key
+// that is not a plain, repo-relative path fully contained within the
+// worktree PublishBranch writes into: an absolute path, an empty path, or
+// any path whose cleaned form is ".." or starts with "../" would otherwise
+// reach filepath.Join(worktreeDir, filepath.FromSlash(p)) unchecked and
+// resolve OUTSIDE that temporary worktree -- a real path-traversal
+// vulnerability (a Copilot review finding on this PR): the prior check only
+// rejected the specific "knowledge/hosts/" prefix, not the general "does
+// this path even stay inside the directory PublishBranch owns" question.
+func validateSafeRepoRelativePath(p string) error {
+	if strings.TrimSpace(p) == "" {
+		return fmt.Errorf("path is empty")
+	}
+	if path.IsAbs(p) || filepath.IsAbs(p) {
+		return fmt.Errorf("path must be repo-relative, not absolute")
+	}
+	clean := path.Clean(filepath.ToSlash(p))
+	if clean == ".." || strings.HasPrefix(clean, "../") {
+		return fmt.Errorf("path escapes the repository root via '..'")
 	}
 	return nil
 }
@@ -445,7 +471,19 @@ func candidateSlug(id string) string {
 			lastWasDash = true
 		}
 	}
-	return strings.Trim(b.String(), "-")
+	slug := strings.Trim(b.String(), "-")
+	if slug == "" {
+		// ValidateKnowledgeCandidate only enforces that Metadata.ID is
+		// non-empty, not that it contains any alphanumeric character --
+		// an id built entirely from symbols would otherwise slug down to
+		// "", producing an ambiguous branch name
+		// ("knowledge-candidate/") and a file path ending in "/.json" (a
+		// real Copilot review finding on this PR). This fallback keeps
+		// every branch/path this package builds non-empty and
+		// unambiguous even for a pathological id.
+		return "candidate"
+	}
+	return slug
 }
 
 // candidatePRTitle names automation and collection time in the pull

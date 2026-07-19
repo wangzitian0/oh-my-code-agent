@@ -187,7 +187,62 @@ func mustDigestBytes(raw []byte) string {
 // internal/knowledge/fixtures_test.go for AffectedPackages/
 // RunAffectedFixtures's own real-but-local-only proof).
 
-func TestRunKnowledge_UnknownSubcommand_UsageError(t *testing.T) {
+// writeTinyPassingModule builds a minimal, valid Go module with exactly one
+// trivial passing test -- just enough for RunAffectedFixtures' own real
+// `go test ./...` fallback to have something quick and unambiguous to run
+// against, for TestBuildRunFixtures_AffectedPackagesFails_FallsBackToFullSuite.
+func writeTinyPassingModule(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	write := func(rel, content string) {
+		full := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("mkdir for %s: %v", rel, err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+	write("go.mod", "module omca-buildrunfixtures-test\n\ngo 1.22\n")
+	write("onlypkg/onlypkg_test.go", "package onlypkg\n\nimport \"testing\"\n\nfunc TestOK(t *testing.T) {}\n")
+	return root
+}
+
+// TestBuildRunFixtures_AffectedPackagesFails_FallsBackToFullSuite is a
+// regression test (Copilot review finding on this PR): buildRunFixtures
+// previously returned knowledge.AffectedPackages' own error immediately,
+// aborting `omca knowledge propose` entirely, instead of falling back to
+// RunAffectedFixtures' documented nil-packages "./..." behavior as both
+// this file's own doc comment and the PR description already promised.
+// knowledge.AffectedPackages errors on an empty host (a real, already-proven
+// error condition -- TestAffectedPackages_EmptyHostOrModuleDir_Errors in
+// internal/knowledge), which lets this test force exactly that failure
+// against an otherwise perfectly valid module, proving the fallback
+// actually runs (and succeeds) rather than the whole call failing.
+func TestBuildRunFixtures_AffectedPackagesFails_FallsBackToFullSuite(t *testing.T) {
+	moduleDir := writeTinyPassingModule(t)
+	var stderr bytes.Buffer
+	runFixtures := buildRunFixtures(&stderr, moduleDir)
+
+	results, err := runFixtures(context.Background(), "" /* empty host forces AffectedPackages to error */)
+	if err != nil {
+		t.Fatalf("runFixtures with a forced AffectedPackages failure: want the full-suite fallback to succeed, got error: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("runFixtures returned zero FixtureResults -- want at least the one package the fallback './...' run should have exercised")
+	}
+	if !strings.Contains(stderr.String(), "falling back to the full suite") {
+		t.Errorf("stderr = %q, want it to explain the AffectedPackages failure and the fallback", stderr.String())
+	}
+}
+
+// TestRunKnowledge_Propose_MissingHost_UsageError is a regression test
+// (Copilot review finding on this PR): this test's name previously said
+// "UnknownSubcommand," but "propose" IS a real, known subcommand -- what
+// this actually exercises is that subcommand's own required-host argument
+// validation, a materially different failure mode a future maintainer
+// debugging a real unknown-subcommand report would be misled by.
+func TestRunKnowledge_Propose_MissingHost_UsageError(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := runKnowledge(&stdout, &stderr, []string{"propose"}); code != 2 {
 		t.Fatalf("runKnowledge(propose, no host) = %d, want 2; stderr=%s", code, stderr.String())

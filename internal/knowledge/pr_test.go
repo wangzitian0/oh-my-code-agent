@@ -216,6 +216,57 @@ func TestCLIGitPublisher_PublishBranch_RejectsFilesUnderKnowledgeHosts(t *testin
 	}
 }
 
+// TestCLIGitPublisher_PublishBranch_RejectsPathTraversal is a regression
+// test (Copilot review finding on this PR): the prior check only rejected
+// the specific "knowledge/hosts/" prefix, never a general unsafe path -- a
+// "../"-escaping key reaches filepath.Join(worktreeDir,
+// filepath.FromSlash(p)) unchecked, and the resulting path is written to
+// via os.WriteFile BEFORE the subsequent `git add` step (which does reject
+// a path outside the git worktree) ever runs. That means the OLD code's
+// own non-nil error return does NOT actually prove nothing escaped: a
+// throwaway proof-of-concept file at a real, attacker-chosen path outside
+// the worktree was already written to disk by the time `git add` finally
+// failed and surfaced an error -- confirmed empirically while writing this
+// fix (the file genuinely appeared on disk with the reverted code, despite
+// PublishBranch still returning a non-nil error). The real security
+// property this test must check is therefore the absence of that escaped
+// file on disk, not merely a non-nil error.
+func TestCLIGitPublisher_PublishBranch_RejectsPathTraversal(t *testing.T) {
+	escapeTarget := filepath.Join(t.TempDir(), "omca-path-traversal-poc")
+	// filepath.Join(worktreeDir, "../../../../../../"+escapeTarget) is how
+	// many "../" segments it takes to walk from a fresh os.MkdirTemp
+	// worktree back up to "/" is implementation-detail-dependent, so this
+	// test computes a traversal string relative to escapeTarget's own
+	// absolute path instead of hardcoding a fixed number of "../" segments.
+	traversal := strings.Repeat("../", 20) + strings.TrimPrefix(escapeTarget, string(filepath.Separator))
+
+	repoDir, remoteName, baseRef, _ := setupLocalGitRepoWithBareRemote(t)
+
+	pub := CLIGitPublisher{}
+	req := BranchPublishRequest{
+		RepoDir:       repoDir,
+		RemoteName:    remoteName,
+		BaseRef:       baseRef,
+		Branch:        "should-never-be-pushed",
+		Files:         map[string]string{traversal: "malicious content"},
+		CommitMessage: "must not happen",
+		AuthorName:    "OMCA Bot",
+		AuthorEmail:   "omca-bot@example.invalid",
+	}
+	if _, err := pub.PublishBranch(context.Background(), req); err == nil {
+		t.Fatalf("PublishBranch with Files key %q: want an error, got nil", traversal)
+	}
+	if _, statErr := os.Stat(escapeTarget); statErr == nil {
+		t.Fatalf("%s exists -- PublishBranch wrote a file outside the worktree it owns, the actual path-traversal vulnerability (a non-nil error alone does not prove this didn't happen: the write can succeed before a later step, e.g. `git add`, fails)", escapeTarget)
+	} else if !os.IsNotExist(statErr) {
+		t.Fatalf("stat %s: %v", escapeTarget, statErr)
+	}
+	out := runTestGit(t, repoDir, "ls-remote", remoteName)
+	if strings.Contains(out, req.Branch) {
+		t.Fatalf("remote branches = %q, want branch %q to never have been pushed", out, req.Branch)
+	}
+}
+
 func TestCLIGitPublisher_PublishBranch_RequiresNonEmptyFields(t *testing.T) {
 	valid := BranchPublishRequest{
 		RepoDir: "x", RemoteName: "origin", BaseRef: "main", Branch: "b",
