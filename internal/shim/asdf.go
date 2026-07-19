@@ -40,7 +40,41 @@ func IsASDFShim(path string) bool {
 	if filepath.Base(shimsDir) != "shims" {
 		return false
 	}
-	return filepath.Base(filepath.Dir(shimsDir)) == ".asdf"
+	if filepath.Base(filepath.Dir(shimsDir)) == ".asdf" {
+		return true
+	}
+	// asdf's own ASDF_DATA_DIR env var can relocate its data directory away
+	// from the default "$HOME/.asdf" (asdf's own documented override), so a
+	// shim's grandparent directory need not literally be named ".asdf" --
+	// asdf's "<dataDir>/shims/<name>" layout is otherwise unchanged. Fall
+	// back to confirming the file itself carries asdf's own shim-metadata
+	// comment (the same signal ResolveASDFShimTarget independently
+	// re-confirms before ever acting on anything) rather than silently
+	// missing every non-default-ASDF_DATA_DIR installation (a real Copilot
+	// review finding on this PR).
+	return hasASDFPluginComment(path)
+}
+
+// hasASDFPluginComment reports whether path's content contains at least one
+// "# asdf-plugin: <plugin> <version>" line -- IsASDFShim's fallback
+// confirmation for a non-default ASDF_DATA_DIR layout. A read error (path
+// does not exist, is a directory, permission denied, ...) is treated as
+// "not a recognizable asdf shim" rather than propagated: IsASDFShim is a
+// cheap yes/no gate callers use to decide whether the more expensive,
+// error-returning ResolveASDFShimTarget is worth attempting at all, so it
+// has no error to report here -- ResolveASDFShimTarget re-reads the file
+// itself and surfaces any real I/O error through its own return value.
+func hasASDFPluginComment(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if asdfPluginCommentRE.MatchString(line) {
+			return true
+		}
+	}
+	return false
 }
 
 // ResolveASDFShimTarget resolves shimPath -- an asdf shim script, per
@@ -90,16 +124,27 @@ func ResolveASDFShimTarget(shimPath string) (string, error) {
 		return "", fmt.Errorf("shim: ResolveASDFShimTarget: reading %s: %w", shimPath, err)
 	}
 
+	// Distinct (plugin, version) pairs, not raw matching-line count: asdf
+	// has been observed to write more than one identical "# asdf-plugin:
+	// <plugin> <version>" line for the same pair into a single shim script
+	// (a real Copilot review finding on this PR) -- counting raw lines
+	// would incorrectly report that as "2 different plugin versions" and
+	// refuse to resolve a shim that is, in fact, completely unambiguous.
+	type pluginVersion struct{ plugin, version string }
+	seen := map[pluginVersion]bool{}
 	var plugin, version string
-	matches := 0
 	for _, line := range strings.Split(string(data), "\n") {
 		m := asdfPluginCommentRE.FindStringSubmatch(line)
 		if m == nil {
 			continue
 		}
-		matches++
-		plugin, version = m[1], m[2]
+		pv := pluginVersion{plugin: m[1], version: m[2]}
+		if !seen[pv] {
+			seen[pv] = true
+			plugin, version = pv.plugin, pv.version
+		}
 	}
+	matches := len(seen)
 	if matches == 0 {
 		return "", fmt.Errorf("shim: ResolveASDFShimTarget: %s has no \"# asdf-plugin: <plugin> <version>\" metadata line; not a resolvable asdf shim (unrecognized shim format)", shimPath)
 	}

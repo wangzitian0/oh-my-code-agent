@@ -93,6 +93,22 @@ func TestIsASDFShim_EmptyPath(t *testing.T) {
 	}
 }
 
+// TestIsASDFShim_CustomASDFDataDir_DetectedViaMetadataFallback is a
+// regression test (Copilot review finding on this PR): a shim under a
+// non-default ASDF_DATA_DIR (asdf's own env var override, e.g.
+// "<home>/asdf-data/shims/<name>" instead of "<home>/.asdf/shims/<name>")
+// must still be recognized -- via the file's own "# asdf-plugin:" metadata
+// comment, since the directory-name heuristic alone cannot see it -- or
+// isolated mode silently falls back to exec'ing the shim directly and hits
+// the original exit-126 failure this whole fix exists to prevent.
+func TestIsASDFShim_CustomASDFDataDir_DetectedViaMetadataFallback(t *testing.T) {
+	customDataDir := filepath.Join(t.TempDir(), "asdf-data") // deliberately not ".asdf"
+	path := writeASDFShim(t, customDataDir, "codex", [][2]string{{"nodejs", "20.19.0"}})
+	if !IsASDFShim(path) {
+		t.Errorf("IsASDFShim(%q) = false, want true (custom ASDF_DATA_DIR, detected via metadata comment fallback)", path)
+	}
+}
+
 // TestResolveASDFShimTarget_SingleVersion_Resolves is this fix's core
 // success-path proof: a shim naming exactly one plugin version (issue #69's
 // own reproduction shape) resolves to the concrete installed binary,
@@ -126,6 +142,30 @@ func TestResolveASDFShimTarget_AmbiguousVersions_Errors(t *testing.T) {
 
 	if _, err := ResolveASDFShimTarget(shimPath); err == nil {
 		t.Fatal("ResolveASDFShimTarget with two plugin-version lines: want error, got nil")
+	}
+}
+
+// TestResolveASDFShimTarget_DuplicateIdenticalPluginLine_NotAmbiguous is a
+// regression test (Copilot review finding on this PR): asdf has been
+// observed to write the same "# asdf-plugin: <plugin> <version>" line more
+// than once into a single shim script for the same (plugin, version) pair.
+// Counting raw matching lines (rather than distinct pairs) would
+// incorrectly refuse this as "2 different plugin versions" even though
+// there is exactly one real candidate and nothing to disambiguate.
+func TestResolveASDFShimTarget_DuplicateIdenticalPluginLine_NotAmbiguous(t *testing.T) {
+	asdfDataDir := filepath.Join(t.TempDir(), ".asdf")
+	shimPath := writeASDFShim(t, asdfDataDir, "codex", [][2]string{
+		{"nodejs", "20.19.0"},
+		{"nodejs", "20.19.0"},
+	})
+	want := writeASDFInstalledBinary(t, asdfDataDir, "nodejs", "20.19.0", "codex")
+
+	got, err := ResolveASDFShimTarget(shimPath)
+	if err != nil {
+		t.Fatalf("ResolveASDFShimTarget with a duplicated identical plugin-version line: want success, got error: %v", err)
+	}
+	if got != want {
+		t.Errorf("ResolveASDFShimTarget(%q) = %q, want %q", shimPath, got, want)
 	}
 }
 

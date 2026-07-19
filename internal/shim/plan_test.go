@@ -218,6 +218,15 @@ func TestBuild_AmbiguousASDFShim_FailsWithActionableError(t *testing.T) {
 	if !strings.Contains(err.Error(), "asdf") {
 		t.Errorf("Build error does not mention asdf, want an actionable message naming the problem: %v", err)
 	}
+	// Regression test (Copilot review finding on this PR): the message must
+	// describe the resolved path's LOCATION, not assert it is a confirmed
+	// asdf shim -- IsASDFShim's location heuristic can match a path that
+	// ResolveASDFShimTarget then fails to resolve for a reason other than
+	// "genuinely asdf-managed" (e.g. an unrecognized/foreign shim format),
+	// so claiming confirmed asdf-ness here would be misleading in that case.
+	if strings.Contains(err.Error(), "resolves to an asdf-managed shim") {
+		t.Errorf("Build error overclaims confirmed asdf-shim identity instead of describing the path's location: %v", err)
+	}
 }
 
 // TestBuild_MissingHOME proves Build fails closed, with a clear actionable

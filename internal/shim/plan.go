@@ -155,7 +155,7 @@ func Build(invokedName string, environ []string) (Plan, error) {
 	if IsASDFShim(realPath) {
 		resolved, asdfErr := ResolveASDFShimTarget(realPath)
 		if asdfErr != nil {
-			return Plan{}, fmt.Errorf("shim: Build: %s resolves to an asdf-managed shim (%s) that isolated mode cannot safely resolve past: %w -- install it outside asdf (e.g. a plain global npm/brew install, not asdf-managed), or use `omca run --mode native` instead of the PATH shim", invokedName, realPath, asdfErr)
+			return Plan{}, fmt.Errorf("shim: Build: %s resolves to %s, a path under an asdf shims directory, but isolated mode could not resolve it to a concrete asdf-installed binary: %w -- install it outside asdf (e.g. a plain global npm/brew install, not asdf-managed), or use `omca run --mode native` instead of the PATH shim", invokedName, realPath, asdfErr)
 		}
 		realPath = resolved
 	}

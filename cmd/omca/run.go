@@ -310,7 +310,7 @@ func runIsolated(stderr io.Writer, host string, realEnv hostcontext.Environment,
 	if shim.IsASDFShim(hd.BinaryPath) {
 		resolved, asdfErr := shim.ResolveASDFShimTarget(hd.BinaryPath)
 		if asdfErr != nil {
-			fmt.Fprintf(stderr, "omca: run: %s resolves to an asdf-managed shim (%s) that isolated mode cannot safely resolve past: %v\nisolated mode virtualizes HOME (docs/architecture/runtime.md §7.1), which asdf's own shim resolution needs a real, resolvable HOME to complete -- install %s outside asdf (e.g. a plain global npm/brew install, not asdf-managed), or run `omca run --mode native %s` instead\n", host, hd.BinaryPath, asdfErr, host, host)
+			fmt.Fprintf(stderr, "omca: run: %s resolves to %s, a path under an asdf shims directory, but isolated mode could not resolve it to a concrete asdf-installed binary: %v\nisolated mode virtualizes HOME (docs/architecture/runtime.md §7.1), which asdf's own shim resolution needs a real, resolvable HOME to complete -- install %s outside asdf (e.g. a plain global npm/brew install, not asdf-managed), or run `omca run --mode native %s` instead\n", host, hd.BinaryPath, asdfErr, host, host)
 			return 1
 		}
 		execBinaryPath = resolved
