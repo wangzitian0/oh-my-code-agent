@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/wangzitian0/oh-my-code-agent/internal/assurance"
@@ -38,6 +39,14 @@ type VerificationResult struct {
 	// no longer discover. Bare identifiers only, never a formatted
 	// "identifier: error text" string -- see Detail for the human-readable
 	// explanation. Empty when Passed.
+	//
+	// One documented exception: if the effective-graph check itself cannot
+	// even run (an unsupported host, a malformed synthetic detection, a
+	// re-observation or graph-computation failure -- none of which is "a
+	// source failed to verify", but "verification itself could not be
+	// performed"), FailedArtifacts contains exactly the sentinel string
+	// "effective-graph-verification" rather than any GenerationSourceEntry
+	// identifier. Detail always explains which case occurred.
 	FailedArtifacts []string
 	// Detail is a human-readable summary, always non-empty.
 	Detail string
@@ -118,10 +127,13 @@ type VerificationResult struct {
 // internal/report/build.go's Build already does (knowledge.Default plus
 // Repository.Resolve/Packs -- this file's knowledgePackByID), computes a
 // fresh effective.EffectiveGraph (internal/effective.ComputeEffectiveGraph),
-// and verifies it (internal/assurance.VerifyGraph) -- failing when a
-// concept the manifest's own Sources list records at least one Included:true
-// Observation-derived entry for is not present anywhere in that fresh graph
-// (crossCheckEffectiveGraph).
+// and verifies it (internal/assurance.VerifyGraph) -- failing when, for any
+// concept, the manifest's own Sources list records more Included:true
+// Observation-derived entries than that fresh graph actually contains of
+// that concept (crossCheckEffectiveGraph's own doc comment: a per-concept
+// COUNT comparison, not a bare "was anything of this concept found at all"
+// check, so a partial loss among two-or-more same-concept sources cannot
+// hide behind one surviving sibling).
 //
 // This second check is deliberately restricted to Observation-derived
 // Sources entries -- compileHostTree's own records, distinguishable from
@@ -305,18 +317,19 @@ func verifyEffectiveGraphAgainstManifest(worktreeStateDir, generationDir, host s
 		return []string{setupFailureIdent}, []string{fmt.Sprintf("effective-graph re-derivation: %v", err)}
 	}
 
+	var hostVersion string
+	if rec, recErr := ReadCurrentRecord(worktreeStateDir, host); recErr == nil {
+		hostVersion = rec.HostVersion
+	}
+
 	hostPrefix := filepath.Join(generationDir, "hosts", host, surface)
 	detection := hostcontext.HostDetection{
 		Host:    host,
 		Surface: surface,
+		Version: hostVersion,
 		NativeHomes: []hostcontext.NativeHome{
 			{Name: nativeHomeEnvVar, Path: filepath.Join(hostPrefix, nativeHomeDirName)},
 		},
-	}
-
-	var hostVersion string
-	if rec, recErr := ReadCurrentRecord(worktreeStateDir, host); recErr == nil {
-		hostVersion = rec.HostVersion
 	}
 
 	obs, obsErr := observe.Observe(observe.Request{
@@ -346,20 +359,32 @@ func verifyEffectiveGraphAgainstManifest(worktreeStateDir, generationDir, host s
 	return crossCheckEffectiveGraph(host, sources, graph)
 }
 
-// crossCheckEffectiveGraph reports, for every GenerationSourceEntry in
-// sources that belongs to host, is Included:true, is Observation-derived
-// (Scope != desiredStateScope -- see that const's own doc comment for why
-// resolvedAssetSources' desired-state entries are never checked here), and
-// names one of effectiveGraphSourceConcepts, whether the fresh graph
-// actually found SOMETHING of that concept -- either a resolved
-// EffectiveEntry or an unresolved Conflict. A Conflict still counts as
-// "found": it means the Identity Matcher and merge logic genuinely
-// recognized content of that concept and simply could not adjudicate a
-// value for it, which already proves the physical content was
-// rediscoverable -- exactly this check's whole question. Only "nothing of
-// this concept was found at all" is a failure.
+// crossCheckEffectiveGraph reports, for every concept named by at least one
+// GenerationSourceEntry in sources that belongs to host, is Included:true,
+// is Observation-derived (Scope != desiredStateScope -- see that const's own
+// doc comment for why resolvedAssetSources' desired-state entries are never
+// checked here), and names one of effectiveGraphSourceConcepts, whether the
+// fresh graph found at least as many distinct things of that concept as the
+// manifest recorded Included=true sources for it -- counting BOTH resolved
+// EffectiveEntry values and unresolved Conflicts as "found" (a Conflict
+// still means the Identity Matcher and merge logic genuinely recognized
+// content of that concept and simply could not adjudicate a value for it,
+// which already proves the physical content was rediscoverable -- exactly
+// this check's whole question).
 //
-// This cannot verify a one-entry-to-one-entity correspondence: a
+// Comparing COUNTS per concept, not a boolean "was anything of this concept
+// found at all" (an earlier version of this function, and a real Copilot
+// review finding on this PR): a boolean check silently passes when a
+// manifest records two-or-more Included=true sources of the same concept
+// and only SOME of them become undiscoverable, since any one surviving
+// source of that concept satisfies a bare presence check. Counting cannot
+// attribute a shortfall to one specific source either (see below), so when
+// the found count for a concept is less than the included count, every
+// source of that concept is reported -- an honest "at least one of these N
+// sources is missing, but which one cannot be determined," not a false
+// "nothing is wrong."
+//
+// This still cannot verify a one-entry-to-one-entity correspondence: a
 // GenerationSourceEntry's own Source field names the ORIGINAL path Compile
 // observed at compile time (a real worktree/native-home location), which
 // internal/effective's Identity Matcher folds into a LogicalID keyed on
@@ -367,35 +392,45 @@ func verifyEffectiveGraphAgainstManifest(worktreeStateDir, generationDir, host s
 // value a re-observation of the compiled generation tree (a different
 // directory, by construction) can never reproduce. What this DOES honestly
 // prove is exactly the failure class issue #70 exists for: "Compile's
-// manifest claims a source of concept X is included, but nothing of concept
-// X is discoverable at all by re-observing what Compile actually wrote" --
-// a compiler bug that rendered content at a path internal/observe's own
-// discovery rules would never find again.
+// manifest claims N sources of concept X are included, but fewer than N
+// things of concept X are discoverable at all by re-observing what Compile
+// actually wrote" -- a compiler bug that rendered content at a path
+// internal/observe's own discovery rules would never find again.
 func crossCheckEffectiveGraph(host string, sources []domain.GenerationSourceEntry, graph effective.EffectiveGraph) (failed []string, reasons []string) {
-	present := map[string]bool{}
+	foundCount := map[string]int{}
 	for _, e := range graph.Entries {
-		present[e.Concept] = true
+		foundCount[e.Concept]++
 	}
 	for _, c := range graph.Conflicts {
-		present[c.Concept] = true
+		foundCount[c.Concept]++
 	}
 
-	reportedConcept := map[string]bool{}
+	includedByConcept := map[string][]domain.GenerationSourceEntry{}
+	var concepts []string
 	for _, s := range sources {
 		if s.Host != host || !s.Included || s.Scope == desiredStateScope || !effectiveGraphSourceConcepts[s.Concept] {
 			continue
 		}
-		if present[s.Concept] {
+		if _, seen := includedByConcept[s.Concept]; !seen {
+			concepts = append(concepts, s.Concept)
+		}
+		includedByConcept[s.Concept] = append(includedByConcept[s.Concept], s)
+	}
+	sort.Strings(concepts) // deterministic output order, independent of map iteration
+
+	for _, concept := range concepts {
+		included := includedByConcept[concept]
+		have, want := foundCount[concept], len(included)
+		if have >= want {
 			continue
 		}
-		ident := s.Source
-		if ident == "" {
-			ident = s.Concept
-		}
-		failed = append(failed, ident)
-		if !reportedConcept[s.Concept] {
-			reportedConcept[s.Concept] = true
-			reasons = append(reasons, fmt.Sprintf("effective-graph re-derivation: manifest records at least one Included=true %q source (e.g. %q) for %s, but re-observing the activated generation's own compiled tree found nothing of that concept in the re-derived effective graph", s.Concept, ident, host))
+		reasons = append(reasons, fmt.Sprintf("effective-graph re-derivation: manifest records %d Included=true %q source(s) for %s, but re-observing the activated generation's own compiled tree found only %d of that concept in the re-derived effective graph", want, concept, host, have))
+		for _, s := range included {
+			ident := s.Source
+			if ident == "" {
+				ident = s.Concept
+			}
+			failed = append(failed, ident)
 		}
 	}
 	return failed, reasons

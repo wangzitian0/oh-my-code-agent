@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/wangzitian0/oh-my-code-agent/internal/domain"
+	"github.com/wangzitian0/oh-my-code-agent/internal/effective"
 )
 
 // codexConfigTOMLRelPath is the one artifact every codex generation always
@@ -474,5 +475,58 @@ func TestActivateAndVerify_FailedVerification_NoParent_LedgersFailureReturnsErro
 	}
 	if !found {
 		t.Errorf("ledger has no 'verification-failed' entry even though rollback could not proceed: %+v", entries)
+	}
+}
+
+// TestCrossCheckEffectiveGraph_PartialConceptLoss_DetectedByCount is a
+// regression test (Copilot review finding on this PR) directly against
+// crossCheckEffectiveGraph, isolated from the full compile/activate
+// machinery: an earlier version of this function reported a concept as
+// "verified" the moment ANY entry/conflict of that concept existed anywhere
+// in the re-derived graph, so a manifest naming TWO Included=true
+// instruction sources with only ONE surviving in the re-derived graph
+// (the other became undiscoverable) would incorrectly pass -- the
+// surviving source's mere presence satisfied the old boolean check. The
+// fixed, count-based comparison must catch this: 1 found < 2 included.
+func TestCrossCheckEffectiveGraph_PartialConceptLoss_DetectedByCount(t *testing.T) {
+	sources := []domain.GenerationSourceEntry{
+		{Host: "codex", Concept: "instruction", Source: "workspace/AGENTS.md", Included: true},
+		{Host: "codex", Concept: "instruction", Source: "user/AGENTS.md", Included: true},
+	}
+	// Only ONE instruction entity is actually discoverable in the
+	// re-derived graph, even though the manifest recorded two.
+	graph := effective.EffectiveGraph{
+		Entries: []effective.EffectiveEntry{
+			{Concept: "instruction", LogicalID: "workspace/AGENTS.md"},
+		},
+	}
+
+	failed, reasons := crossCheckEffectiveGraph("codex", sources, graph)
+	if len(failed) == 0 {
+		t.Fatal("crossCheckEffectiveGraph with 1 of 2 included instruction sources discoverable: want a failure, got none (partial concept loss was not detected)")
+	}
+	if len(reasons) == 0 || !strings.Contains(reasons[0], "2") || !strings.Contains(reasons[0], "1") {
+		t.Errorf("reasons = %v, want an explanation naming both the included count (2) and the found count (1)", reasons)
+	}
+}
+
+// TestCrossCheckEffectiveGraph_ConflictCountsAsFound proves a Conflict (not
+// just a resolved EffectiveEntry) counts toward a concept's found total --
+// unresolved-but-recognized content still proves the physical source was
+// rediscoverable, this check's whole question (crossCheckEffectiveGraph's
+// own doc comment).
+func TestCrossCheckEffectiveGraph_ConflictCountsAsFound(t *testing.T) {
+	sources := []domain.GenerationSourceEntry{
+		{Host: "codex", Concept: "skill", Source: "workspace/skills/a", Included: true},
+	}
+	graph := effective.EffectiveGraph{
+		Conflicts: []effective.Conflict{
+			{Concept: "skill", LogicalID: "workspace/skills/a"},
+		},
+	}
+
+	failed, _ := crossCheckEffectiveGraph("codex", sources, graph)
+	if len(failed) != 0 {
+		t.Errorf("crossCheckEffectiveGraph with the sole included source's concept present only as a Conflict: want no failure, got %v", failed)
 	}
 }

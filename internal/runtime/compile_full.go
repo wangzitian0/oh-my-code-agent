@@ -285,7 +285,8 @@ func desiredStateRef(profiles []domain.Profile, activation domain.Activation, ex
 // desiredStateScope marks a GenerationSourceEntry as a resolvedAssetSources
 // audit record rather than an Observation-derived one (compileHostTree's own
 // entries always carry a real ontology Scope.Kind, e.g. "user"/"workspace").
-// Exported at package level (originally a resolvedAssetSources-local const)
+// Promoted to package scope (originally a resolvedAssetSources-local const,
+// still unexported)
 // so verify.go's post-activation EffectiveGraph cross-check
 // (crossCheckEffectiveGraph) can reliably tell the two kinds of entry apart
 // without duplicating this literal a second time: a desired-state entry's
