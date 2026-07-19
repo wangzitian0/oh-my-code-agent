@@ -3,10 +3,12 @@ package report
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/wangzitian0/oh-my-code-agent/internal/domain"
 	"github.com/wangzitian0/oh-my-code-agent/internal/drift"
 	"github.com/wangzitian0/oh-my-code-agent/internal/effective"
+	"github.com/wangzitian0/oh-my-code-agent/internal/knowledge"
 )
 
 // BuildDriftSignals is the PR-18-anticipated adapter (see doc.go's "The
@@ -50,15 +52,25 @@ import (
 // that builds a real Desired<->Effective identity bridge is the correct
 // place to add it.
 //
+// A third situation needs more than the Effective Graph alone: an unqualified
+// knowledge.Resolution (ADR-0004 decision 3 -- "no published Pack's version
+// range covers the installed version ... treated as UNKNOWN and degrades to
+// observed/OBSERVED reconcile mode") becomes KNOWLEDGE_DRIFT
+// (knowledgeDriftSignals below), so a human sees the same fail-closed fact
+// cmd/omca/mcp.go's capabilityFuncForMCP already enforces at the write gate,
+// surfaced here as a first-class, groupable ActionCard instead of only a
+// silent capability denial.
+//
 // project is the human-facing project label every emitted Signal's Project
 // field carries (reporting.md §7's "8 projects x 5 hosts x 40 artifacts"
 // impact dimension). A caller building a report across several worktrees
 // calls this once per (project, host) Graphs pair and concatenates the
 // results before handing them to drift.ClassifyAll.
-func BuildDriftSignals(project string, g effective.Graphs) []drift.Signal {
+func BuildDriftSignals(project string, g effective.Graphs, resolution knowledge.Resolution, repo knowledge.Repository) []drift.Signal {
 	var out []drift.Signal
 	out = append(out, conflictSignals(project, g)...)
 	out = append(out, ambiguousIdentitySignals(project, g)...)
+	out = append(out, knowledgeDriftSignals(project, g, resolution, repo)...)
 	return out
 }
 
@@ -119,6 +131,77 @@ func ambiguousIdentitySignals(project string, g effective.Graphs) []drift.Signal
 			Guarantee:   domain.GuaranteeObserved,
 		})
 	}
+	return out
+}
+
+// knowledgeDriftSignals turns one host's unqualified knowledge.Resolution
+// into a single KNOWLEDGE_DRIFT drift.Signal. A Qualified resolution (the
+// installed version falls inside some published Pack's versionRange)
+// produces nothing -- there is no drift to report.
+//
+// This is the report-time half of the same fail-closed fact
+// cmd/omca/mcp.go's capabilityFuncForMCP already enforces at the write gate
+// (an unqualified Resolution makes CapabilityFor return
+// ReconcileMode=OBSERVED with every level empty, which
+// internal/mcp/propose.go's capabilityAndPolicyGates then rejects): before
+// this function existed, an unqualified host silently lost write capability
+// with no human-visible signal explaining why. The Signal names the
+// installed version and every version range this host DOES have a published
+// Pack for, so a maintainer sees the actual gap rather than just "capability
+// denied".
+func knowledgeDriftSignals(project string, g effective.Graphs, resolution knowledge.Resolution, repo knowledge.Repository) []drift.Signal {
+	if resolution.Qualified {
+		return nil
+	}
+
+	ranges := packVersionRangesForHost(repo, g.Host)
+	var observed string
+	if len(ranges) == 0 {
+		observed = fmt.Sprintf("no Knowledge Pack is published for host %q at all", g.Host)
+	} else {
+		observed = fmt.Sprintf("published Knowledge Pack version range(s) for host %q: %s -- none cover the installed version", g.Host, strings.Join(ranges, ", "))
+	}
+
+	reason := resolution.Reason
+	if reason == "" {
+		reason = fmt.Sprintf("host %q version %q does not fall inside any qualified Knowledge Pack's versionRange", g.Host, g.HostVersion)
+	}
+
+	return []drift.Signal{{
+		EntityID:    "host/" + g.Host,
+		Concept:     "host",
+		Field:       "knowledgeQualification",
+		Category:    domain.DriftKnowledgeDrift,
+		Expected:    fmt.Sprintf("installed version %q inside a qualified Knowledge Pack's versionRange", g.HostVersion),
+		Observed:    observed,
+		RootCause:   reason,
+		Remediation: "poll allowlisted official sources, build a Knowledge Candidate, run qualification fixtures, and publish an updated Pack covering this version (docs/knowledge/README.md §8); until then this host degrades to observation-only and write capability expansion is blocked",
+		Project:     project,
+		Host:        g.Host,
+		HostVersion: g.HostVersion,
+		Guarantee:   domain.GuaranteeObserved,
+	}}
+}
+
+// packVersionRangesForHost returns the sorted, deduplicated set of
+// metadata.versionRange values every loaded Pack declares for host --
+// exactly the set an unqualified Resolution's installed version fell
+// outside of, so knowledgeDriftSignals can show a human what IS published
+// rather than only that the installed version is not covered by it.
+func packVersionRangesForHost(repo knowledge.Repository, host string) []string {
+	seen := make(map[string]bool)
+	var out []string
+	for _, p := range repo.Packs() {
+		if p.Knowledge.Metadata.Host != host {
+			continue
+		}
+		r := p.Knowledge.Metadata.VersionRange
+		if !seen[r] {
+			seen[r] = true
+			out = append(out, r)
+		}
+	}
+	sort.Strings(out)
 	return out
 }
 
