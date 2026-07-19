@@ -5,8 +5,8 @@
 Drift: 1 root cause(s)
 
 DR-8105bca2  SOURCE_DRIFT
-  Reason      precedence program "mcp_server.union-by-id" declares operator UNION_BY_ID for concept "mcp_server", but the Knowledge Pack's resolve capability is "UNKNOWN" (not EXACT/COMPATIBLE); 2 sources disagree and this package refuses to guess a winner
-  Action      qualify a precedence program for this concept in the host's Knowledge Pack so the resolver can select a winner, or resolve the collision with an explicit Profile/Exception
+  Reason      sources disagree and no resolver could select a single winner (see the Debug view for the full precedence trace)
+  Action      sources disagree and no resolver could select a single winner (see the Debug view for the full precedence trace)
   Impact      1 project(s) x 1 host(s) x 1 artifact(s)
   Guarantee   OBSERVED
   Samples

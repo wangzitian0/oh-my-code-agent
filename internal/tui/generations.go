@@ -60,13 +60,37 @@ func renderGenerationPointer(b *strings.Builder, label, generationID string, sou
 	}
 	fmt.Fprintf(b, "    %d source(s): %d included, %d excluded\n", len(sources), included, excluded)
 
+	// A regression test (Copilot review finding on this PR): Included+Concept
+	// alone is not a total order -- two entries with the same Concept and
+	// Included status (common in real data, e.g. two excluded skills) tie,
+	// and sort.Slice gives no guarantee about tie order (unlike
+	// sort.SliceStable, and even that would only preserve input order, not a
+	// deterministic one). An undefined tie order risks golden-file churn
+	// across Go versions/runs. Scope/Host/Source/Reason chain in as
+	// tiebreakers to produce a full deterministic order -- Source is a
+	// native path and is used here only as a sort key, never displayed
+	// (this function's own printed columns stay Concept/status/Reason only,
+	// unchanged).
 	sorted := make([]domain.GenerationSourceEntry, len(sources))
 	copy(sorted, sources)
 	sort.Slice(sorted, func(i, j int) bool {
-		if sorted[i].Included != sorted[j].Included {
-			return sorted[i].Included // included entries first
+		a, c := sorted[i], sorted[j]
+		if a.Included != c.Included {
+			return a.Included // included entries first
 		}
-		return sorted[i].Concept < sorted[j].Concept
+		if a.Concept != c.Concept {
+			return a.Concept < c.Concept
+		}
+		if a.Scope != c.Scope {
+			return a.Scope < c.Scope
+		}
+		if a.Host != c.Host {
+			return a.Host < c.Host
+		}
+		if a.Source != c.Source {
+			return a.Source < c.Source
+		}
+		return a.Reason < c.Reason
 	})
 	for _, s := range sorted {
 		status := "included"
