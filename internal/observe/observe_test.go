@@ -180,7 +180,9 @@ func TestObserve_ClaudeCode_FullLayout(t *testing.T) {
 	mustWriteFile(t, filepath.Join(tr.ClaudeConfigDir, "CLAUDE.md"), "# user instructions\n")
 	mustWriteFile(t, filepath.Join(tr.ClaudeConfigDir, "rules", "style.md"), "# style rule\n")
 	mustWriteFile(t, filepath.Join(tr.ClaudeConfigDir, "rules", "nested", "deep.md"), "# nested rule\n")
-	mustWriteFile(t, filepath.Join(tr.ClaudeConfigDir, ".claude.json"), `{"mcpServers":{"demo":{"command":"npx"}}}`)
+	// .claude.json lives at bare HomeDir, a SIBLING of ClaudeConfigDir, not
+	// nested inside it — see claudeTree's HomeDir doc comment.
+	mustWriteFile(t, filepath.Join(tr.HomeDir, ".claude.json"), `{"mcpServers":{"demo":{"command":"npx"}}}`)
 	mustWriteFile(t, filepath.Join(tr.ClaudeConfigDir, "skills", "deploy", "SKILL.md"), "---\nname: deploy\n---\nbody\n")
 
 	mustWriteFile(t, filepath.Join(tr.HomeAgentsDir, "shared", "SKILL.md"), "---\nname: shared\n---\nbody\n")
@@ -202,11 +204,11 @@ func TestObserve_ClaudeCode_FullLayout(t *testing.T) {
 		{conceptInstruction, filepath.Join(tr.ClaudeConfigDir, "CLAUDE.md")},
 		{conceptInstruction, filepath.Join(tr.ClaudeConfigDir, "rules", "style.md")},
 		{conceptInstruction, filepath.Join(tr.ClaudeConfigDir, "rules", "nested", "deep.md")},
-		{conceptMCPServer, filepath.Join(tr.ClaudeConfigDir, ".claude.json")},
+		{conceptMCPServer, filepath.Join(tr.HomeDir, ".claude.json")},
 		// PR-16: .claude.json is also documented as carrying Policy/state's
 		// "OAuth, project trust, cache" (rules.go's claudeUserRules doc
 		// comment) — same file, one additional concept-tagged record.
-		{conceptPolicy, filepath.Join(tr.ClaudeConfigDir, ".claude.json")},
+		{conceptPolicy, filepath.Join(tr.HomeDir, ".claude.json")},
 		{conceptSkill, filepath.Join(tr.ClaudeConfigDir, "skills", "deploy", "SKILL.md")},
 		{conceptSkill, filepath.Join(tr.HomeAgentsDir, "shared", "SKILL.md")},
 		{conceptInstruction, filepath.Join(tr.WorktreeRoot, "CLAUDE.md")},
@@ -224,7 +226,7 @@ func TestObserve_ClaudeCode_FullLayout(t *testing.T) {
 
 	// .claude.json / .mcp.json ARE structurally parsed: content must be a
 	// generic map carrying every field losslessly, not a raw string.
-	mcp := findObservation(t, obs, conceptMCPServer, filepath.Join(tr.ClaudeConfigDir, ".claude.json"))
+	mcp := findObservation(t, obs, conceptMCPServer, filepath.Join(tr.HomeDir, ".claude.json"))
 	content, ok := mcp.Spec.OpaqueVendorFields["content"].(map[string]any)
 	if !ok {
 		t.Fatalf(".claude.json OpaqueVendorFields[content] type = %T, want map[string]any", mcp.Spec.OpaqueVendorFields["content"])
@@ -240,7 +242,7 @@ func TestObserve_ClaudeCode_FullLayout(t *testing.T) {
 
 func TestObserve_MalformedJSON_FallsBackToRawText(t *testing.T) {
 	tr := newClaudeTree(t)
-	mustWriteFile(t, filepath.Join(tr.ClaudeConfigDir, ".claude.json"), `{not valid json`)
+	mustWriteFile(t, filepath.Join(tr.HomeDir, ".claude.json"), `{not valid json`)
 
 	obs, err := Observe(tr.request("2.1.211"))
 	if err != nil {
@@ -248,7 +250,7 @@ func TestObserve_MalformedJSON_FallsBackToRawText(t *testing.T) {
 	}
 	assertValid(t, obs)
 
-	mcp := findObservation(t, obs, conceptMCPServer, filepath.Join(tr.ClaudeConfigDir, ".claude.json"))
+	mcp := findObservation(t, obs, conceptMCPServer, filepath.Join(tr.HomeDir, ".claude.json"))
 	content, ok := mcp.Spec.OpaqueVendorFields["content"].(string)
 	if !ok {
 		t.Fatalf("malformed .claude.json OpaqueVendorFields[content] type = %T, want string fallback", mcp.Spec.OpaqueVendorFields["content"])
@@ -447,7 +449,7 @@ func TestObserve_E0_OpaqueVendorFieldsMatchesDigestedValue(t *testing.T) {
 func TestObserve_JSONLargeInteger_PrecisionPreserved(t *testing.T) {
 	tr := newClaudeTree(t)
 	const bigInt = "123456789012345678" // exceeds float64's 2^53 exact-integer range
-	mustWriteFile(t, filepath.Join(tr.ClaudeConfigDir, ".claude.json"),
+	mustWriteFile(t, filepath.Join(tr.HomeDir, ".claude.json"),
 		`{"mcpServers":{"demo":{"command":"npx","meta":{"pid":`+bigInt+`}}}}`)
 
 	obs, err := Observe(tr.request("2.1.211"))

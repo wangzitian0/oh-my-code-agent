@@ -105,7 +105,9 @@ func TestObserve_Policy_Codex_Golden(t *testing.T) {
 // re-tagged policy) plus settings.json's permissions block.
 func TestObserve_Policy_ClaudeCode_Golden(t *testing.T) {
 	tr := newClaudeTree(t)
-	mustWriteFile(t, filepath.Join(tr.ClaudeConfigDir, ".claude.json"), `{"mcpServers":{},"projects":{}}`)
+	// .claude.json lives at bare HomeDir, a SIBLING of ClaudeConfigDir, not
+	// nested inside it — see claudeTree's HomeDir doc comment.
+	mustWriteFile(t, filepath.Join(tr.HomeDir, ".claude.json"), `{"mcpServers":{},"projects":{}}`)
 	mustWriteFile(t, filepath.Join(tr.ClaudeConfigDir, "settings.json"), `{"permissions":{"deny":["Bash(rm -rf *)"]}}`)
 
 	obs, err := Observe(tr.request("2.1.211"))
@@ -113,7 +115,7 @@ func TestObserve_Policy_ClaudeCode_Golden(t *testing.T) {
 		t.Fatalf("Observe: %v", err)
 	}
 	assertExactIDs(t, filterByConcept(obs, conceptPolicy), []string{
-		"claude-code:policy:" + filepath.Join(tr.ClaudeConfigDir, ".claude.json"),
+		"claude-code:policy:" + filepath.Join(tr.HomeDir, ".claude.json"),
 		"claude-code:policy:" + filepath.Join(tr.ClaudeConfigDir, "settings.json"),
 	})
 }

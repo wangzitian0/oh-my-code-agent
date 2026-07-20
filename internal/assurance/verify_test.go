@@ -258,7 +258,18 @@ func loadRealCaseGraph(t *testing.T, host, version, fixtureRel string) (effectiv
 	det := hostcontext.HostDetection{Host: host, Surface: "cli", Installed: true, Version: c.Version}
 	switch host {
 	case "claude-code":
-		det.NativeHomes = []hostcontext.NativeHome{{Name: "CLAUDE_CONFIG_DIR", Path: sb.ClaudeConfigDir}}
+		// This sandbox's ClaudeConfigDir stands in for an explicitly-set
+		// CLAUDE_CONFIG_DIR, under which real Claude Code relocates
+		// .claude.json right along with the asset directory, so both
+		// entries deliberately share the identical Path here (see
+		// internal/context/host.go's claudeNativeHomes doc comment) —
+		// without this second entry, this fixture's user-scope
+		// "shared-tools" MCP-ID collision (the whole point of the
+		// mcp-merge case) would silently stop being exercised.
+		det.NativeHomes = []hostcontext.NativeHome{
+			{Name: "CLAUDE_CONFIG_DIR", Path: sb.ClaudeConfigDir},
+			{Name: "HOME/.claude.json", Path: sb.ClaudeConfigDir},
+		}
 	case "codex":
 		det.NativeHomes = []hostcontext.NativeHome{
 			{Name: "CODEX_HOME", Path: sb.CodexHome},

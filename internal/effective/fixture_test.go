@@ -54,8 +54,15 @@ func buildObserveRequest(sb *qualify.Sandbox, host, version string) observe.Requ
 	}
 	switch host {
 	case "claude-code":
+		// This sandbox's ClaudeConfigDir stands in for an EXPLICITLY SET
+		// CLAUDE_CONFIG_DIR (a dedicated fixture subdirectory, not bare
+		// $HOME) — real Claude Code relocates .claude.json right along
+		// with the asset directory in that case, so both NativeHome
+		// entries deliberately collapse to the identical Path here (see
+		// internal/context/host.go's claudeNativeHomes doc comment).
 		req.Detection.NativeHomes = []hostcontext.NativeHome{
 			{Name: "CLAUDE_CONFIG_DIR", Path: sb.ClaudeConfigDir},
+			{Name: "HOME/.claude.json", Path: sb.ClaudeConfigDir},
 		}
 	case "codex":
 		req.Detection.NativeHomes = []hostcontext.NativeHome{
