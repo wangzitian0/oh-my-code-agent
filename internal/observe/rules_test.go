@@ -25,7 +25,7 @@ func ruleCoversFile(rules []sourceRule, filename string) bool {
 // .claude.json actually lives when CLAUDE_CONFIG_DIR is unset), and must
 // look for it exclusively under the new "HOME/.claude.json" NativeHome —
 // not both, which would double-report the same file whenever
-// CLAUDE_CONFIG_DIR happens to be unset and get date out of sync with
+// CLAUDE_CONFIG_DIR happens to be unset and get data out of sync with
 // internal/context/host.go's claudeNativeHomes, which only ever reports
 // .claude.json's rule-relevant location under the "HOME/.claude.json" name.
 func TestClaudeUserRules_ClaudeJSON_MovedNotDuplicated(t *testing.T) {
