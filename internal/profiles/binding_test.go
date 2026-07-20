@@ -289,6 +289,28 @@ func TestMatchedProfileIDs_UnionAndDedup(t *testing.T) {
 	}
 }
 
+// TestMatchesRepository_UnsetMatchNeverMatches is a regression test for a
+// Copilot review finding on this PR: matchesRepository's fallback branch
+// used to be a bare `match.Repository == repository` comparison, which is
+// true for "" == "" -- an unvalidated Binding whose spec.match sets
+// neither repository nor repositoryGlob would incorrectly match a caller
+// that (however unusually) passes an empty-string repository argument,
+// contradicting the documented "correctly matches nothing" guarantee.
+// domain.ValidateBinding rejects such a Binding before it can reach
+// MatchBindings via LoadBindings, but matchesRepository is exercised
+// directly here (same package) because it must not rely on that upstream
+// validation having run -- defense in depth for any future caller that
+// constructs a Binding without going through LoadBindings.
+func TestMatchesRepository_UnsetMatchNeverMatches(t *testing.T) {
+	unset := domain.BindingMatch{}
+	if matchesRepository(unset, "") {
+		t.Error(`matchesRepository(BindingMatch{}, "") = true, want false`)
+	}
+	if matchesRepository(unset, "/Users/x/workspace/order-service") {
+		t.Error(`matchesRepository(BindingMatch{}, "/Users/x/workspace/order-service") = true, want false`)
+	}
+}
+
 // TestGlobMatch_PatternGrammar unit-tests the small doublestar-style
 // matcher directly, beyond the golden-context table above.
 func TestGlobMatch_PatternGrammar(t *testing.T) {

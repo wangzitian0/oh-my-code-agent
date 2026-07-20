@@ -112,17 +112,26 @@ func MatchBindings(bindings []domain.Binding, repository, relPath string) []doma
 // match.RepositoryGlob (globMatch) is set. domain.ValidateBinding already
 // guarantees exactly one of the two is non-empty for any Binding that
 // reached this function via LoadBindings, but this helper does not assume
-// that invariant was already checked: it dispatches on which field is
-// actually set (RepositoryGlob takes priority if, unexpectedly, both were
-// somehow set) rather than trying to fall back from one to the other,
-// so a Binding with neither field set (an unvalidated construction, e.g.
-// directly in a test) correctly matches nothing instead of matching every
-// repository.
+// that invariant was already checked: it dispatches explicitly on which
+// field is actually set (RepositoryGlob takes priority if, unexpectedly,
+// both were somehow set) rather than falling back to a bare
+// `match.Repository == repository` comparison, whose == would itself
+// evaluate true for an unset match.Repository ("") against an
+// empty-string repository argument -- silently matching an unvalidated,
+// field-less Binding against an empty caller-supplied repository, instead
+// of correctly matching nothing (Copilot review finding on this PR; see
+// TestMatchesRepository_UnsetMatchNeverMatches for the regression this
+// guards). A Binding with neither field set must match no repository
+// value at all, empty string included.
 func matchesRepository(match domain.BindingMatch, repository string) bool {
-	if match.RepositoryGlob != "" {
+	switch {
+	case match.RepositoryGlob != "":
 		return globMatch(match.RepositoryGlob, repository)
+	case match.Repository != "":
+		return match.Repository == repository
+	default:
+		return false
 	}
-	return match.Repository == repository
 }
 
 // MatchedProfileIDs returns the union of every matched Binding's
