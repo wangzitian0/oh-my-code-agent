@@ -229,9 +229,21 @@ isolated Codex home and a virtual process home:
 ```text
 OMCA_REAL_HOME=/Users/alice
 HOME=<generation>/virtual-home
-CODEX_HOME=<generation>/codex-home
+CODEX_HOME=<worktree-state>/state/hosts/codex/cli/codex-home
 OMCA_RUN_ID=<generation-id>
 ```
+
+`CODEX_HOME` is deliberately NOT `<generation>/hosts/codex/cli/codex-home`:
+that directory is the generation's own compiled config, made read-only on
+disk (§5.2, §12's "current artifacts do not change during a session"), while
+Codex uses this same variable to store its own mutable runtime state (session
+history, local SQLite databases, `auth.json`) — pointing it directly at a
+read-only directory fails the moment Codex tries to write. Each launch
+instead points `CODEX_HOME` at a writable directory scoped to the worktree
+(§9's "worktree-shared" state class), pre-synced with the current
+generation's compiled `config.toml` but otherwise left untouched, so Codex's
+own state survives both relaunches and generation recompiles within the same
+worktree.
 
 The generated Codex configuration can restore the real `HOME` for subprocesses
 through Codex shell-environment policy so Git, SSH, package managers, and build
@@ -380,6 +392,12 @@ identity-shared
 host-global external
 prohibited import
 ```
+
+Codex's own `CODEX_HOME`-resident state (sessions, SQLite databases,
+`auth.json`) is classified `worktree-shared` (§7.1): scoped under
+`OMCA_STATE_DIR`/worktree, not the generation directory, so it survives a
+generation recompile instead of being silently wiped by one, and is never
+copied into — or shared across — a different worktree's own state.
 
 Sharing state through symlinks is allowed only for an explicit allowlist backed
 by fixtures. A broad symlink to the native host home defeats isolation.

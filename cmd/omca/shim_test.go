@@ -242,10 +242,22 @@ func TestShim_EndToEnd_NonRecursionAndEnvInjection(t *testing.T) {
 		t.Fatalf("shim invocation did not exit within 10s (possible recursion); stderr so far:\n%s", stderr.String())
 	}
 
-	wantHomeDir := filepath.Join(generationDir, "hosts", "codex", "cli", "codex-home")
+	// CODEX_HOME must point at the writable, worktree-scoped mutable-state
+	// directory (runtime.MutableNativeHomeDir) synced from the generation's
+	// own read-only codex-home, NOT at the read-only generation directory
+	// itself -- a real host launched against the latter fails outright the
+	// moment it tries to write its own runtime state (e.g. Codex's own
+	// CODEX_HOME/state_5.sqlite: "unable to open database file").
+	wantHomeDir := filepath.Join(worktreeStateDir, "state", "hosts", "codex", "cli", "codex-home")
 	wantLine := "CODEX_HOME=" + wantHomeDir
 	if !strings.Contains(stdout.String(), wantLine) {
 		t.Errorf("fakehost's dumped environment did not contain %q; stdout:\n%s", wantLine, stdout.String())
+	}
+	if info, statErr := os.Stat(wantHomeDir); statErr != nil || info.Mode().Perm()&0o200 == 0 {
+		t.Errorf("CODEX_HOME directory %s is not writable (stat err: %v, mode: %v) -- the exact class of bug this test guards against", wantHomeDir, statErr, info)
+	}
+	if _, err := os.ReadFile(filepath.Join(wantHomeDir, "config.toml")); err != nil {
+		t.Errorf("CODEX_HOME directory %s was not synced with the generation's compiled config.toml: %v", wantHomeDir, err)
 	}
 
 	// docs/architecture/runtime.md §7.1's other half: HOME itself must also
@@ -310,7 +322,7 @@ func TestShim_EndToEnd_ASDFManagedInterpreter_BypassesBrokenShimScript(t *testin
 		t.Skip("syscall.Exec-based shim mode is macOS-first scope")
 	}
 
-	worktreeStateDir, generationDir := buildFixtureCurrentGeneration(t)
+	worktreeStateDir, _ := buildFixtureCurrentGeneration(t)
 
 	shimDir := t.TempDir()
 	installFixtureShim(t, shimDir)
@@ -396,7 +408,11 @@ func TestShim_EndToEnd_ASDFManagedInterpreter_BypassesBrokenShimScript(t *testin
 	// received the same generation-scoped env injection as the
 	// non-interpreter case (HOME virtualized, CODEX_HOME pointing into the
 	// real compiled generation).
-	wantHomeDir := filepath.Join(generationDir, "hosts", "codex", "cli", "codex-home")
+	// See TestShim_EndToEnd_NonRecursionAndEnvInjection's identical assertion
+	// for why this is worktreeStateDir/state/... and not generationDir/...:
+	// CODEX_HOME must point at the writable mutable-state directory, never
+	// the read-only generation directory.
+	wantHomeDir := filepath.Join(worktreeStateDir, "state", "hosts", "codex", "cli", "codex-home")
 	if !strings.Contains(stdout.String(), "CODEX_HOME="+wantHomeDir) {
 		t.Errorf("fakehost's dumped environment did not contain CODEX_HOME=%s; stdout:\n%s", wantHomeDir, stdout.String())
 	}

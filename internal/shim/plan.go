@@ -58,8 +58,16 @@ type Plan struct {
 	// NativeHomeEnvVar is the environment variable Exec sets to
 	// NativeHomeDir before exec'ing RealBinaryPath (runtime.NativeHomeEnvVar).
 	NativeHomeEnvVar string
-	// NativeHomeDir is the current generation's native-home directory for
-	// Host (runtime.NativeHomeDirName, joined under GenerationDir).
+	// NativeHomeDir is the writable, worktree-scoped directory Exec points
+	// Host's native-home variable at (runtime.MutableNativeHomeDir) --
+	// pre-synced by Build with the current generation's compiled config
+	// artifacts (runtime.SyncMutableNativeHome), but NOT itself inside
+	// GenerationDir: GenerationDir's own native-home directory
+	// (runtime.NativeHomeDirName) is read-only (readonly.go), and Host
+	// stores mutable runtime state (sessions, local databases, trust
+	// decisions) at whatever path its native-home variable resolves to, so
+	// pointing it directly at a read-only directory fails the moment Host
+	// tries to write.
 	NativeHomeDir string
 	// GenerationID is the compiled generation's metadata.id, best-effort —
 	// empty if the current generation's manifest could not be re-read (see
@@ -248,6 +256,20 @@ func Build(invokedName string, environ []string) (Plan, error) {
 		return Plan{}, fmt.Errorf("shim: Build: current generation %s for %s has no %s directory at %s; run `omca env` again", genDir, host, homeDirName, nativeHomeDir)
 	}
 
+	// mutableHomeDir is what Plan.NativeHomeDir actually resolves to below --
+	// nativeHomeDir itself is read-only (readonly.go), and a host launched
+	// with its native-home variable pointing directly at it fails the moment
+	// it tries to write its own runtime state there (runtime.
+	// MutableNativeHomeDir's doc comment has the full rationale and the real
+	// observed failure this fixes).
+	mutableHomeDir, err := runtime.MutableNativeHomeDir(stateDir, host, surfaceCLI)
+	if err != nil {
+		return Plan{}, fmt.Errorf("shim: Build: %w", err)
+	}
+	if err := runtime.SyncMutableNativeHome(nativeHomeDir, mutableHomeDir); err != nil {
+		return Plan{}, fmt.Errorf("shim: Build: %w", err)
+	}
+
 	virtualHomeDir := filepath.Join(genDir, "hosts", host, surfaceCLI, runtime.VirtualHomeDirName)
 	if info, statErr := os.Stat(virtualHomeDir); statErr != nil || !info.IsDir() {
 		return Plan{}, fmt.Errorf("shim: Build: current generation %s for %s has no %s directory at %s; run `omca env` again", genDir, host, runtime.VirtualHomeDirName, virtualHomeDir)
@@ -257,7 +279,7 @@ func Build(invokedName string, environ []string) (Plan, error) {
 		Host:             host,
 		RealBinaryPath:   realPath,
 		NativeHomeEnvVar: envVar,
-		NativeHomeDir:    nativeHomeDir,
+		NativeHomeDir:    mutableHomeDir,
 		GenerationID:     genID,
 		GenerationDir:    genDir,
 		VirtualHomeDir:   virtualHomeDir,
