@@ -115,6 +115,42 @@ spec:
     - project:order-service
 ```
 
+`spec.match` requires exactly one of `repository` or `repositoryGlob` — they
+are mutually exclusive alternatives for naming which repository context(s)
+a Binding selects, not independent filters that could both apply at once.
+`repository` (above) requires an exact match: one Binding names one
+repository. `repositoryGlob` instead matches any repository against a
+doublestar-style glob pattern (the same `**`/`*` segment grammar `paths`
+already uses), so one Binding can select every repository under a prefix
+without an entry per project:
+
+```yaml
+apiVersion: omca.dev/v1alpha1
+kind: Binding
+
+metadata:
+  id: binding:workspace-projects
+
+spec:
+  match:
+    repositoryGlob: "/home/example/workspace/**"
+    paths: ["**"]
+  profiles:
+    - company:example
+```
+
+This closes a real gap for anyone with many project checkouts and ephemeral
+`git worktree add` worktrees: previously, applying one Binding to "every
+project under a given directory" required a separate, near-duplicate
+Binding per checkout, with no way to automatically cover a worktree created
+later. When more than one Binding matches the same repository and path
+(whether by `repository`, `repositoryGlob`, or both), all of them apply:
+their `spec.profiles` are unioned, since nothing loads unless a selected
+Profile explicitly includes it and there is no "exclude" concept at this
+layer. A real conflict between two selected Profiles over the same asset is
+resolved downstream by the Effective Graph's merge operators (e.g.
+`DENY_WINS`), not by Binding precedence.
+
 ### 4.3 Local activation
 
 Local activation records worktree-specific choices without modifying a shared

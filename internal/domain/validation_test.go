@@ -25,7 +25,22 @@ func TestValidateBinding_RequiredFields(t *testing.T) {
 	missingRepo := base
 	missingRepo.Spec.Match = BindingMatch{}
 	if err := ValidateBinding(missingRepo); err == nil {
-		t.Error("expected an error for missing spec.match.repository")
+		t.Error("expected an error for missing spec.match.repository and spec.match.repositoryGlob (neither set)")
+	}
+
+	bothRepoFields := base
+	bothRepoFields.Spec.Match = BindingMatch{
+		Repository:     "github.com/example/order-service",
+		RepositoryGlob: "github.com/example/**",
+	}
+	if err := ValidateBinding(bothRepoFields); err == nil {
+		t.Error("expected an error when both spec.match.repository and spec.match.repositoryGlob are set")
+	}
+
+	globOnly := base
+	globOnly.Spec.Match = BindingMatch{RepositoryGlob: "github.com/example/**"}
+	if err := ValidateBinding(globOnly); err != nil {
+		t.Errorf("a repositoryGlob-only spec.match should validate: %v", err)
 	}
 
 	missingProfiles := base
