@@ -25,14 +25,19 @@
         "match": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["repository"],
+          "description": "Exactly one of repository or repositoryGlob must be set -- mutually exclusive alternatives for naming which repository context(s) this Binding selects, not independent filters. repository (the original, still-fully-supported mode) requires an exact match; repositoryGlob (issue: closes the 'apply to every checkout under a prefix, e.g. ~/workspace/**, including worktrees created later' gap that one Binding = one literal repository could not express) matches via the same doublestar-style '**'/'*' segment grammar paths already uses.",
           "properties": {
             "repository": { "type": "string", "minLength": 1 },
+            "repositoryGlob": { "type": "string", "minLength": 1 },
             "paths": {
               "type": "array",
               "items": { "type": "string" }
             }
-          }
+          },
+          "oneOf": [
+            { "required": ["repository"], "not": { "required": ["repositoryGlob"] } },
+            { "required": ["repositoryGlob"], "not": { "required": ["repository"] } }
+          ]
         },
         "profiles": {
           "type": "array",
