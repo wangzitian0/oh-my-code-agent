@@ -130,9 +130,30 @@ func TestBuild_ResolvesRealBinaryAndInjectsGenerationEnv(t *testing.T) {
 	if plan.NativeHomeEnvVar != "CODEX_HOME" {
 		t.Errorf("NativeHomeEnvVar = %q, want CODEX_HOME", plan.NativeHomeEnvVar)
 	}
-	wantHomeDir := filepath.Join(outputDir, "hosts", "codex", "cli", "codex-home")
+	// NativeHomeDir must be the writable, worktree-scoped mutable-state
+	// directory (runtime.MutableNativeHomeDir), never outputDir's own
+	// read-only codex-home -- a real host launched against the latter fails
+	// outright the moment it tries to write its own runtime state (e.g.
+	// Codex's own CODEX_HOME/state_5.sqlite: "unable to open database
+	// file").
+	wantHomeDir := filepath.Join(stateDir, "state", "hosts", "codex", "cli", "codex-home")
 	if plan.NativeHomeDir != wantHomeDir {
 		t.Errorf("NativeHomeDir = %q, want %q", plan.NativeHomeDir, wantHomeDir)
+	}
+	if info, statErr := os.Stat(plan.NativeHomeDir); statErr != nil || info.Mode().Perm()&0o200 == 0 {
+		t.Errorf("NativeHomeDir %s is not writable (stat err: %v, mode: %v) -- the exact class of bug this test guards against", plan.NativeHomeDir, statErr, info)
+	}
+	wantConfig := filepath.Join(outputDir, "hosts", "codex", "cli", "codex-home", "config.toml")
+	wantContent, err := os.ReadFile(wantConfig)
+	if err != nil {
+		t.Fatalf("reading generation's own config.toml: %v", err)
+	}
+	gotContent, err := os.ReadFile(filepath.Join(plan.NativeHomeDir, "config.toml"))
+	if err != nil {
+		t.Fatalf("NativeHomeDir was not synced with the generation's compiled config.toml: %v", err)
+	}
+	if string(gotContent) != string(wantContent) {
+		t.Errorf("synced config.toml content = %q, want %q", gotContent, wantContent)
 	}
 	if plan.GenerationID != gen.Metadata.ID {
 		t.Errorf("GenerationID = %q, want %q", plan.GenerationID, gen.Metadata.ID)
@@ -143,6 +164,61 @@ func TestBuild_ResolvesRealBinaryAndInjectsGenerationEnv(t *testing.T) {
 	}
 	if plan.RealHomeDir != realHome {
 		t.Errorf("RealHomeDir = %q, want %q", plan.RealHomeDir, realHome)
+	}
+}
+
+// TestBuild_PreservesHostStateAcrossRelaunch is this fix's own
+// worktree-shared-state regression proof: a second Build call against the
+// same worktree (simulating a second launch -- e.g. a codex/claude session
+// relaunched after a generation recompile) must never wipe state a previous
+// launch's host process already wrote into NativeHomeDir (Codex's own
+// state_5.sqlite, session history, auth.json, ...). Only the OMCA-authored
+// config files a generation compiles are ever refreshed
+// (runtime.SyncMutableNativeHome).
+func TestBuild_PreservesHostStateAcrossRelaunch(t *testing.T) {
+	stateDir := t.TempDir()
+	buildFixtureGeneration(t, stateDir)
+
+	shimDir := t.TempDir()
+	writeFakeExecutable(t, shimDir, "codex")
+	realDir := t.TempDir()
+	writeFakeExecutable(t, realDir, "codex")
+	realHome := t.TempDir()
+
+	environ := []string{
+		"PATH=" + shimDir + string(os.PathListSeparator) + realDir,
+		"OMCA_SHIM_DIR=" + shimDir,
+		"OMCA_STATE_DIR=" + stateDir,
+		"HOME=" + realHome,
+	}
+
+	first, err := Build("codex", environ)
+	if err != nil {
+		t.Fatalf("first Build: %v", err)
+	}
+
+	// Simulate the host process (from the first launch) having written its
+	// own runtime state into NativeHomeDir -- exactly what a real Codex
+	// session does with state_5.sqlite.
+	hostState := filepath.Join(first.NativeHomeDir, "state_5.sqlite")
+	if err := os.WriteFile(hostState, []byte("real session state"), 0o644); err != nil {
+		t.Fatalf("simulating host-written state: %v", err)
+	}
+
+	second, err := Build("codex", environ)
+	if err != nil {
+		t.Fatalf("second Build: %v", err)
+	}
+	if second.NativeHomeDir != first.NativeHomeDir {
+		t.Fatalf("NativeHomeDir changed across relaunches in the same worktree: first %q, second %q -- host state would be silently orphaned", first.NativeHomeDir, second.NativeHomeDir)
+	}
+
+	got, err := os.ReadFile(hostState)
+	if err != nil {
+		t.Fatalf("a second launch removed the first launch's host-written state: %v", err)
+	}
+	if string(got) != "real session state" {
+		t.Errorf("host-written state content changed = %q, want untouched %q", got, "real session state")
 	}
 }
 

@@ -338,8 +338,24 @@ func runIsolated(stderr io.Writer, host string, realEnv hostcontext.Environment,
 		}
 	}
 
+	// mutableHomeDir is what overrides[envVar] actually points at below --
+	// nativeHomeDir itself is read-only (readonly.go), and a host launched
+	// with its native-home variable pointing directly at it fails the moment
+	// it tries to write its own runtime state there (runtime.
+	// MutableNativeHomeDir's doc comment has the full rationale and the real
+	// observed failure this fixes).
+	mutableHomeDir, err := runtime.MutableNativeHomeDir(worktreeStateDir, host, surface)
+	if err != nil {
+		fmt.Fprintf(stderr, "omca: run: %v\n", err)
+		return 1
+	}
+	if err := runtime.SyncMutableNativeHome(nativeHomeDir, mutableHomeDir); err != nil {
+		fmt.Fprintf(stderr, "omca: run: %v\n", err)
+		return 1
+	}
+
 	overrides := map[string]string{
-		envVar:             nativeHomeDir,
+		envVar:             mutableHomeDir,
 		"HOME":             virtualHomeDir,
 		"OMCA_REAL_HOME":   realEnv.Get("HOME"),
 		"OMCA_RUN_ID":      gen.Metadata.ID,
