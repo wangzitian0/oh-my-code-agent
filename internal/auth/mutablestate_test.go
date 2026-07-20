@@ -67,7 +67,7 @@ func TestClassificationTable_ClaudeJSON_IsProhibitedImport(t *testing.T) {
 				t.Errorf(".claude.json Class = %q, want %q", item.Class, domain.MutableStateProhibitedImport)
 			}
 			if !item.RelativeToHomeDir {
-				t.Error(".claude.json RelativeToHomeDir = false, want true (it lives outside CLAUDE_CONFIG_DIR)")
+				t.Error(".claude.json RelativeToHomeDir = false, want true (its own unset-default fallback is bare $HOME, distinct from the asset tree's $HOME/.claude default)")
 			}
 		}
 	}
