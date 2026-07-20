@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "decoy-should-never-be-observed": {
+      "command": "npx",
+      "args": ["-y", "@example/this-file-sits-at-the-old-wrong-nested-path"]
+    }
+  }
+}

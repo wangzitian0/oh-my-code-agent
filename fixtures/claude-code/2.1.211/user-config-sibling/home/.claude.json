@@ -1,0 +1,57 @@
+{
+  "mcpServers": {
+    "omsc": {
+      "command": "npx",
+      "args": ["-y", "@example/omsc-server"],
+      "env": {"OMSC_API_TOKEN": "fixture-fake-value-not-a-real-secret-7f3a9c"}
+    },
+    "skynet-base": {
+      "command": "npx",
+      "args": ["-y", "@example/skynet-base-server"],
+      "headers": {"Authorization": "fixture-fake-value-not-a-real-secret-7f3a9c"}
+    },
+    "skynet-plan-and-gen-fast": {
+      "command": "npx",
+      "args": ["-y", "@example/skynet-plan-and-gen-fast-server"]
+    }
+  },
+  "oauthAccount": {
+    "emailAddress": "example-user@example.com",
+    "accessToken": "fixture-fake-value-not-a-real-secret-7f3a9c",
+    "refreshToken": "fixture-fake-value-not-a-real-secret-7f3a9c"
+  },
+  "projects": {
+    "/Users/example/projects/alpha": {
+      "allowedTools": [],
+      "mcpServers": {
+        "alpha-only-server": {
+          "command": "npx",
+          "args": ["-y", "@example/alpha-server"],
+          "env": {"ALPHA_SECRET_KEY": "fixture-fake-value-not-a-real-secret-7f3a9c"}
+        }
+      },
+      "disabledMcpServers": ["skynet-base"],
+      "enabledPlugins": ["my-marketplace/deploy-helper"],
+      "hasTrustDialogAccepted": true
+    },
+    "/Users/example/projects/beta": {
+      "allowedTools": [],
+      "mcpServers": {},
+      "disabledMcpServers": [],
+      "enabledPlugins": ["my-marketplace/lint-helper"],
+      "hasTrustDialogAccepted": false
+    },
+    "/Users/example/projects/gamma": {
+      "allowedTools": [],
+      "mcpServers": {
+        "gamma-only-server": {
+          "command": "npx",
+          "args": ["-y", "@example/gamma-server"]
+        }
+      },
+      "disabledMcpServers": [],
+      "enabledPlugins": [],
+      "hasTrustDialogAccepted": true
+    }
+  }
+}
