@@ -299,3 +299,91 @@ func TestBuild_NoCurrentGeneration(t *testing.T) {
 		t.Fatal("Build with no compiled generation: want error, got nil")
 	}
 }
+
+// TestBuild_ResolvesInterpreter_WhenASDFTargetIsItselfAnEnvIndirectScript is
+// this fix's own regression proof, reproducing the real machine's exact
+// shape found while dogfooding this project (a new instance of issue #69's
+// class of bug, one interpreter layer deeper than TestBuild_
+// ResolvesPastASDFShim above covers): codex's own asdf-installed binary is
+// not a native executable but a "#!/usr/bin/env node" script, and node is
+// *also* asdf-managed on the same machine. Without this fix, Build would
+// hand back RealBinaryPath pointing at that script as-is, and Exec would
+// rely on the OS's own shebang handling to find "node" via PATH at exec
+// time -- exactly when HOME has already been virtualized, which breaks
+// node's own asdf shim dispatch (silently: exit 126, no output, verified by
+// hand against a real asdf+node+codex install during this fix's own
+// investigation). Build must instead resolve "node" itself past its asdf
+// shim to a concrete binary and report it via Plan.InterpreterPath.
+func TestBuild_ResolvesInterpreter_WhenASDFTargetIsItselfAnEnvIndirectScript(t *testing.T) {
+	stateDir := t.TempDir()
+	buildFixtureGeneration(t, stateDir)
+
+	shimDir := t.TempDir()
+	writeFakeExecutable(t, shimDir, "codex")
+
+	asdfDataDir := filepath.Join(t.TempDir(), ".asdf")
+	writeASDFShim(t, asdfDataDir, "codex", [][2]string{{"nodejs", "20.19.0"}})
+	writeASDFShim(t, asdfDataDir, "node", [][2]string{{"nodejs", "20.19.0"}})
+
+	// The "installed" codex binary is itself an env-indirect script, not a
+	// native binary -- exactly codex-cli's own real, observed shape.
+	codexBinDir := filepath.Join(asdfDataDir, "installs", "nodejs", "20.19.0", "bin")
+	if err := os.MkdirAll(codexBinDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	codexScript := filepath.Join(codexBinDir, "codex")
+	if err := os.WriteFile(codexScript, []byte("#!/usr/bin/env node\nconsole.log(\"codex\");\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wantInterpreter := writeASDFInstalledBinary(t, asdfDataDir, "nodejs", "20.19.0", "node")
+
+	environ := []string{
+		"PATH=" + shimDir + string(os.PathListSeparator) + filepath.Join(asdfDataDir, "shims"),
+		"OMCA_SHIM_DIR=" + shimDir,
+		"OMCA_STATE_DIR=" + stateDir,
+		"HOME=" + t.TempDir(),
+	}
+
+	plan, err := Build("codex", environ)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if plan.RealBinaryPath != codexScript {
+		t.Errorf("RealBinaryPath = %q, want %q (the resolved codex script itself, unresolved further)", plan.RealBinaryPath, codexScript)
+	}
+	if plan.InterpreterPath != wantInterpreter {
+		t.Errorf("InterpreterPath = %q, want %q (node resolved past its own asdf shim)", plan.InterpreterPath, wantInterpreter)
+	}
+}
+
+// TestBuild_InterpreterPath_Empty_WhenTargetIsNotEnvIndirectScript proves
+// the overwhelmingly common case -- RealBinaryPath is an ordinary native
+// binary, not any kind of shebang script -- leaves InterpreterPath empty,
+// so Exec's existing, unmodified behavior (exec RealBinaryPath directly)
+// still applies. This is TestBuild_ResolvesRealBinaryAndInjectsGenerationEnv's
+// own fixture, with only the new field asserted, proving this fix does not
+// change behavior for the non-asdf, non-script case.
+func TestBuild_InterpreterPath_Empty_WhenTargetIsNotEnvIndirectScript(t *testing.T) {
+	stateDir := t.TempDir()
+	buildFixtureGeneration(t, stateDir)
+
+	shimDir := t.TempDir()
+	writeFakeExecutable(t, shimDir, "codex")
+	realDir := t.TempDir()
+	writeFakeExecutable(t, realDir, "codex") // "#!/bin/sh\nexit 0\n" -- an absolute-path shebang, not env-indirect
+
+	environ := []string{
+		"PATH=" + shimDir + string(os.PathListSeparator) + realDir,
+		"OMCA_SHIM_DIR=" + shimDir,
+		"OMCA_STATE_DIR=" + stateDir,
+		"HOME=" + t.TempDir(),
+	}
+
+	plan, err := Build("codex", environ)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if plan.InterpreterPath != "" {
+		t.Errorf("InterpreterPath = %q, want \"\" (RealBinaryPath is not an env-indirect script)", plan.InterpreterPath)
+	}
+}

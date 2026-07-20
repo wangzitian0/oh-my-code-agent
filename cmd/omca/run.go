@@ -316,6 +316,28 @@ func runIsolated(stderr io.Writer, host string, realEnv hostcontext.Environment,
 		execBinaryPath = resolved
 	}
 
+	// execBinaryPath can still carry its own, one-layer-deeper HOME
+	// dependency: a "#!/usr/bin/env <name>" script (codex's own
+	// asdf-installed binary is exactly this) defers resolving <name> to the
+	// OS's own shebang handling AT EXEC TIME via PATH -- and if <name> is
+	// itself asdf-managed (node commonly is), that lookup needs the same
+	// real, resolvable HOME the block above already worked around for
+	// execBinaryPath itself. Resolve <name> now, using this process's own
+	// real PATH, exactly like shim.Build (internal/shim/plan.go) does for
+	// the PATH-shim launch path, so the exec below can invoke the real
+	// interpreter directly and never depend on the virtualized HOME either.
+	interpreterPath := ""
+	if name, isEnvIndirect := shim.ShebangEnvIndirectInterpreter(execBinaryPath); isEnvIndirect {
+		if interpCandidate, resolveErr := shim.ResolveReal(name, realEnv.Get("PATH"), ""); resolveErr == nil {
+			if shim.IsASDFShim(interpCandidate) {
+				if resolved, asdfErr := shim.ResolveASDFShimTarget(interpCandidate); asdfErr == nil {
+					interpCandidate = resolved
+				}
+			}
+			interpreterPath = interpCandidate
+		}
+	}
+
 	overrides := map[string]string{
 		envVar:             nativeHomeDir,
 		"HOME":             virtualHomeDir,
@@ -325,8 +347,15 @@ func runIsolated(stderr io.Writer, host string, realEnv hostcontext.Environment,
 		"OMCA_WORKTREE_ID": wt.ID,
 	}
 	envp := shim.InjectEnv(os.Environ(), overrides)
-	argv := append([]string{execBinaryPath}, passthrough...)
-	if err := shim.ExecReplace(execBinaryPath, argv, envp); err != nil {
+
+	execPath := execBinaryPath
+	argv := []string{execBinaryPath}
+	if interpreterPath != "" {
+		execPath = interpreterPath
+		argv = []string{interpreterPath, execBinaryPath}
+	}
+	argv = append(argv, passthrough...)
+	if err := shim.ExecReplace(execPath, argv, envp); err != nil {
 		fmt.Fprintf(stderr, "omca: run: %v\n", err)
 		return 1
 	}

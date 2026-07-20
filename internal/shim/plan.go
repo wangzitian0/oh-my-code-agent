@@ -85,6 +85,23 @@ type Plan struct {
 	// anything it spawns) to recover the identity-shared real home it was
 	// launched from; Exec itself never reads it back.
 	RealHomeDir string
+	// InterpreterPath, when non-empty, is the real, concrete interpreter
+	// binary that RealBinaryPath's own "#!/usr/bin/env <name>" shebang line
+	// names -- already resolved past any asdf-shim indirection of its own,
+	// exactly like RealBinaryPath itself was. Set only when RealBinaryPath
+	// is such a script and <name> was resolvable; empty otherwise (the
+	// common case: RealBinaryPath is an ordinary native binary with no
+	// shebang, so there is nothing to resolve). When set, Exec invokes
+	// InterpreterPath directly with RealBinaryPath as its first argument,
+	// bypassing the OS's own shebang-driven PATH lookup of <name> entirely
+	// -- the one piece of exec behavior that would otherwise depend on a
+	// resolvable HOME at exec time (an asdf-managed <name>'s own shim
+	// dispatch needs one), which Exec is about to virtualize. This closes
+	// the same asdf+virtualized-HOME class of failure issue #69 fixed for
+	// RealBinaryPath itself, one interpreter layer deeper: a real, observed
+	// case is codex's own asdf-installed binary being a
+	// "#!/usr/bin/env node" script, where node is *also* asdf-managed.
+	InterpreterPath string
 }
 
 // getEnv returns the value of the last environ entry named key
@@ -160,6 +177,39 @@ func Build(invokedName string, environ []string) (Plan, error) {
 		realPath = resolved
 	}
 
+	// realPath can still carry its own, one-layer-deeper HOME dependency
+	// even now: a "#!/usr/bin/env <name>" script (e.g. codex's own
+	// asdf-installed binary is exactly this -- a Node entry point) defers
+	// resolving <name> to the OS's own shebang handling AT EXEC TIME, using
+	// whatever PATH is in the exec'd environment -- and if <name> is
+	// *itself* asdf-managed (node commonly is, on the same machine that
+	// triggered issue #69), that lookup needs the same real, resolvable
+	// HOME the outer asdf shim needed, which Exec is about to virtualize.
+	// Resolve <name> ourselves, now, using this process's own real PATH
+	// (before virtualization), so Exec can invoke the real interpreter
+	// directly and this second layer never depends on HOME either.
+	interpreterPath := ""
+	if name, isEnvIndirect := ShebangEnvIndirectInterpreter(realPath); isEnvIndirect {
+		if interpCandidate, resolveErr := ResolveReal(name, getEnv(environ, "PATH"), shimDir); resolveErr == nil {
+			if IsASDFShim(interpCandidate) {
+				if resolved, asdfErr := ResolveASDFShimTarget(interpCandidate); asdfErr == nil {
+					interpCandidate = resolved
+				}
+				// asdfErr != nil: leave interpCandidate as the unresolved
+				// asdf shim path rather than failing Build outright -- Exec
+				// will still try it, and a genuine failure there surfaces
+				// the real OS exec error instead of this function silently
+				// declining to even attempt the common case.
+			}
+			interpreterPath = interpCandidate
+		}
+		// resolveErr != nil: <name> is not found in PATH outside the OMCA
+		// shim dir at all -- leave interpreterPath empty and fall through to
+		// today's existing behavior (exec realPath directly). This keeps an
+		// interpreter Build cannot resolve a soft, "maybe not immune to this
+		// class of bug" case rather than a hard failure.
+	}
+
 	// HOME is required, the same fail-closed way OMCA_STATE_DIR is below:
 	// Exec must always set HOME to the generation's virtual-home directory
 	// (docs/architecture/runtime.md §7.1), and it must always record the
@@ -212,5 +262,6 @@ func Build(invokedName string, environ []string) (Plan, error) {
 		GenerationDir:    genDir,
 		VirtualHomeDir:   virtualHomeDir,
 		RealHomeDir:      realHome,
+		InterpreterPath:  interpreterPath,
 	}, nil
 }
