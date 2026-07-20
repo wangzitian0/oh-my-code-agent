@@ -284,6 +284,132 @@ func TestShim_EndToEnd_NonRecursionAndEnvInjection(t *testing.T) {
 	}
 }
 
+// TestShim_EndToEnd_ASDFManagedInterpreter_BypassesBrokenShimScript
+// reproduces, through a real syscall.Exec, the exact failure this fix
+// closes -- found by hand while dogfooding this project against a real
+// asdf+node+codex install (a new instance of issue #69's class of bug, one
+// interpreter layer deeper than that issue's own fix reaches):
+// codex's own asdf-installed binary is a "#!/usr/bin/env node" script, and
+// node is *itself* asdf-managed on the same machine. asdf's own shim
+// dispatch (the "node" shim script under asdfDataDir/shims here) needs a
+// real, resolvable HOME to find its own state -- the shim script fixture
+// below always exits 126 if actually executed, standing in for exactly
+// that failure, reproduced by hand as a silent exit 126 with zero output
+// against the real machine before this fix existed.
+//
+// Without this fix, the shim exec's own HOME virtualization means the OS's
+// shebang handling of codex's "#!/usr/bin/env node" line resolves "node"
+// via PATH at exec time and finds this broken shim script, which exits 126
+// and prints nothing -- exactly the silent failure this test would catch
+// if internal/shim.Build ever regressed to not resolving past it. With the
+// fix, Build resolves "node" itself, past its own asdf shim, to the
+// concrete real binary (here, the fakehost fixture) and Exec invokes it
+// directly, so the shim script above is never executed at all.
+func TestShim_EndToEnd_ASDFManagedInterpreter_BypassesBrokenShimScript(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("syscall.Exec-based shim mode is macOS-first scope")
+	}
+
+	worktreeStateDir, generationDir := buildFixtureCurrentGeneration(t)
+
+	shimDir := t.TempDir()
+	installFixtureShim(t, shimDir)
+
+	// realDir/codex: a real "#!/usr/bin/env node" script, exactly codex-cli's
+	// own observed shape -- not a native binary, and not itself an asdf
+	// shim (that combination is TestBuild_ResolvesPastASDFShim's own
+	// coverage in internal/shim/plan_test.go); this test's own new ground is
+	// the *interpreter* named by the shebang being asdf-managed.
+	realDir := t.TempDir()
+	codexScript := filepath.Join(realDir, "codex")
+	if err := os.WriteFile(codexScript, []byte("#!/usr/bin/env node\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// asdfDataDir/shims/node: recognizable to internal/shim.IsASDFShim (its
+	// grandparent directory is named ".asdf") and to ResolveASDFShimTarget
+	// (the "# asdf-plugin:" metadata line) -- but deliberately broken if
+	// actually executed, standing in for the real asdf shim script's own
+	// HOME-dependent "asdf exec" dispatch, which this fix must never invoke.
+	asdfDataDir := filepath.Join(t.TempDir(), ".asdf")
+	nodeShimDir := filepath.Join(asdfDataDir, "shims")
+	if err := os.MkdirAll(nodeShimDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nodeShimScript := "#!/usr/bin/env bash\n# asdf-plugin: nodejs 20.19.0\necho \"node shim script was executed -- this is the exact bug this fix closes\" >&2\nexit 126\n"
+	if err := os.WriteFile(filepath.Join(nodeShimDir, "node"), []byte(nodeShimScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// asdfDataDir/installs/nodejs/20.19.0/bin/node: the concrete real binary
+	// ResolveASDFShimTarget must resolve "node" to -- the fakehost fixture,
+	// so a successful run dumps its environment exactly like the sibling
+	// non-interpreter end-to-end test above asserts against.
+	nodeInstallDir := filepath.Join(asdfDataDir, "installs", "nodejs", "20.19.0", "bin")
+	if err := os.MkdirAll(nodeInstallDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(testFixtureBinaries.fakeHost, filepath.Join(nodeInstallDir, "node")); err != nil {
+		t.Fatal(err)
+	}
+
+	markerFile := filepath.Join(t.TempDir(), "invocations.log")
+	realHome := t.TempDir()
+
+	environ := []string{
+		"HOME=" + realHome,
+		"PATH=" + shimDir + string(os.PathListSeparator) + realDir + string(os.PathListSeparator) + nodeShimDir,
+		"OMCA_SHIM_DIR=" + shimDir,
+		"OMCA_STATE_DIR=" + worktreeStateDir,
+		"FAKEHOST_MARKER=" + markerFile,
+	}
+
+	cmd := exec.Command(filepath.Join(shimDir, "codex"))
+	cmd.Env = environ
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	done := make(chan error, 1)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting shim: %v", err)
+	}
+	go func() { done <- cmd.Wait() }()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("shim invocation failed (want success -- the broken node shim script must never run): %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+		}
+	case <-time.After(10 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatalf("shim invocation did not exit within 10s; stderr so far:\n%s", stderr.String())
+	}
+
+	if strings.Contains(stderr.String(), "node shim script was executed") {
+		t.Fatalf("the broken node asdf shim script was executed -- Build fell through to the OS's own shebang handling instead of resolving the interpreter itself; stderr:\n%s", stderr.String())
+	}
+
+	// fakehost, invoked as the resolved interpreter with codexScript as its
+	// first argument, dumps its own environment -- proving the interpreter
+	// actually ran (not just "exited 0 from somewhere"), and that it
+	// received the same generation-scoped env injection as the
+	// non-interpreter case (HOME virtualized, CODEX_HOME pointing into the
+	// real compiled generation).
+	wantHomeDir := filepath.Join(generationDir, "hosts", "codex", "cli", "codex-home")
+	if !strings.Contains(stdout.String(), "CODEX_HOME="+wantHomeDir) {
+		t.Errorf("fakehost's dumped environment did not contain CODEX_HOME=%s; stdout:\n%s", wantHomeDir, stdout.String())
+	}
+
+	markerData, err := os.ReadFile(markerFile)
+	if err != nil {
+		t.Fatalf("reading invocation marker: %v", err)
+	}
+	if strings.Count(string(markerData), "invoked") != 1 {
+		t.Errorf("fakehost (as the resolved interpreter) was invoked %d times, want exactly 1: %q", strings.Count(string(markerData), "invoked"), string(markerData))
+	}
+}
+
 // TestShim_SIGINT_ExitCodePassthrough is issue #14's literal exec-semantics
 // AC test: "invoke the shim wrapping a fake binary that blocks until it
 // receives SIGINT then exits with a specific code, send SIGINT to the shim
