@@ -268,6 +268,91 @@ func TestDetectHost_ClaudeConfigDirOverride(t *testing.T) {
 	}
 }
 
+// TestDetectHost_ClaudeHomeClaudeJSON_DefaultHome is the regression test for
+// the real bug this package's own commit history root-caused live against a
+// machine with real MCP servers configured: `.claude.json` resolves to bare
+// $HOME/.claude.json when CLAUDE_CONFIG_DIR is unset — a SIBLING of the
+// default $HOME/.claude asset directory — never nested inside it. A
+// previous version of claudeNativeHomes only reported a "CLAUDE_CONFIG_DIR"
+// entry defaulted to $HOME/.claude, which internal/observe/rules.go then
+// (wrongly) used to look for .claude.json at $HOME/.claude/.claude.json —
+// a path that never exists on a real machine, so claude-code always found 0
+// mcp_server candidates from this source. This asserts the new
+// "HOME/.claude.json" entry's default Path is bare $HOME, not $HOME/.claude.
+func TestDetectHost_ClaudeHomeClaudeJSON_DefaultHome(t *testing.T) {
+	binDir := t.TempDir()
+	writeFakeBinary(t, binDir, "claude", "2.1.211 (Claude Code)\n")
+	home := t.TempDir()
+	env := Environment{Vars: []string{"HOME=" + home, "PATH=" + binDir}}
+
+	det, err := DetectHost(context.Background(), env, "claude-code")
+	if err != nil {
+		t.Fatalf("DetectHost: %v", err)
+	}
+
+	found := false
+	for _, nh := range det.NativeHomes {
+		if nh.Name == "HOME/.claude.json" {
+			found = true
+			if nh.Path != home {
+				t.Errorf("HOME/.claude.json Path = %q, want bare HOME %q", nh.Path, home)
+			}
+			// The old, wrong assumption: nested under the default asset
+			// directory. Assert this is NOT what gets reported anymore.
+			wrongNestedPath := filepath.Join(home, ".claude")
+			if nh.Path == wrongNestedPath {
+				t.Errorf("HOME/.claude.json Path = %q, matches the OLD wrong nested-under-.claude assumption; want bare HOME", nh.Path)
+			}
+			if nh.FromEnvVar != "" {
+				t.Errorf("HOME/.claude.json FromEnvVar = %q, want empty (CLAUDE_CONFIG_DIR unset, default in use)", nh.FromEnvVar)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no HOME/.claude.json entry in NativeHomes")
+	}
+}
+
+// TestDetectHost_ClaudeHomeClaudeJSON_ConfigDirOverride proves that when
+// CLAUDE_CONFIG_DIR IS explicitly set, "HOME/.claude.json"'s Path collapses
+// to the identical directory as "CLAUDE_CONFIG_DIR"'s own Path — matching
+// real Claude Code's own behavior of relocating .claude.json right along
+// with the asset directory in that case (read-only `strings`-extraction
+// evidence against the installed binary, see claudeNativeHomes' doc
+// comment). This is the one case this bug fix does NOT change: it already
+// worked correctly before this fix, and must keep working identically.
+func TestDetectHost_ClaudeHomeClaudeJSON_ConfigDirOverride(t *testing.T) {
+	binDir := t.TempDir()
+	writeFakeBinary(t, binDir, "claude", "2.1.211 (Claude Code)\n")
+	home := t.TempDir()
+	override := t.TempDir()
+	env := Environment{Vars: []string{
+		"HOME=" + home,
+		"PATH=" + binDir,
+		"CLAUDE_CONFIG_DIR=" + override,
+	}}
+
+	det, err := DetectHost(context.Background(), env, "claude-code")
+	if err != nil {
+		t.Fatalf("DetectHost: %v", err)
+	}
+	found := false
+	for _, nh := range det.NativeHomes {
+		if nh.Name == "HOME/.claude.json" {
+			found = true
+			if nh.Path != override {
+				t.Errorf("HOME/.claude.json Path = %q, want override %q", nh.Path, override)
+			}
+			if nh.FromEnvVar != "CLAUDE_CONFIG_DIR" {
+				t.Errorf("HOME/.claude.json FromEnvVar = %q, want %q", nh.FromEnvVar, "CLAUDE_CONFIG_DIR")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no HOME/.claude.json entry in NativeHomes")
+	}
+}
+
 func TestDetectHost_VersionProbeUnparseableOutput(t *testing.T) {
 	binDir := t.TempDir()
 	writeFakeBinary(t, binDir, "codex", "no version number in here\n")

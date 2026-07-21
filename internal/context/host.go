@@ -110,14 +110,38 @@ func codexNativeHomes(env Environment) []NativeHome {
 // binary — see fixtures/README.md for the full evidentiary trail, including
 // that this was never behaviorally confirmed by launching Claude Code with
 // the variable set).
+//
+// This returns THREE entries, not two, because ~/.claude.json (Claude
+// Code's user/local MCP-registry + trust/OAuth state file) resolves via a
+// formula with a DIFFERENT unset-default fallback than every other file
+// under the CLAUDE_CONFIG_DIR entry: read-only `strings` extraction against
+// the real installed binary (fixtures/README.md's own static-inspection
+// method, reproduced here against a second, newer install — see
+// internal/observe/rules.go's claudeUserRules doc comment for the exact
+// evidence and dated correction note) shows Claude Code computes it as
+// `path.join(process.env.CLAUDE_CONFIG_DIR || os.homedir(), ".claude.json")`
+// — i.e. CLAUDE_CONFIG_DIR, when SET, relocates .claude.json right along
+// with the asset directory (both land directly under it, so the
+// "CLAUDE_CONFIG_DIR" and "HOME/.claude.json" entries below deliberately
+// collapse to the identical Path in that case), but when CLAUDE_CONFIG_DIR
+// is UNSET, .claude.json sits at bare $HOME/.claude.json — a SIBLING of the
+// default $HOME/.claude asset directory, never nested inside it, unlike
+// this same fallback rule for every other Claude Code source file. A single
+// "CLAUDE_CONFIG_DIR" NativeHome cannot represent both fallback shapes at
+// once, hence the dedicated "HOME/.claude.json" entry (named after the
+// resolved-shape convention "HOME/.agents/skills" below already
+// established, not the runtime-level $HOME-redirection concept in
+// internal/runtime/mutablehome.go, which this package has no relation to).
 func claudeNativeHomes(env Environment) []NativeHome {
 	home := env.Get("HOME")
 	claudeConfigDir := env.Get("CLAUDE_CONFIG_DIR")
 	homes := []NativeHome{}
 	if claudeConfigDir != "" {
 		homes = append(homes, NativeHome{Name: "CLAUDE_CONFIG_DIR", Path: claudeConfigDir, FromEnvVar: "CLAUDE_CONFIG_DIR"})
+		homes = append(homes, NativeHome{Name: "HOME/.claude.json", Path: claudeConfigDir, FromEnvVar: "CLAUDE_CONFIG_DIR"})
 	} else {
 		homes = append(homes, NativeHome{Name: "CLAUDE_CONFIG_DIR", Path: filepath.Join(home, ".claude")})
+		homes = append(homes, NativeHome{Name: "HOME/.claude.json", Path: home})
 	}
 	homes = append(homes, NativeHome{Name: "HOME/.agents/skills", Path: filepath.Join(home, ".agents", "skills")})
 	return homes

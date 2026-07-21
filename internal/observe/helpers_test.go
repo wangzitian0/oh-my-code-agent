@@ -131,16 +131,26 @@ func (tr codexTree) request(version string) Request {
 // claudeTree is claude-code's analogous synthetic host layout.
 type claudeTree struct {
 	ClaudeConfigDir string
-	HomeAgentsDir   string
-	WorktreeRoot    string
+	// HomeDir is the synthetic bare-$HOME directory: real Claude Code's
+	// ~/.claude.json lives directly here (a SIBLING of ClaudeConfigDir, the
+	// default $HOME/.claude asset directory), never nested inside
+	// ClaudeConfigDir — see internal/context/host.go's claudeNativeHomes and
+	// internal/observe/rules.go's claudeUserRules doc comments for the
+	// real-machine evidence this split is based on. It is also
+	// HomeAgentsDir's parent, matching real $HOME/.agents/skills.
+	HomeDir       string
+	HomeAgentsDir string
+	WorktreeRoot  string
 }
 
 func newClaudeTree(t *testing.T) claudeTree {
 	t.Helper()
 	root := t.TempDir()
+	homeDir := filepath.Join(root, "home")
 	return claudeTree{
 		ClaudeConfigDir: filepath.Join(root, "claude-config"),
-		HomeAgentsDir:   filepath.Join(root, "home", ".agents", "skills"),
+		HomeDir:         homeDir,
+		HomeAgentsDir:   filepath.Join(homeDir, ".agents", "skills"),
 		WorktreeRoot:    filepath.Join(root, "project"),
 	}
 }
@@ -153,6 +163,7 @@ func (tr claudeTree) request(version string) Request {
 			Version: version,
 			NativeHomes: []hostcontext.NativeHome{
 				{Name: "CLAUDE_CONFIG_DIR", Path: tr.ClaudeConfigDir, FromEnvVar: "CLAUDE_CONFIG_DIR"},
+				{Name: "HOME/.claude.json", Path: tr.HomeDir},
 				{Name: "HOME/.agents/skills", Path: tr.HomeAgentsDir},
 			},
 		},

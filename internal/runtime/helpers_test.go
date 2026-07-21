@@ -100,6 +100,12 @@ func (tr claudeFixtureTree) detection(version string) hostcontext.HostDetection 
 		Version: version,
 		NativeHomes: []hostcontext.NativeHome{
 			{Name: "CLAUDE_CONFIG_DIR", Path: tr.ClaudeConfigDir, FromEnvVar: "CLAUDE_CONFIG_DIR"},
+			// ClaudeConfigDir stands in for an explicitly-set
+			// CLAUDE_CONFIG_DIR, under which real Claude Code relocates
+			// .claude.json right along with the asset directory, so both
+			// entries deliberately share the identical Path here (see
+			// internal/context/host.go's claudeNativeHomes doc comment).
+			{Name: "HOME/.claude.json", Path: tr.ClaudeConfigDir, FromEnvVar: "CLAUDE_CONFIG_DIR"},
 		},
 	}
 }

@@ -8,10 +8,22 @@ import "github.com/wangzitian0/oh-my-code-agent/internal/domain"
 // claude-code — internal/context/host.go's codexNativeHomes/
 // claudeNativeHomes) unless RelativeToHomeDir is true, in which case it is
 // relative to $HOME directly (needed for Claude Code's ~/.claude.json,
-// which docs/architecture/runtime.md §7.2 explicitly documents as a
-// separate file OUTSIDE the CLAUDE_CONFIG_DIR-relocatable tree: "account
-// and OAuth state, project trust decisions, and parts of the MCP registry
-// share one mutable user state file").
+// which docs/architecture/runtime.md §7.2 documents as carrying "account
+// and OAuth state, project trust decisions, and parts of the MCP
+// registry" in one mutable user state file).
+//
+// Correction (2026-07-20): RelativeToHomeDir's own doc text used to claim
+// .claude.json sits "OUTSIDE the CLAUDE_CONFIG_DIR-relocatable tree" —
+// imprecise. Read-only `strings` extraction against the installed `claude`
+// binary (internal/context/host.go's claudeNativeHomes doc comment has the
+// full evidence) shows CLAUDE_CONFIG_DIR, when explicitly SET, relocates
+// .claude.json right along with the rest of the asset tree; only the
+// UNSET/default case resolves it to bare $HOME instead of $HOME/.claude.
+// RelativeToHomeDir has no consumer yet that resolves NativePath to a real
+// absolute path (grep confirms only this package's own tests reference the
+// field), so this was a latent doc inaccuracy, not a behavioral bug — noted
+// here so a future consumer doesn't inherit the same wrong assumption
+// internal/observe/rules.go's claudeUserRules briefly had.
 type StateItem struct {
 	Host     string
 	Category string

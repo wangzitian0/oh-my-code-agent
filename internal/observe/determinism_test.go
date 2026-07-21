@@ -64,7 +64,9 @@ func TestObserve_Deterministic_ClaudeCodeRepeatCalls(t *testing.T) {
 	tr := newClaudeTree(t)
 	mustWriteFile(t, filepath.Join(tr.ClaudeConfigDir, "CLAUDE.md"), "# user\n")
 	mustWriteFile(t, filepath.Join(tr.ClaudeConfigDir, "rules", "a.md"), "# rule a\n")
-	mustWriteFile(t, filepath.Join(tr.ClaudeConfigDir, ".claude.json"), `{"mcpServers":{"demo":{"command":"npx","args":["-y","x"]}}}`)
+	// .claude.json lives at bare HomeDir, a SIBLING of ClaudeConfigDir, not
+	// nested inside it — see claudeTree's HomeDir doc comment.
+	mustWriteFile(t, filepath.Join(tr.HomeDir, ".claude.json"), `{"mcpServers":{"demo":{"command":"npx","args":["-y","x"]}}}`)
 	mustWriteFile(t, filepath.Join(tr.ClaudeConfigDir, "skills", "a", "SKILL.md"), "---\nname: a\n---\n")
 	mustWriteFile(t, filepath.Join(tr.WorktreeRoot, ".claude", "CLAUDE.md"), "# project\n")
 	mustWriteFile(t, filepath.Join(tr.WorktreeRoot, ".mcp.json"), `{"mcpServers":{"proj":{"command":"./run.sh"}}}`)

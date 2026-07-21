@@ -76,7 +76,10 @@ func TestObserve_RedactionSafe_ParsedJSONEnvBlock(t *testing.T) {
 	fixtureConfig := filepath.Join(repoFixturesDir(), "claude-code", "2.1.211", "mcp-merge", "input", "claude-config", ".claude.json")
 
 	tr := newClaudeTree(t)
-	copyFixtureFile(t, fixtureConfig, filepath.Join(tr.ClaudeConfigDir, ".claude.json"))
+	// .claude.json lives at bare HomeDir, a SIBLING of ClaudeConfigDir, not
+	// nested inside it — see claudeTree's HomeDir doc comment. The fixture
+	// content itself is unaffected by where it's placed for this test.
+	copyFixtureFile(t, fixtureConfig, filepath.Join(tr.HomeDir, ".claude.json"))
 
 	obs, err := Observe(tr.request("2.1.211"))
 	if err != nil {
@@ -86,7 +89,7 @@ func TestObserve_RedactionSafe_ParsedJSONEnvBlock(t *testing.T) {
 		t.Fatal("Observe returned no observations; this test would be vacuous")
 	}
 
-	mcp := findObservation(t, obs, conceptMCPServer, filepath.Join(tr.ClaudeConfigDir, ".claude.json"))
+	mcp := findObservation(t, obs, conceptMCPServer, filepath.Join(tr.HomeDir, ".claude.json"))
 	if _, ok := mcp.Spec.OpaqueVendorFields["content"].(map[string]any); !ok {
 		t.Fatalf("expected .claude.json content to be parsed into a map, got %T", mcp.Spec.OpaqueVendorFields["content"])
 	}

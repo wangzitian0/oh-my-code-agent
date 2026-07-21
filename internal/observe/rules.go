@@ -198,37 +198,67 @@ func claudeUserRules(nativeHomeName string) []sourceRule {
 	switch nativeHomeName {
 	case "CLAUDE_CONFIG_DIR":
 		// docs/ontology/README.md §6.1: Instructions "~/.claude/CLAUDE.md
-		// and ~/.claude/rules/"; MCP "user/local state in ~/.claude.json"
-		// — under CLAUDE_CONFIG_DIR relocation this file sits directly at
-		// $CLAUDE_CONFIG_DIR/.claude.json, not nested under a further
-		// .claude/ subdirectory (fixtures/README.md's static inspection
-		// finding, knowledge/hosts/claude-code/cli/2.1/manifest.json's
-		// knownUnknowns; matches fixtures/claude-code/2.1.211/mcp-merge's
-		// claude-config/.claude.json layout); Skills
-		// "~/.claude/skills/<id>/SKILL.md".
+		// and ~/.claude/rules/"; Skills "~/.claude/skills/<id>/SKILL.md".
+		// .claude.json (MCP/Policy) is NOT one of this case's files — see
+		// the "HOME/.claude.json" case below for why it needs its own
+		// NativeHome rather than living here.
 		//
 		// PR-16 (issue #20) additions: settings.json/settings.local.json are
 		// docs/ontology/README.md §6.1's "Hooks/plugins: hooks in scoped
 		// settings; plugin manifests and enabled-plugin settings" and
 		// "Policy/state: settings permissions/sandbox/trust" physical
 		// sources — genuinely new files PR-08 never observed (it only
-		// covered CLAUDE.md/rules/.claude.json/skills). .claude.json is also
-		// re-tagged conceptPolicy here: the SAME file's already-parsed
-		// content is documented as carrying "OAuth, project trust, cache" —
-		// no new read, just a second concept-scoped record over content this
-		// package already reads for MCP, relying on the same
-		// internal/domain/redact boundary redact_test.go's
-		// TestObserve_RedactionSafe_ParsedJSONEnvBlock already proves catches
-		// a token-shaped key in this exact file.
+		// covered CLAUDE.md/rules/.claude.json/skills).
 		return []sourceRule{
 			{concept: conceptInstruction, kind: ruleCandidateFiles, files: []string{"CLAUDE.md"}},
 			{concept: conceptInstruction, kind: ruleWalkDir, dir: "rules"},
-			{concept: conceptMCPServer, kind: ruleCandidateFiles, files: []string{".claude.json"}},
-			{concept: conceptPolicy, kind: ruleCandidateFiles, files: []string{".claude.json"}},
 			{concept: conceptSkill, kind: ruleWalkDir, dir: "skills", marker: "SKILL.md"},
 			{concept: conceptHook, kind: ruleCandidateFiles, files: []string{"settings.json", "settings.local.json"}},
 			{concept: conceptPolicy, kind: ruleCandidateFiles, files: []string{"settings.json", "settings.local.json"}},
 			{concept: conceptPlugin, kind: ruleCandidateFiles, files: []string{"settings.json", "settings.local.json"}},
+		}
+	case "HOME/.claude.json":
+		// docs/ontology/README.md §6.1: MCP "user/local state in
+		// ~/.claude.json"; .claude.json is also re-tagged conceptPolicy
+		// here: the SAME file's already-parsed content is documented as
+		// carrying "OAuth, project trust, cache" — no new read, just a
+		// second concept-scoped record over content this package already
+		// reads for MCP, relying on the same internal/domain/redact
+		// boundary redact_test.go's TestObserve_RedactionSafe_ParsedJSONEnvBlock
+		// already proves catches a token-shaped key in this exact file.
+		//
+		// Why this is its own case, not folded into "CLAUDE_CONFIG_DIR"
+		// above (corrected 2026-07-20 — read this before "fixing" it back):
+		// a PREVIOUS version of this function looked for .claude.json
+		// directly under the CLAUDE_CONFIG_DIR NativeHome, on the theory
+		// that CLAUDE_CONFIG_DIR relocation places it there un-nested
+		// (matching fixtures/claude-code/2.1.211/mcp-merge's
+		// claude-config/.claude.json layout). That is true ONLY when
+		// CLAUDE_CONFIG_DIR is explicitly set. When it is unset — the
+		// common case, and the one a real machine with real MCP servers
+		// configured hit — internal/context/host.go's claudeNativeHomes
+		// used to default the "CLAUDE_CONFIG_DIR" NativeHome to
+		// $HOME/.claude (correct for CLAUDE.md/rules/skills/settings.json),
+		// but real Claude Code resolves .claude.json's unset-default
+		// location to bare $HOME/.claude.json instead — a SIBLING of
+		// $HOME/.claude, never nested inside it. Looking for
+		// "$HOME/.claude/.claude.json" therefore silently found nothing on
+		// a real machine (confirmed live: `omca report` found 0
+		// mcp_server candidates for claude-code despite several being
+		// configured, while codex correctly found its 8 real ones from
+		// config.toml), and the committed fixture never caught the
+		// mismatch because it was built with the same wrong assumption
+		// baked in (fixture drift from reality, not independently
+		// verified against a real filesystem layout) — see
+		// internal/context/host.go's claudeNativeHomes doc comment for the
+		// read-only `strings`-extraction evidence this correction rests
+		// on. The fix: report a dedicated "HOME/.claude.json" NativeHome
+		// whose own default fallback is bare $HOME (matching .claude.json's
+		// real resolution formula exactly, independent of the asset
+		// directory's own default), and look for .claude.json only there.
+		return []sourceRule{
+			{concept: conceptMCPServer, kind: ruleCandidateFiles, files: []string{".claude.json"}},
+			{concept: conceptPolicy, kind: ruleCandidateFiles, files: []string{".claude.json"}},
 		}
 	case "HOME/.agents/skills":
 		// Shared cross-host root: this project's own task scope for PR-08
