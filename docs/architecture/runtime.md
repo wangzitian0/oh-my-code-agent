@@ -57,6 +57,14 @@ resolve worktree ID
   -> execute the real host binary
 ```
 
+Shell entry and direct launch preserve an explicitly activated `current`
+generation, including its activation record. `omca env` and `omca run` share
+the runtime selector and the activation/rollback lock. They refresh bootstrap
+only when no desired runtime has been activated; they never activate `pending`.
+An unreadable selection, mismatched worktree/host, missing activation evidence,
+or changed host version fails visibly without replacing the selection. After a
+host upgrade, recompile and explicitly activate the desired runtime first.
+
 The bootstrap generation contains:
 
 - conservative permission defaults;
