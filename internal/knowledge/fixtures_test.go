@@ -206,7 +206,7 @@ func TestAffectedPackages_EmptyHostOrModuleDir_Errors(t *testing.T) {
 // --- AffectedPackages / RunAffectedFixtures against this real repository -
 
 // repoRootForTest resolves this repository's own module root the same way
-// internal/knowledge/repository.go's defaultHostsDir does: relative to this
+// other source-fixture tests do: relative to this
 // source file's own location, so it is correct regardless of the test
 // runner's working directory.
 func repoRootForTest(t *testing.T) string {
