@@ -85,8 +85,9 @@ complete the interactive MVP.
 The installed Codex upgraded after the earlier recheck. The automatic lane ran
 at `2026-09-15T07:59:01Z` using reviewed OMCA `fed8928` on darwin-arm64.
 Its [complete JSON artifact](codex-0.154.0-safe-qualification.json) records the
-pre-update `knowledge-pack=UNKNOWN`, passing MCP and Skill isolation, and clean
-native snapshots. Invocation and synthetic inputs are the same `omca qualify
+`knowledge-pack=UNKNOWN` before adding the 0.154.0 Knowledge Pack, passing
+MCP and Skill isolation, and clean native snapshots. Codex itself was already
+version 0.154.0 in this run. Invocation and synthetic inputs are the same `omca qualify
 tui --json` lane described above: only `--version`, `mcp list --json`, and the
 app-server `initialize`/`initialized`/`skills/list` exchange; no model turn.
 
