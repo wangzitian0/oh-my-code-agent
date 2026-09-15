@@ -20,6 +20,18 @@ func TestRunVersion(t *testing.T) {
 	}
 }
 
+func TestRunHelp(t *testing.T) {
+	for _, arg := range []string{"help", "--help", "-h"} {
+		var stdout, stderr bytes.Buffer
+		if code := run([]string{arg}, &stdout, &stderr); code != 0 {
+			t.Errorf("run(%q) = %d, want success", arg, code)
+		}
+		if !strings.Contains(stdout.String(), usage) || stderr.Len() != 0 {
+			t.Errorf("help should print usage to stdout: stdout=%q stderr=%q", stdout.String(), stderr.String())
+		}
+	}
+}
+
 func TestRunNoArgs(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run(nil, &stdout, &stderr)

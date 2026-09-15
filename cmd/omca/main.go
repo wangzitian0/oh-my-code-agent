@@ -60,6 +60,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	switch args[0] {
+	case "help", "--help", "-h":
+		fmt.Fprintln(stdout, usage)
+		return 0
 	case "version":
 		fmt.Fprintln(stdout, version.String())
 		return 0
