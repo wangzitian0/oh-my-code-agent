@@ -140,7 +140,7 @@ func runEnv(stdout, stderr io.Writer, args []string) int {
 		req := runtime.BootstrapRequest{Detection: hd, Worktree: wt, Observations: obs, Now: now, OMCABinaryPath: omcaCommandPath(shimDir)}
 		gen, outputDir, err := runtime.EnsureLaunchGeneration(req, worktreeStateDir)
 		if err != nil {
-			fmt.Fprintf(stderr, "omca: env: compiling %s generation: %v\n", host, err)
+			fmt.Fprintf(stderr, "omca: env: selecting %s runtime: %v\n", host, err)
 			return 1
 		}
 		fmt.Fprintf(stderr, "omca: env: %s -> generation %s (%s)\n", host, gen.Metadata.ID, outputDir)

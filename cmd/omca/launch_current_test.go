@@ -25,6 +25,8 @@ func TestLaunchEntriesPreserveActivatedRuntime(t *testing.T) {
 				t.Fatal(err)
 			}
 			if entry == "env" {
+				stdout.Reset()
+				stderr.Reset()
 				if code := runEnv(&stdout, &stderr, nil); code != 0 {
 					t.Fatalf("env: %d: %s", code, stderr.String())
 				}
@@ -68,6 +70,8 @@ func TestShellEntryDoesNotReplaceBrokenOrIncompatibleSelection(t *testing.T) {
 			case "host-upgrade":
 				writeFakeVersionBinary(t, env.BinDir, "codex", "codex-cli 0.153.4\n")
 			}
+			stdout.Reset()
+			stderr.Reset()
 			if code := runEnv(&stdout, &stderr, nil); code != 1 {
 				t.Fatalf("%s should fail closed: code=%d, stderr=%s", failure, code, stderr.String())
 			}
@@ -91,6 +95,8 @@ func TestShellEntryLeavesUnapprovedPendingRuntimeInactive(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _, pending := buildPendingFixtureForActivate(t, env, mcpServerProfileYAML, nil, time.Now())
+	stdout.Reset()
+	stderr.Reset()
 	if code := runEnv(&stdout, &stderr, nil); code != 0 {
 		t.Fatal(stderr.String())
 	}

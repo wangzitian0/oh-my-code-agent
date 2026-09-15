@@ -232,7 +232,7 @@ func runIsolated(stderr io.Writer, host string, realEnv hostcontext.Environment,
 	req := runtime.BootstrapRequest{Detection: hd, Worktree: wt, Observations: obs, Now: now, OMCABinaryPath: omcaCommandPath(shimDir)}
 	gen, outputDir, err := runtime.EnsureLaunchGeneration(req, worktreeStateDir)
 	if err != nil {
-		fmt.Fprintf(stderr, "omca: run: compiling %s generation: %v\n", host, err)
+		fmt.Fprintf(stderr, "omca: run: selecting %s runtime: %v\n", host, err)
 		return 1
 	}
 	fmt.Fprintf(stderr, "omca: run: %s\n", contextCostSummaryLine(host, gen))
