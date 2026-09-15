@@ -1,0 +1,41 @@
+{
+  "kind": "InteractiveTUIQualification",
+  "generatedAt": "2026-09-15T09:28:35Z",
+  "hosts": [
+    {
+      "host": "codex",
+      "version": "0.154.0",
+      "knowledgePack": "codex:cli:0.154.0",
+      "checks": [
+        {
+          "id": "knowledge-pack",
+          "status": "PASS",
+          "evidence": "E2",
+          "detail": "installed host version is covered by codex:cli:0.154.0"
+        },
+        {
+          "id": "native-mcp-exclusion",
+          "status": "PASS",
+          "evidence": "E3",
+          "detail": "host-reported MCP inventory=[omca]; native sentinel absent"
+        },
+        {
+          "id": "skill-isolation",
+          "status": "PASS",
+          "evidence": "E3",
+          "detail": "Codex host-reported 7 visible Skills; managed repository sentinel present and native sentinels absent"
+        },
+        {
+          "id": "human-interactive-tui",
+          "status": "UNKNOWN",
+          "evidence": "E0",
+          "detail": "codex initial/restart TUI and omca_status model canary require --interactive and explicit human attestation"
+        }
+      ],
+      "complete": false
+    }
+  ],
+  "realNativeStateClean": true,
+  "interactiveAttempted": false,
+  "complete": false
+}

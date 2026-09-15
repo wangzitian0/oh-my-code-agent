@@ -80,6 +80,42 @@ Skill inventory remains UNKNOWN. Overall completion remains false and the
 automatic command exits 1 as designed; passing these inventory checks does not
 complete the interactive MVP.
 
+## Codex 0.154.0 candidate — 2026-09-15
+
+The installed Codex upgraded after the earlier recheck. The automatic lane ran
+at `2026-09-15T07:59:01Z` using reviewed OMCA `fed8928` on darwin-arm64.
+Its [complete JSON artifact](codex-0.154.0-safe-qualification.json) records the
+`knowledge-pack=UNKNOWN` before adding the 0.154.0 Knowledge Pack, passing
+MCP and Skill isolation, and clean native snapshots. Codex itself was already
+version 0.154.0 in this run. Invocation and synthetic inputs are the same `omca qualify
+tui --json` lane described above: only `--version`, `mcp list --json`, and the
+app-server `initialize`/`initialized`/`skills/list` exchange; no model turn.
+
+The candidate binary repeated the Codex-only probe at
+`2026-09-15T09:28:35Z`; its [post-update JSON artifact](codex-0.154.0-candidate-qualification.json)
+records `knowledge-pack=PASS`, MCP/Skills PASS, unchanged native snapshots, and
+the human gate still UNKNOWN. The manifest pins this newer artifact's bytes;
+the earlier artifact remains the evidence for the original missing-pack finding.
+
+Candidate review:
+
+- Version range: add `>=0.154.0 <0.154.1`; retain every historical pack unchanged.
+- Sources: re-read the official configuration, MCP, Skills, and app-server
+  references. The new manifest records SHA-256 digests of the fetched Markdown
+  bytes. Earlier sources had no digest baseline, so no upstream content diff is
+  claimed. The observed binary version changed from 0.153.4 to 0.154.0.
+- Discovery: no change observed in the tested repository-Skill inclusion and
+  native-Skill/MCP exclusion cases. Collision precedence remains unverified.
+- Capability impact: Skill, MCP, instruction, and permission modes all stay
+  `OBSERVED`; no write authority expands. Only inventory and configuration-load
+  checks have host-reported proof. No adapter change is required for these cases.
+- Generations: old generations retain their pinned knowledge and host version;
+  the existing launch guard requires an explicit rebuild after a host upgrade.
+- Regression gate: the default repository must resolve 0.154.0 to its exact pack
+  while leaving 0.154.1 and 0.155.0 unqualified and every mode `OBSERVED`.
+- Unknowns: both hosts' initial/restart TUI and model canaries remain unrun;
+  Claude 2.1.272 has no safe Skill inventory. Overall completion remains false.
+
 ## Human completion procedure
 
 The remaining E4 proof is:

@@ -249,12 +249,17 @@ an explicit UNKNOWN for the human-owned initial/restart TUI and `omca_status`
 model canary, so even a Codex-only automatic run cannot report completion. The
 remaining interactive gates are not counted as a completed first slice.
 
-Current recheck (2026-09-15): Codex 0.153.4 passes MCP/Skill isolation after
+Earlier recheck (2026-09-15): Codex 0.153.4 passes MCP/Skill isolation after
 migrating the removed approval setting to documented untrusted-project trust.
 Claude Code 2.1.267 passes MCP isolation. Native configuration snapshots remain
 unchanged. The exact-version Codex pack stays OBSERVED; Claude Skills and both
 human TUI/restart/model canaries remain UNKNOWN. See the
 [qualification evidence](../evidence/interactive-tui-v0.1.0.md).
+
+Installed-host follow-up (2026-09-15): Codex 0.154.0 and Claude Code 2.1.272
+pass the same safe inventory checks with unchanged native snapshots. The new
+exact 0.154.0 pack stays `OBSERVED`; adjacent untested releases stay unqualified.
+The human gates remain open. See the [candidate evidence](../evidence/interactive-tui-v0.1.0.md#codex-01540-candidate--2026-09-15).
 
 Launch persistence correction (2026-09-15): both `omca env` and `omca run`
 previously overwrote an explicitly activated runtime with bootstrap. Entry-point

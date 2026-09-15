@@ -310,7 +310,16 @@ func TestDefault_LoadsRealCommittedPacks(t *testing.T) {
 	if !current.Qualified || current.PackID != "codex:cli:0.153.4" {
 		t.Fatalf("current exact-version qualification missing: %+v", current)
 	}
-	for _, version := range []string{"0.153.3", "0.153.5", "0.154.0"} {
+	latest := repo.Resolve("codex", "cli", "0.154.0")
+	if !latest.Qualified || latest.PackID != "codex:cli:0.154.0" {
+		t.Fatalf("installed exact-version qualification missing: %+v", latest)
+	}
+	for _, concept := range []string{"instruction", "skill", "mcp_server", "permission"} {
+		if mode := latest.CapabilityFor(concept).ReconcileMode; mode != ReconcileModeObserved {
+			t.Errorf("Codex 0.154.0 %s mode = %q, want OBSERVED", concept, mode)
+		}
+	}
+	for _, version := range []string{"0.153.3", "0.153.5", "0.154.1", "0.155.0"} {
 		if repo.Resolve("codex", "cli", version).Qualified {
 			t.Errorf("untested Codex %s must remain unqualified", version)
 		}

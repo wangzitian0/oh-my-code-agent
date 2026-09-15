@@ -1,0 +1,100 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "HostKnowledge",
+  "metadata": {
+    "id": "codex:cli:0.154.0",
+    "host": "codex",
+    "surface": "cli",
+    "versionRange": ">=0.154.0 <0.154.1",
+    "platforms": [
+      "darwin-arm64"
+    ],
+    "observedAt": "2026-09-15",
+    "recheckAfter": "2026-10-15",
+    "status": "FRESH"
+  },
+  "evidence": [
+    {
+      "id": "codex-0154-configuration-reference",
+      "kind": "official-doc",
+      "url": "https://learn.chatgpt.com/docs/config-file/config-reference.md",
+      "digest": "sha256:60f5567c787e50f805e7d8b30ae153a1712ae20625c3624372f4b566c88284cb"
+    },
+    {
+      "id": "codex-0154-mcp",
+      "kind": "official-doc",
+      "url": "https://learn.chatgpt.com/docs/extend/mcp.md?surface=cli",
+      "digest": "sha256:978cad2319d28ce8e888e890cb6bd5c5a0631d3dc0b463fc66928ba419982f1a"
+    },
+    {
+      "id": "codex-0154-skills",
+      "kind": "official-doc",
+      "url": "https://learn.chatgpt.com/docs/build-skills.md",
+      "digest": "sha256:d15791562748e64a53dfec534b8558aa522e732cec0fdedcf7257fa4ef486a20"
+    },
+    {
+      "id": "codex-0154-app-server",
+      "kind": "official-doc",
+      "url": "https://learn.chatgpt.com/docs/app-server.md",
+      "digest": "sha256:a72a5c88ab05ab9737ec28b432708f2776f696be48eae09ee39c02dd2f9480e0"
+    },
+    {
+      "id": "codex-0.154.0-safe-host-qualification",
+      "kind": "maintainer-observation",
+      "path": "docs/evidence/codex-0.154.0-candidate-qualification.json",
+      "digest": "sha256:aa07c32c0bdbee1d65b0a78674fbcd66a39fd86d596a8c3544e9ab58f7d5b288"
+    },
+    {
+      "id": "codex-project-approval-config-fixture",
+      "kind": "executable-fixture",
+      "path": "internal/runtime/mcpregistration_test.go"
+    }
+  ],
+  "capabilities": {
+    "skill": {
+      "discover": "PARTIAL",
+      "resolve": "UNKNOWN",
+      "verify": "PARTIAL",
+      "reconcileMode": "OBSERVED",
+      "verificationMethods": [
+        "official-doc-review",
+        "app-server-skills-list",
+        "native-sentinel-qualification"
+      ]
+    },
+    "instruction": {
+      "discover": "PARTIAL",
+      "resolve": "UNKNOWN",
+      "reconcileMode": "OBSERVED",
+      "verificationMethods": [
+        "official-doc-review"
+      ]
+    },
+    "mcp_server": {
+      "discover": "PARTIAL",
+      "resolve": "UNKNOWN",
+      "verify": "PARTIAL",
+      "reconcileMode": "OBSERVED",
+      "verificationMethods": [
+        "official-doc-review",
+        "codex-mcp-list",
+        "native-sentinel-qualification"
+      ]
+    },
+    "permission": {
+      "discover": "PARTIAL",
+      "resolve": "UNKNOWN",
+      "verify": "PARTIAL",
+      "reconcileMode": "OBSERVED",
+      "verificationMethods": [
+        "official-doc-review",
+        "config-load-qualification"
+      ]
+    }
+  },
+  "knownUnknowns": [
+    "Only Codex CLI 0.154.0 on darwin-arm64 was tested. MCP and Skill inventory checks do not prove collision precedence, effective model context, or command approval behavior during a model turn.",
+    "The untrusted-project approval migration loads successfully in safe introspection; command approval semantics are supported by official documentation, not a model-calling test. Project-local Codex configuration is disabled by this policy.",
+    "Human initial/restart TUI and omca_status model canaries remain unrun. All reconciliation modes remain OBSERVED."
+  ]
+}
