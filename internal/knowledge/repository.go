@@ -20,8 +20,8 @@ type Repository struct {
 	packs []Pack
 }
 
-// LoadRepository walks hostsRoot for every file named PackFileName and loads
-// each with LoadPack. A structurally invalid pack anywhere under hostsRoot,
+// LoadRepository walks hostsRoot for every file named PackFileName and applies
+// the shared pack validation and content-addressing parser. A structurally invalid pack anywhere under hostsRoot,
 // or two packs declaring the same metadata.id, fails the whole load closed
 // rather than silently skipping or shadowing a broken/duplicate pack
 // (mirroring internal/ontology.LoadRegistry's discipline for a duplicate
