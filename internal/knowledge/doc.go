@@ -19,31 +19,8 @@
 //     permissive older Pack is never applied optimistically to a new
 //     version.").
 //
-// # A known doc/code discrepancy this package resolves one way, explicitly
-//
-// docs/knowledge/README.md §3 shows a Knowledge Pack directory holding six
-// split files (manifest.yaml, capabilities.yaml, discovery.yaml,
-// precedence.yaml, evidence.yaml, migrations.yaml). The existing
-// domain.HostKnowledge Go type (internal/domain/hostknowledge.go) and the
-// existing schemas/protocol/hostknowledge.v1alpha1.schema.json both model
-// one *combined* JSON document instead — metadata, evidence, capabilities,
-// precedencePrograms, and knownUnknowns together, with no split-file merge
-// logic anywhere in the codebase. This package follows the code and schema
-// (a single combined document per pack, loaded from one manifest.json per
-// pack directory) rather than the docs' split-file layout, because that is
-// what the pre-existing, already-merged HostKnowledge type and schema
-// actually implement. See the PR-07 pull request description for the fuller
-// discussion; this is a known, unresolved tension worth a follow-up, not a
-// silently invented reconciliation.
-//
-// A second, smaller doc/code tension: docs/knowledge/README.md §4's worked
-// example is YAML. domain.HostKnowledge, however, carries only `json`
-// struct tags (no `yaml` tags) — and gopkg.in/yaml.v3's default, tag-free
-// field matching lowercases each Go field name for comparison (VersionRange
-// -> "versionrange"), which does *not* match a camelCase YAML key like
-// "versionRange". Parsing the docs' own worked example as YAML directly into
-// domain.HostKnowledge would therefore silently leave multi-word fields
-// empty. This package loads Knowledge Pack files as JSON instead, matching
-// domain.HostKnowledge's actual tags and the existing
-// internal/domain/testdata/hostknowledge-valid.json convention.
+// Production packs use a combined JSON manifest matching domain.HostKnowledge
+// and its schema. docs/knowledge/README.md documents this concrete format
+// alongside its conceptual split layout. Default embeds the reviewed manifests;
+// explicit directory loading validates candidates with the same parser.
 package knowledge

@@ -97,7 +97,7 @@ func TestRegistry_MCPServer_LogicalIdentity(t *testing.T) {
 }
 
 func TestConcept_PackageLevelLookup(t *testing.T) {
-	// Uses the package-level default loader (runtime.Caller-relative path),
+	// Uses the package-level default loader (embedded build assets),
 	// not the explicit test registry, proving the zero-configuration path
 	// normalize.go depends on actually resolves.
 	skill, ok := Concept("skill")

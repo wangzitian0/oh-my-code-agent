@@ -47,7 +47,7 @@ func runKnowledge(stdout, stderr io.Writer, args []string) int {
 //
 // This function itself is intentionally thin: it wires the one real,
 // impure Fetcher (knowledge.HTTPFetcher, which makes real outbound HTTP
-// requests) and the real on-disk Knowledge repository into
+// requests) and the embedded reviewed Knowledge repository into
 // pollAllHostsAndRender, which holds all the actual logic and is what this
 // package's own tests exercise with a fake Fetcher instead -- so no
 // automated test in this repository ever reaches a real HTTPFetcher call

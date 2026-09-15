@@ -116,3 +116,24 @@ func TestRunReport_RealCollision_SurfacesSourceDrift(t *testing.T) {
 		t.Errorf("expected a SOURCE_DRIFT card, got categories: %+v", a.ActionCards)
 	}
 }
+
+// The shared subprocess binary is built with -trimpath. Its default assets
+// therefore cannot resolve through the build machine's source directory.
+func TestInstalledBinaryReportUsesBundledKnowledge(t *testing.T) {
+	env := setupManagedTestEnv(t, true, false)
+	writeCodexMCPCollision(t, env)
+	stdout, stderr, code := runOmcaSubprocess(t, env.WorktreeRoot, []string{"report", "--json"}, os.Environ())
+	if code != 0 {
+		t.Fatalf("standalone report failed: exit=%d stderr=%s", code, stderr)
+	}
+	var artifact report.Artifact
+	if err := json.Unmarshal([]byte(stdout), &artifact); err != nil {
+		t.Fatal(err)
+	}
+	if len(artifact.Hosts) != 1 || !artifact.Hosts[0].Knowledge.Qualified || artifact.Hosts[0].Knowledge.PackID != "codex:cli:0.144" {
+		t.Fatalf("standalone report lost its built-in pack: %+v", artifact.Hosts)
+	}
+	if len(artifact.Debug["codex"].Candidates) == 0 || len(artifact.ActionCards) == 0 {
+		t.Fatal("standalone report must retain the observed MCP collision")
+	}
+}

@@ -107,7 +107,7 @@ func packageDir() string {
 }
 
 func buildFixtureBinary(dir, pkg, out string) error {
-	cmd := exec.Command("go", "build", "-o", out, pkg)
+	cmd := exec.Command("go", "build", "-trimpath", "-o", out, pkg)
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	if err != nil {

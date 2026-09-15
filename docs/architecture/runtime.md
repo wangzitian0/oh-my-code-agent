@@ -551,3 +551,19 @@ system-level residual behavior is reported explicitly
 failed post-activation verification leaves a recoverable previous generation
 bisect never activates a disposable generation it builds
 ```
+
+## Standalone executable assets
+
+The installed OMCA executable carries the reviewed Knowledge Packs and ontology
+concept JSON compiled from `knowledge/hosts/` and `ontology/concepts/`. Default
+lookups read those immutable embedded bytes, independent of the build path,
+current directory, or presence of a source checkout. Installing the binary does
+not extract another writable registry or inherit project-local replacements.
+Changes to built-in facts require a reviewed source change and a rebuilt binary.
+Explicit directory loaders remain available for candidate validation and tests;
+they retain malformed/duplicate validation and content-addressed pack identity.
+
+The installation proof runs a trimmed-path CLI from an unrelated synthetic
+worktree, resolves its host's pack, and reports an observed MCP collision. A
+trimmed-path ontology lookup proves the normalizer's separate default asset
+boundary. These checks execute in CI without real host or model sessions.

@@ -1,4 +1,4 @@
-.PHONY: build test lint fixtures cover perf
+.PHONY: build test lint fixtures cover perf standalone
 
 build:
 	go build ./...
@@ -29,3 +29,8 @@ fixtures:
 # risking a flaky CI gate.
 perf:
 	go test ./internal/perf/... -run TestPerf -v
+
+# Compiled defaults must work without source paths on the installation machine.
+# The full suite also executes a trimmed-path CLI report from a synthetic repo.
+standalone:
+	go test -trimpath ./internal/knowledge ./internal/ontology -run 'TestDefault_LoadsRealCommittedPacks|TestConcept_PackageLevelLookup' -count=1

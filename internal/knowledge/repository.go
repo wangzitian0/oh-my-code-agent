@@ -3,13 +3,15 @@ package knowledge
 import (
 	"fmt"
 	"io/fs"
+	"os"
+	"path"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
 
 	"github.com/wangzitian0/oh-my-code-agent/internal/domain"
+	knowledgeassets "github.com/wangzitian0/oh-my-code-agent/knowledge"
 )
 
 // Repository is an immutable, loaded set of Knowledge Packs, typically every
@@ -18,31 +20,40 @@ type Repository struct {
 	packs []Pack
 }
 
-// LoadRepository walks hostsRoot for every file named PackFileName and loads
-// each with LoadPack. A structurally invalid pack anywhere under hostsRoot,
+// LoadRepository walks hostsRoot for every file named PackFileName and applies
+// the shared pack validation and content-addressing parser. A structurally invalid pack anywhere under hostsRoot,
 // or two packs declaring the same metadata.id, fails the whole load closed
 // rather than silently skipping or shadowing a broken/duplicate pack
 // (mirroring internal/ontology.LoadRegistry's discipline for a duplicate
 // conceptId).
 func LoadRepository(hostsRoot string) (Repository, error) {
+	return loadRepositoryFS(os.DirFS(hostsRoot), ".", hostsRoot)
+}
+
+func loadRepositoryFS(files fs.FS, root, displayRoot string) (Repository, error) {
 	var packs []Pack
 	seenIDs := make(map[string]string, 8) // metadata.id -> path
 
-	err := filepath.WalkDir(hostsRoot, func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(files, root, func(name string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.IsDir() || d.Name() != PackFileName {
 			return nil
 		}
-		p, err := LoadPack(path)
+		source := filepath.Join(displayRoot, strings.TrimPrefix(name, path.Clean(root)+"/"))
+		raw, err := fs.ReadFile(files, name)
+		if err != nil {
+			return fmt.Errorf("knowledge: read pack %s: %w", source, err)
+		}
+		p, err := parsePack(raw, source)
 		if err != nil {
 			return err
 		}
 		if existing, ok := seenIDs[p.Knowledge.Metadata.ID]; ok {
-			return fmt.Errorf("knowledge: LoadRepository: metadata.id %q is declared by both %s and %s; a duplicate Pack id must fail closed rather than silently shadow an earlier one", p.Knowledge.Metadata.ID, existing, path)
+			return fmt.Errorf("knowledge: LoadRepository: metadata.id %q is declared by both %s and %s; a duplicate Pack id must fail closed rather than silently shadow an earlier one", p.Knowledge.Metadata.ID, existing, source)
 		}
-		seenIDs[p.Knowledge.Metadata.ID] = path
+		seenIDs[p.Knowledge.Metadata.ID] = source
 		packs = append(packs, p)
 		return nil
 	})
@@ -63,26 +74,17 @@ func (r Repository) Packs() []Pack {
 	return out
 }
 
-// defaultHostsDir locates knowledge/hosts/ relative to this source file's
-// own location (the same runtime.Caller trick internal/ontology's
-// defaultConceptsDir and internal/qualify's repoFixturesDir use), so it
-// resolves correctly regardless of the caller's working directory.
-func defaultHostsDir() string {
-	_, file, _, _ := runtime.Caller(0)
-	return filepath.Join(filepath.Dir(file), "..", "..", "knowledge", "hosts")
-}
-
 var (
 	defaultOnce sync.Once
 	defaultRepo Repository
 	defaultErr  error
 )
 
-// Default loads (once, memoized) and returns the repository's real committed
-// Knowledge Packs under knowledge/hosts/.
+// Default loads (once, memoized) the reviewed Knowledge Packs embedded at build
+// time. Installed binaries never read their build machine's source checkout.
 func Default() (Repository, error) {
 	defaultOnce.Do(func() {
-		defaultRepo, defaultErr = LoadRepository(defaultHostsDir())
+		defaultRepo, defaultErr = loadRepositoryFS(knowledgeassets.Files, "hosts", "embedded:knowledge/hosts")
 	})
 	return defaultRepo, defaultErr
 }

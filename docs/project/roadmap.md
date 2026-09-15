@@ -268,6 +268,13 @@ activation-record preservation. A shared locked selector now retains activated
 state, leaves pending inactive, and refuses broken or host-incompatible state.
 This is deterministic lifecycle proof; it does not replace real interactive proof.
 
+Standalone installation correction ([#97](https://github.com/wangzitian0/oh-my-code-agent/issues/97)):
+default Knowledge and ontology loading previously depended on compile-time
+source paths. A trimmed-path CLI silently lost its pack and default ontology
+lookup failed. Both are now embedded from the canonical JSON files. The CLI
+report regression and trimmed-path lookup gate fail before the fix and pass
+after it; explicit disk-loader validation remains covered.
+
 ## Interim Relief
 
 The founding trigger is measurable today: dozens of user-global Skills and MCP

@@ -29,6 +29,17 @@ can give parallel hosts in the same worktree deliberately different loadouts.
 - [Architecture decision records](docs/adr/): frozen isolation, ownership, credential, knowledge update, and plugin distribution decisions.
 - [Roadmap](docs/project/roadmap.md): gated implementation plan.
 
+## Install from a reviewed checkout
+
+```bash
+GOBIN="$HOME/.local/bin" go install -trimpath ./cmd/omca
+```
+
+Add `$HOME/.local/bin` to PATH. The executable includes the reviewed Knowledge
+Packs and ontology JSON; it can run after the build checkout is moved or removed.
+Updating those built-in facts requires rebuilding from a reviewed revision.
+No adjacent data directory or workspace submodule is needed at runtime.
+
 ## Development
 
 ```bash
@@ -38,6 +49,7 @@ make test    # go test ./... -race -coverprofile=coverage.out
 make cover   # print total coverage; CI floor is 67%
 make lint    # golangci-lint run ./...
 make fixtures
+make standalone  # default asset lookup without build-source paths
 
 # Safe, real-host qualification: no interactive session or model call.
 omca qualify tui --json

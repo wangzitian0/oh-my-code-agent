@@ -23,6 +23,11 @@ facts, evidence retention, and upgrade workflow belong to the
 behavior belong to the [Project Charter](../../init.md) and
 [Runtime Architecture](../architecture/runtime.md).
 
+The canonical declarations under `ontology/concepts/` are embedded in each
+OMCA executable. Default lookup uses that build's reviewed bytes; explicit
+directory loading remains available for validation. Installation does not
+require the source checkout or a writable extracted concept cache.
+
 ## 1. Canonical Tree
 
 ```mermaid
