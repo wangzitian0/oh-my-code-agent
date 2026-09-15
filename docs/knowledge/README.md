@@ -257,3 +257,11 @@ future debugging does not depend on the current repository head.
 - Credentials, proprietary configuration content, and personal paths are removed from fixtures.
 - A Pack may narrow capability without migration, but expanding write capability requires explicit review evidence.
 - Historical Pack removal requires a documented retention decision.
+
+## Current installed-host evidence
+
+Codex CLI 0.154.0 on darwin-arm64 has an exact-version observation pack backed
+by [safe host qualification](../evidence/interactive-tui-v0.1.0.md#codex-01540-candidate--2026-09-15).
+Its manifest records official-source and observation-artifact digests. All
+reconciliation modes remain `OBSERVED`; neither adjacent releases nor human
+TUI/model behavior are qualified by the inventory check.
