@@ -41,11 +41,11 @@ func loadRepositoryFS(files fs.FS, root, displayRoot string) (Repository, error)
 		if d.IsDir() || d.Name() != PackFileName {
 			return nil
 		}
+		source := filepath.Join(displayRoot, strings.TrimPrefix(name, path.Clean(root)+"/"))
 		raw, err := fs.ReadFile(files, name)
 		if err != nil {
-			return err
+			return fmt.Errorf("knowledge: read pack %s: %w", source, err)
 		}
-		source := filepath.Join(displayRoot, strings.TrimPrefix(name, path.Clean(root)+"/"))
 		p, err := parsePack(raw, source)
 		if err != nil {
 			return err
