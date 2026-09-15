@@ -90,6 +90,12 @@ native snapshots. Invocation and synthetic inputs are the same `omca qualify
 tui --json` lane described above: only `--version`, `mcp list --json`, and the
 app-server `initialize`/`initialized`/`skills/list` exchange; no model turn.
 
+The candidate binary repeated the Codex-only probe at
+`2026-09-15T09:28:35Z`; its [post-update JSON artifact](codex-0.154.0-candidate-qualification.json)
+records `knowledge-pack=PASS`, MCP/Skills PASS, unchanged native snapshots, and
+the human gate still UNKNOWN. The manifest pins this newer artifact's bytes;
+the earlier artifact remains the evidence for the original missing-pack finding.
+
 Candidate review:
 
 - Version range: add `>=0.154.0 <0.154.1`; retain every historical pack unchanged.

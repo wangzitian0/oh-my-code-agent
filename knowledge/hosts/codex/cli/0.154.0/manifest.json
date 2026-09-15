@@ -40,9 +40,9 @@
     },
     {
       "id": "codex-0.154.0-safe-host-qualification",
-      "kind": "automation-observation",
-      "path": "docs/evidence/codex-0.154.0-safe-qualification.json",
-      "digest": "sha256:4e52d003d597b6316431d36d79d8868b8bf3dba65f7965623492c435bb3b970f"
+      "kind": "maintainer-observation",
+      "path": "docs/evidence/codex-0.154.0-candidate-qualification.json",
+      "digest": "sha256:aa07c32c0bdbee1d65b0a78674fbcd66a39fd86d596a8c3544e9ab58f7d5b288"
     },
     {
       "id": "codex-project-approval-config-fixture",
