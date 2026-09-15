@@ -56,6 +56,12 @@ func LoadPack(path string) (Pack, error) {
 	if err != nil {
 		return Pack{}, fmt.Errorf("knowledge: LoadPack: %w", err)
 	}
+	return parsePack(raw, path)
+}
+
+// parsePack applies identical validation and content addressing to disk and
+// embedded packs. The source path is diagnostic, never part of the digest.
+func parsePack(raw []byte, path string) (Pack, error) {
 	var hk domain.HostKnowledge
 	if err := json.Unmarshal(raw, &hk); err != nil {
 		return Pack{}, fmt.Errorf("knowledge: LoadPack: %s: %w", path, err)

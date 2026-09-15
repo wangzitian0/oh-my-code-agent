@@ -60,6 +60,12 @@ fixtures/
             └── expected-generation/
 ```
 
+The production directory uses one combined `manifest.json` per pack, matching
+`HostKnowledge` and its JSON schema. The split YAML layout above is conceptual.
+The binary embeds these canonical files at build time; default lookup never
+reads the source checkout. Explicit directory loading is for candidate review
+and tests. Rebuild the binary to install a reviewed pack update.
+
 Knowledge Packs are immutable after publication. Corrections publish a new Pack
 and mark the old one superseded; they do not rewrite history.
 

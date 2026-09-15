@@ -3,11 +3,14 @@ package ontology
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"sync"
+
+	ontologyassets "github.com/wangzitian0/oh-my-code-agent/ontology"
 )
 
 // LogicalIdentity is the rule that decides whether two physical
@@ -108,28 +111,32 @@ type Registry struct {
 // LoadRegistry reads every *.json file directly inside dir as a concept
 // declaration (docs/architecture/README.md §6, ontology/concepts/).
 func LoadRegistry(dir string) (*Registry, error) {
-	entries, err := os.ReadDir(dir)
+	return loadRegistryFS(os.DirFS(dir), ".", dir)
+}
+
+func loadRegistryFS(files fs.FS, dir, displayDir string) (*Registry, error) {
+	entries, err := fs.ReadDir(files, dir)
 	if err != nil {
-		return nil, fmt.Errorf("ontology: read concepts dir %s: %w", dir, err)
+		return nil, fmt.Errorf("ontology: read concepts dir %s: %w", displayDir, err)
 	}
 	reg := &Registry{concepts: map[string]ConceptSchema{}}
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
 		}
-		path := filepath.Join(dir, entry.Name())
-		raw, err := os.ReadFile(path)
+		source := filepath.Join(displayDir, entry.Name())
+		raw, err := fs.ReadFile(files, path.Join(dir, entry.Name()))
 		if err != nil {
-			return nil, fmt.Errorf("ontology: read %s: %w", path, err)
+			return nil, fmt.Errorf("ontology: read %s: %w", source, err)
 		}
 		c, err := parseConcept(raw)
 		if err != nil {
-			return nil, fmt.Errorf("ontology: %s: %w", path, err)
+			return nil, fmt.Errorf("ontology: %s: %w", source, err)
 		}
 		if existing, ok := reg.concepts[c.ID]; ok {
-			return nil, fmt.Errorf("ontology: %s: concept %q is already declared by %s; a duplicate conceptId must fail closed rather than silently override an earlier file", path, c.ID, existing.sourcePath)
+			return nil, fmt.Errorf("ontology: %s: concept %q is already declared by %s; a duplicate conceptId must fail closed rather than silently override an earlier file", source, c.ID, existing.sourcePath)
 		}
-		c.sourcePath = path
+		c.sourcePath = source
 		reg.concepts[c.ID] = c
 	}
 	return reg, nil
@@ -158,24 +165,15 @@ var (
 	defaultErr      error
 )
 
-// defaultConceptsDir locates ontology/concepts/ relative to this source
-// file's own location (via runtime.Caller), so it resolves correctly
-// regardless of the caller's working directory or which package imports
-// ontology.
-func defaultConceptsDir() string {
-	_, file, _, _ := runtime.Caller(0)
-	return filepath.Join(filepath.Dir(file), "..", "..", "ontology", "concepts")
-}
-
 func loadDefault() (*Registry, error) {
 	defaultOnce.Do(func() {
-		defaultRegistry, defaultErr = LoadRegistry(defaultConceptsDir())
+		defaultRegistry, defaultErr = loadRegistryFS(ontologyassets.Files, "concepts", "embedded:ontology/concepts")
 	})
 	return defaultRegistry, defaultErr
 }
 
 // Concept looks up a loaded concept by its stable ID (e.g. "skill"),
-// loading the default ontology/concepts/ registry on first use. This is the
+// loading the embedded ontology/concepts/ registry on first use. This is the
 // lookup normalize.go (and later normalizer PRs) should call instead of
 // hard-coding concept facts (docs/architecture/README.md §6: ontology owns
 // "schema loading and canonical validation"). Callers that need an
