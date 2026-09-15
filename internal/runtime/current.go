@@ -36,12 +36,9 @@ func DirSafeID(id string) string {
 // identical to what Bootstrap would produce again; recompiling it would be
 // wasted work, not a correctness improvement.
 //
-// This is the M1 "no Activation/Ledger yet" scope decision this PR's issue
-// documents explicitly: there is deliberately no separate pending-then-
-// activate step here (that is M2/Reconciler scope, docs/architecture/
-// runtime.md §5.4) -- a freshly compiled generation becomes usable the
-// moment EnsureGeneration returns, and a caller (omca env, omca run) is
-// expected to immediately call SetCurrentGeneration with the result.
+// This function only materializes bootstrap artifacts. Launch callers use
+// EnsureLaunchGeneration to preserve selected current state; staging and
+// activation remain separate operations.
 //
 // generationsRoot is caller-supplied and never resolved internally (the
 // same discipline Bootstrap's own outputDir parameter already has) --
@@ -77,6 +74,61 @@ func EnsureGeneration(req BootstrapRequest, generationsRoot string) (domain.Gene
 
 	gen, err := Bootstrap(req, outputDir)
 	if err != nil {
+		return domain.Generation{}, "", err
+	}
+	return gen, outputDir, nil
+}
+
+// EnsureLaunchGeneration preserves an explicitly activated runtime across shell
+// entry and direct launches. Only an absent or bootstrap current generation may
+// be refreshed automatically. Pending state is never activated by this helper.
+// The activation lock prevents a concurrent bootstrap refresh from overwriting
+// a user activation or rollback; selected-generation evidence is not rewritten.
+func EnsureLaunchGeneration(req BootstrapRequest, worktreeStateDir string) (domain.Generation, string, error) {
+	if err := req.validate(); err != nil {
+		return domain.Generation{}, "", err
+	}
+	if !filepath.IsAbs(worktreeStateDir) {
+		return domain.Generation{}, "", fmt.Errorf("runtime: EnsureLaunchGeneration: absolute worktree state directory is required")
+	}
+	host := req.Detection.Host
+	lock, err := acquireActivationLock(worktreeStateDir, host)
+	if err != nil {
+		return domain.Generation{}, "", err
+	}
+	defer lock.release()
+
+	currentDir, err := CurrentGenerationDir(worktreeStateDir, host)
+	if err == nil {
+		current, readErr := ReadGenerationManifest(currentDir)
+		if readErr != nil {
+			return domain.Generation{}, "", fmt.Errorf("runtime: current %s generation is unreadable; refusing to replace it with bootstrap: %w", host, readErr)
+		}
+		if current.Metadata.Worktree != req.Worktree.ID {
+			return domain.Generation{}, "", fmt.Errorf("runtime: current %s generation belongs to another worktree", host)
+		}
+		if _, ok := current.Spec.Hosts[host]; !ok {
+			return domain.Generation{}, "", fmt.Errorf("runtime: current generation does not contain host %s", host)
+		}
+		if current.Spec.DesiredState != nil {
+			record, recordErr := ReadCurrentRecord(worktreeStateDir, host)
+			if recordErr != nil || record.GenerationID != current.Metadata.ID {
+				return domain.Generation{}, "", fmt.Errorf("runtime: selected %s generation has missing or inconsistent activation evidence; restore its current pointer and record before launch", host)
+			}
+			if record.HostVersion != req.Detection.Version {
+				return domain.Generation{}, "", fmt.Errorf("runtime: selected %s generation targets host version %s, installed %s; recompile and activate the desired runtime before launch", host, record.HostVersion, req.Detection.Version)
+			}
+			return current, currentDir, nil
+		}
+	} else if !os.IsNotExist(err) {
+		return domain.Generation{}, "", fmt.Errorf("runtime: reading current %s generation: %w", host, err)
+	}
+
+	gen, outputDir, err := EnsureGeneration(req, filepath.Join(worktreeStateDir, "generations"))
+	if err != nil {
+		return domain.Generation{}, "", err
+	}
+	if err := SetCurrentGeneration(worktreeStateDir, host, outputDir, gen, req.Detection, req.Now); err != nil {
 		return domain.Generation{}, "", err
 	}
 	return gen, outputDir, nil

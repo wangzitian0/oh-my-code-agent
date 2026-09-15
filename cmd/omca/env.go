@@ -107,7 +107,6 @@ func runEnv(stdout, stderr io.Writer, args []string) int {
 	}
 	worktreeStateDir := worktreeStateDirPath(stateRoot, wt.ID)
 	shimDir := shimDirPath(worktreeStateDir)
-	generationsDir := filepath.Join(worktreeStateDir, "generations")
 
 	if err := installShims(shimDir); err != nil {
 		fmt.Fprintf(stderr, "omca: env: installing PATH shims: %v\n", err)
@@ -139,13 +138,9 @@ func runEnv(stdout, stderr io.Writer, args []string) int {
 		}
 
 		req := runtime.BootstrapRequest{Detection: hd, Worktree: wt, Observations: obs, Now: now, OMCABinaryPath: omcaCommandPath(shimDir)}
-		gen, outputDir, err := runtime.EnsureGeneration(req, generationsDir)
+		gen, outputDir, err := runtime.EnsureLaunchGeneration(req, worktreeStateDir)
 		if err != nil {
 			fmt.Fprintf(stderr, "omca: env: compiling %s generation: %v\n", host, err)
-			return 1
-		}
-		if err := runtime.SetCurrentGeneration(worktreeStateDir, host, outputDir, gen, hd, now); err != nil {
-			fmt.Fprintf(stderr, "omca: env: recording current generation for %s: %v\n", host, err)
 			return 1
 		}
 		fmt.Fprintf(stderr, "omca: env: %s -> generation %s (%s)\n", host, gen.Metadata.ID, outputDir)

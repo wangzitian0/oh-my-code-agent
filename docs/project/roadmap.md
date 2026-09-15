@@ -256,6 +256,13 @@ unchanged. The exact-version Codex pack stays OBSERVED; Claude Skills and both
 human TUI/restart/model canaries remain UNKNOWN. See the
 [qualification evidence](../evidence/interactive-tui-v0.1.0.md).
 
+Launch persistence correction (2026-09-15): both `omca env` and `omca run`
+previously overwrote an explicitly activated runtime with bootstrap. Entry-point
+regressions reproduce both failures using fake hosts, then prove selection and
+activation-record preservation. A shared locked selector now retains activated
+state, leaves pending inactive, and refuses broken or host-incompatible state.
+This is deterministic lifecycle proof; it does not replace real interactive proof.
+
 ## Interim Relief
 
 The founding trigger is measurable today: dozens of user-global Skills and MCP

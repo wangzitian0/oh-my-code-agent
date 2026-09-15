@@ -77,3 +77,8 @@ Runtime generation   -> isolated, immutable, restartable
 
 The CLI, adapters and runtime generations are implemented. Passing build and unit
 tests does not establish host qualification; the roadmap records the remaining gates.
+
+Re-entering a worktree with `omca env` or launching through `omca run` preserves
+the runtime you explicitly activated. Pending changes stay inactive. A broken
+selection or host-version mismatch fails with a repair message instead of
+silently reverting to bootstrap; activation and rollback remain explicit.
