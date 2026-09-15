@@ -31,6 +31,12 @@ can give parallel hosts in the same worktree deliberately different loadouts.
 
 ## Development
 
+Use `omca --help` (also `omca help` or `omca -h`) for non-interactive command
+discovery. Bare `omca` opens the management TUI. A successful CLI/test invocation
+does not establish host-version qualification; consult the roadmap's evidence gates.
+Unmanaged MCP test fixtures explicitly clear host-home and generation variables so
+running the suite from an existing coding-agent session does not change their meaning.
+
 ```bash
 make build   # go build ./...
 make test    # go test ./... -race -coverprofile=coverage.out
@@ -57,5 +63,6 @@ Desired state        -> explicitly composed
 Runtime generation   -> isolated, immutable, restartable
 ```
 
-The repository is design-first. Implementation starts only after the v1alpha1
-schemas and adapter qualification fixtures defined in the roadmap are accepted.
+The deterministic core, CLI, MCP server and TUI are implemented. Completion is
+still determined by the host-specific exit gates in the roadmap, including
+qualification, isolated restart and rollback evidence.

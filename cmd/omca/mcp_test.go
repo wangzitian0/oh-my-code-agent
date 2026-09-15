@@ -39,6 +39,11 @@ func TestRunMCP_RejectsMissingOrWrongSubcommand(t *testing.T) {
 // that exact worktree ID, read out of the real process environment, not a
 // hardcoded or passed-as-argument value.
 func TestRunMCP_Serve_RespondsToToolsCall_ReadingRealAmbientEnvironment(t *testing.T) {
+	// This fixture is unmanaged. Running tests inside Codex/Claude must not
+	// accidentally bind it to the developer's native home or active generation.
+	t.Setenv("CODEX_HOME", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("OMCA_RUN_ID", "")
 	t.Setenv("OMCA_WORKTREE_ID", "worktree:sha256:test-value")
 	t.Setenv("OMCA_CONTEXT_ID", "")
 	t.Setenv("OMCA_STATE_DIR", t.TempDir())
