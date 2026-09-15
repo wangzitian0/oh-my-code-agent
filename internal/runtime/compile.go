@@ -350,7 +350,7 @@ func resolveSandboxPermission(host string, permissions map[string]domain.Permiss
 // permission-compilation sources only (empty/nil when permissions is
 // empty/nil, exactly PR-09's behavior); compileHostTree appends it to the
 // Observation-derived sources list.
-func hostConfigFiles(host, nativeHomeDir, omcaBinaryPath string, permissions map[string]domain.PermissionRef) ([]generatedFile, []domain.GenerationSourceEntry, error) {
+func hostConfigFiles(host, nativeHomeDir, omcaBinaryPath, worktreeRoot string, permissions map[string]domain.PermissionRef) ([]generatedFile, []domain.GenerationSourceEntry, error) {
 	sandboxValue, permEntry := resolveSandboxPermission(host, permissions)
 	var permSources []domain.GenerationSourceEntry
 	if permEntry != nil {
@@ -362,11 +362,16 @@ func hostConfigFiles(host, nativeHomeDir, omcaBinaryPath string, permissions map
 		content := "" +
 			"# OMCA generation: permission defaults (docs/project/roadmap.md M1 conservative\n" +
 			"# baseline, or a resolved policy.permissions value where recognized -- issue #18).\n" +
-			"approval_policy = \"untrusted\"\n" +
 			fmt.Sprintf("sandbox_mode = %s\n", tomlString(sandboxValue))
 		if omcaBinaryPath != "" {
 			content += codexMCPRegistrationTOML(omcaBinaryPath)
 		}
+		// Codex no longer accepts approval_policy="untrusted". Its documented
+		// migration preserves strict command approvals through project trust,
+		// with no explicit approval_policy overriding that derived policy.
+		// This also disables project-local Codex configuration; selected assets
+		// are compiled into the isolated user home by OMCA.
+		content += fmt.Sprintf("\n[projects.%s]\ntrust_level = \"untrusted\"\n", tomlString(worktreeRoot))
 		return []generatedFile{{RelPath: filepath.Join(nativeHomeDir, "config.toml"), Content: []byte(content)}}, permSources, nil
 	case "claude-code":
 		settingsDoc := struct {
@@ -552,7 +557,7 @@ func compileHostTree(in hostTreeInput) ([]generatedFile, []domain.GenerationSour
 		sources = append(sources, entry)
 	}
 
-	configFiles, permSources, err := hostConfigFiles(in.Host, nativeHomeDir, in.OMCABinaryPath, in.Permissions)
+	configFiles, permSources, err := hostConfigFiles(in.Host, nativeHomeDir, in.OMCABinaryPath, in.WorktreeRoot, in.Permissions)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -296,4 +296,23 @@ func TestDefault_LoadsRealCommittedPacks(t *testing.T) {
 	if !res2.Qualified {
 		t.Errorf("Default() repository does not qualify claude-code 2.1.211 against its own committed claude-code:cli:2.1 pack; Reason=%q", res2.Reason)
 	}
+	for _, version := range []string{"0.146.0", "0.147.0"} {
+		res := repo.Resolve("codex", "cli", version)
+		if !res.Qualified || res.PackID != "codex:cli:0.146-0.147" {
+			t.Errorf("Default() repository does not conservatively qualify codex %s against codex:cli:0.146-0.147; Qualified=%v PackID=%q Reason=%q", version, res.Qualified, res.PackID, res.Reason)
+		}
+	}
+	res3 := repo.Resolve("codex", "cli", "0.148.0")
+	if res3.Qualified {
+		t.Errorf("Default() repository optimistically qualified codex 0.148.0 outside codex:cli:0.146-0.147; PackID=%q", res3.PackID)
+	}
+	current := repo.Resolve("codex", "cli", "0.153.4")
+	if !current.Qualified || current.PackID != "codex:cli:0.153.4" {
+		t.Fatalf("current exact-version qualification missing: %+v", current)
+	}
+	for _, version := range []string{"0.153.3", "0.153.5", "0.154.0"} {
+		if repo.Resolve("codex", "cli", version).Qualified {
+			t.Errorf("untested Codex %s must remain unqualified", version)
+		}
+	}
 }

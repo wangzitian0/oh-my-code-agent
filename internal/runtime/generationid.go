@@ -23,6 +23,7 @@ import (
 // only reintroduce the churn problem the stable-shim-path design exists to
 // avoid (TestGenerationID_StableAcrossOMCABinaryPathChange proves this).
 type generationIDInputs struct {
+	HostCompiler    string   `json:"hostCompiler"`
 	Host            string   `json:"host"`
 	HostVersion     string   `json:"hostVersion"`
 	Worktree        string   `json:"worktree"`
@@ -71,6 +72,7 @@ func GenerationID(req BootstrapRequest) (string, error) {
 	sort.Strings(fingerprints)
 
 	digest, err := domain.CanonicalDigest(generationIDInputs{
+		HostCompiler:    HostCompilerVersion,
 		Host:            req.Detection.Host,
 		HostVersion:     req.Detection.Version,
 		Worktree:        req.Worktree.ID,

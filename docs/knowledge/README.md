@@ -216,8 +216,11 @@ Before a capability becomes writable, fixtures cover at least:
 8. multiple projects sharing one global source;
 9. alternate cwd, profile, trust state, and environment flags;
 10. secret redaction and proof that observation did not execute content;
-11. bootstrap isolation from user-global native sources; and
-12. restart activation and rollback of a generated runtime.
+11. bootstrap isolation from user-global native sources;
+12. restart activation and rollback of a generated runtime; and
+13. host-reported MCP/Skill inventory in a disposable native-sentinel lane,
+    followed by a human-owned initial/restart TUI canary when no safe
+    non-interactive introspection surface exists.
 
 ## 11. Runtime Resolution
 

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	hostcontext "github.com/wangzitian0/oh-my-code-agent/internal/context"
@@ -20,6 +21,67 @@ var wantExportKeys = []string{
 	"OMCA_REAL_HOME",
 	"OMCA_STATE_DIR",
 	"OMCA_SHIM_DIR",
+}
+
+// TestInstallShims_ConcurrentRefreshIsAtomic reproduces the real two-terminal
+// startup race: `omca run codex` and `omca run claude` both refresh the same
+// three worktree shim entries. Every caller must succeed, and the directory
+// must end with exactly the complete entries rather than an EEXIST loser or a
+// remove-then-create gap's missing link.
+func TestInstallShims_ConcurrentRefreshIsAtomic(t *testing.T) {
+	shimDir := t.TempDir()
+	const workers = 24
+	const refreshesPerWorker = 10
+	for _, name := range shimEntryNames {
+		if err := os.WriteFile(filepath.Join(shimDir, name), []byte("stale copy\n"), 0o755); err != nil {
+			t.Fatalf("seed stale %s entry: %v", name, err)
+		}
+	}
+
+	start := make(chan struct{})
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < refreshesPerWorker; j++ {
+				if err := installShims(shimDir); err != nil {
+					errs <- err
+					return
+				}
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent installShims: %v", err)
+	}
+
+	wantTarget, err := resolveOMCABinaryPath()
+	if err != nil {
+		t.Fatalf("resolveOMCABinaryPath: %v", err)
+	}
+	entries, err := os.ReadDir(shimDir)
+	if err != nil {
+		t.Fatalf("ReadDir(%s): %v", shimDir, err)
+	}
+	if len(entries) != len(shimEntryNames) {
+		t.Fatalf("shim directory has %d entries, want exactly %d: %v", len(entries), len(shimEntryNames), entries)
+	}
+	for _, name := range shimEntryNames {
+		linkPath := filepath.Join(shimDir, name)
+		gotTarget, err := os.Readlink(linkPath)
+		if err != nil {
+			t.Fatalf("Readlink(%s): %v", linkPath, err)
+		}
+		if gotTarget != wantTarget {
+			t.Errorf("%s target = %q, want %q", name, gotTarget, wantTarget)
+		}
+	}
 }
 
 // TestRunEnv_PrintsExpectedExportsAndInstallsShims exercises `omca env`

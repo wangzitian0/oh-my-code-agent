@@ -31,19 +31,28 @@ can give parallel hosts in the same worktree deliberately different loadouts.
 
 ## Development
 
-Use `omca --help` (also `omca help` or `omca -h`) for non-interactive command
-discovery. Bare `omca` opens the management TUI. A successful CLI/test invocation
-does not establish host-version qualification; consult the roadmap's evidence gates.
-Unmanaged MCP test fixtures explicitly clear host-home and generation variables so
-running the suite from an existing coding-agent session does not change their meaning.
-
 ```bash
+omca --help  # list CLI entry points without opening the TUI
 make build   # go build ./...
 make test    # go test ./... -race -coverprofile=coverage.out
 make cover   # print total coverage; CI floor is 67%
 make lint    # golangci-lint run ./...
 make fixtures
+
+# Safe, real-host qualification: no interactive session or model call.
+omca qualify tui --json
+
+# Human-only completion gate: two TUI launches plus an MCP model canary.
+OMCA_QUALIFY_INTERACTIVE=1 omca qualify tui --host codex --interactive
 ```
+
+`omca qualify tui` always creates a disposable HOME/XDG/state lane with
+synthetic native MCP/Skill sentinels plus a repository-scoped managed Skill
+sentinel. The automatic phase uses only host-reported, non-model introspection.
+`--interactive` is deliberately
+fail-closed behind a human acknowledgement because it launches the real host
+TUI twice and may consume network/model quota; autonomous agents must not run
+that phase.
 
 Requires Go 1.22+. CI runs build+test with a 67% coverage floor, lint, a
 markdown link check, and a secret-leak scan on every pull request.
@@ -63,6 +72,5 @@ Desired state        -> explicitly composed
 Runtime generation   -> isolated, immutable, restartable
 ```
 
-The deterministic core, CLI, MCP server and TUI are implemented. Completion is
-still determined by the host-specific exit gates in the roadmap, including
-qualification, isolated restart and rollback evidence.
+The CLI, adapters and runtime generations are implemented. Passing build and unit
+tests does not establish host qualification; the roadmap records the remaining gates.

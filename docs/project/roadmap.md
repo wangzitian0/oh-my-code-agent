@@ -229,11 +229,32 @@ Codex + Claude Code on macOS
 + compile pending
 + restart and verify
 + rollback
++ safe host-reported MCP/Skill qualification with native sentinels
++ human-owned initial/restart TUI canary and omca_status model call
 ```
 
 This slice is complete only when the report, the measured launch numbers, and
 rollback are credible. Adding a third host before that point increases surface
 area without proving the product.
+
+Historical proof (2026-08-18): the new `omca qualify tui` automatic lane
+reaches E3 for Codex 0.146-0.147 MCP/Skill isolation and for Claude Code
+2.1.220-2.1.228 MCP exclusion/health, with no observed write to the relevant
+real native configuration roots. Claude Code still exposes no safe
+non-interactive Skill inventory, so its Skill proof remains UNKNOWN until the
+human `--interactive` gate runs. Codex 0.146-0.147 also has a conservative
+`codex:cli:0.146-0.147` Knowledge Pack backed by the automatic host-reported
+evidence; its reconcile modes remain `OBSERVED`. Automatic runs now also carry
+an explicit UNKNOWN for the human-owned initial/restart TUI and `omca_status`
+model canary, so even a Codex-only automatic run cannot report completion. The
+remaining interactive gates are not counted as a completed first slice.
+
+Current recheck (2026-09-15): Codex 0.153.4 passes MCP/Skill isolation after
+migrating the removed approval setting to documented untrusted-project trust.
+Claude Code 2.1.267 passes MCP isolation. Native configuration snapshots remain
+unchanged. The exact-version Codex pack stays OBSERVED; Claude Skills and both
+human TUI/restart/model canaries remain UNKNOWN. See the
+[qualification evidence](../evidence/interactive-tui-v0.1.0.md).
 
 ## Interim Relief
 

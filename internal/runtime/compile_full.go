@@ -414,6 +414,7 @@ func exceptionLivenessFingerprints(exceptions []domain.Exception, now time.Time)
 // see exceptionLivenessFingerprints's doc comment for why raw Now itself
 // still must not be folded in directly.
 type compileGenerationIDInputs struct {
+	HostCompiler       string                `json:"hostCompiler"`
 	Worktree           string                `json:"worktree"`
 	DesiredGraphDigest string                `json:"desiredGraphDigest"`
 	ExceptionLiveness  []string              `json:"exceptionLiveness"`
@@ -474,6 +475,7 @@ func CompileGenerationID(req CompileRequest) (string, error) {
 	sort.Slice(hostInputs, func(i, j int) bool { return hostInputs[i].Host < hostInputs[j].Host })
 
 	digest, err := domain.CanonicalDigest(compileGenerationIDInputs{
+		HostCompiler:       HostCompilerVersion,
 		Worktree:           req.Worktree.ID,
 		DesiredGraphDigest: desiredGraphDigest,
 		ExceptionLiveness:  exceptionLivenessFingerprints(req.Exceptions, req.Now),
