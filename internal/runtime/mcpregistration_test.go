@@ -10,6 +10,27 @@ import (
 	"github.com/wangzitian0/oh-my-code-agent/internal/observe"
 )
 
+func TestCodexPermissionConfigPreservesStrictProjectApprovals(t *testing.T) {
+	const worktree = "/tmp/project with \"quotes\""
+	for _, binary := range []string{"", "/opt/bin/omca"} {
+		files, _, err := hostConfigFiles("codex", "codex-home", binary, worktree, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		config := string(files[0].Content)
+		if strings.Contains(config, "approval_policy =") {
+			t.Fatalf("explicit approval_policy overrides the project-derived policy: %s", config)
+		}
+		if !strings.Contains(config, "sandbox_mode = \"read-only\"\n") {
+			t.Fatalf("missing conservative sandbox: %s", config)
+		}
+		const project = "[projects.\"/tmp/project with \\\"quotes\\\"\"]\ntrust_level = \"untrusted\"\n"
+		if !strings.HasSuffix(config, project) {
+			t.Fatalf("missing safely quoted worktree trust table: %s", config)
+		}
+	}
+}
+
 // TestBootstrap_OMCABinaryPathEmpty_NoMCPRegistration is the backward-
 // compatibility half of issue #15's MCP-registration wiring: every caller
 // that leaves BootstrapRequest.OMCABinaryPath unset (every test in this
@@ -84,7 +105,7 @@ func TestBootstrap_Codex_OMCABinaryPath_RegistersMCPServer(t *testing.T) {
 	}
 	// The conservative permission defaults must still be present -- the MCP
 	// registration is additive, not a replacement.
-	if !strings.Contains(configTOML, "approval_policy") {
+	if !strings.Contains(configTOML, `sandbox_mode = "read-only"`) || !strings.Contains(configTOML, `trust_level = "untrusted"`) {
 		t.Errorf("config.toml lost its conservative permission defaults:\n%s", configTOML)
 	}
 }

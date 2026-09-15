@@ -1,0 +1,72 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "HostKnowledge",
+  "metadata": {
+    "id": "codex:cli:0.146-0.147",
+    "host": "codex",
+    "surface": "cli",
+    "versionRange": ">=0.146.0 <0.148.0",
+    "platforms": ["darwin-arm64"],
+    "observedAt": "2026-08-18",
+    "recheckAfter": "2026-09-18",
+    "status": "FRESH"
+  },
+  "evidence": [
+    {
+      "id": "codex-configuration-reference-current",
+      "kind": "official-doc",
+      "url": "https://developers.openai.com/codex/config-reference"
+    },
+    {
+      "id": "codex-mcp-current",
+      "kind": "official-doc",
+      "url": "https://developers.openai.com/codex/mcp"
+    },
+    {
+      "id": "codex-skills-current",
+      "kind": "official-doc",
+      "url": "https://developers.openai.com/codex/skills"
+    },
+    {
+      "id": "codex-app-server-current",
+      "kind": "official-doc",
+      "url": "https://developers.openai.com/codex/app-server"
+    },
+    {
+      "id": "codex-cli-0.146.0-and-0.147.0-tui-qualification",
+      "kind": "maintainer-observation",
+      "path": "docs/evidence/interactive-tui-v0.1.0.md"
+    },
+    {
+      "id": "codex-cli-0.146.0-and-0.147.0-qualification-parser-tests",
+      "kind": "executable-fixture",
+      "path": "cmd/omca/qualify_tui_test.go"
+    }
+  ],
+  "capabilities": {
+    "skill": {
+      "discover": "PARTIAL",
+      "resolve": "UNKNOWN",
+      "verify": "PARTIAL",
+      "reconcileMode": "OBSERVED",
+      "verificationMethods": ["official-doc-review", "app-server-skills-list", "native-sentinel-qualification"]
+    },
+    "instruction": {
+      "discover": "PARTIAL",
+      "resolve": "UNKNOWN",
+      "reconcileMode": "OBSERVED",
+      "verificationMethods": ["official-doc-review"]
+    },
+    "mcp_server": {
+      "discover": "PARTIAL",
+      "resolve": "UNKNOWN",
+      "verify": "PARTIAL",
+      "reconcileMode": "OBSERVED",
+      "verificationMethods": ["official-doc-review", "codex-mcp-list", "native-sentinel-qualification"]
+    }
+  },
+  "knownUnknowns": [
+    "same-name precedence across Instructions, Skills, and MCP sources for Codex CLI 0.146-0.147 remains UNKNOWN: the safe host-reported inventory methods prove which sources are visible in an isolated lane, but they do not prove collision winner semantics or the exact model context assembled for a real turn",
+    "the human-owned initial/restart interactive TUI canary and omca_status model call recorded in docs/evidence/interactive-tui-v0.1.0.md have not yet run; this pack therefore keeps every reconcile mode OBSERVED and does not use the automatic inventory proof to expand write capability"
+  ]
+}

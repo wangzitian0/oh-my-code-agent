@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	hostcontext "github.com/wangzitian0/oh-my-code-agent/internal/context"
@@ -39,6 +40,12 @@ import (
 // "not found" error) rather than being silently absent, which would make
 // "is codex managed" depend on install order.
 var shimEntryNames = []string{"codex", "claude", "omca"}
+
+// shimTempCounter makes each temporary shim path unique among concurrent
+// installShims calls in this process. The PID in atomicReplaceShim's suffix
+// separates different processes; this counter separates goroutines in the
+// same process without relying on wall-clock resolution.
+var shimTempCounter atomic.Uint64
 
 // omcaCommandPath is the stable, worktree-scoped path a compiled
 // generation's MCP registration should invoke — shimDir/omca, refreshed by
@@ -262,14 +269,33 @@ func installShims(shimDir string) error {
 
 	for _, name := range shimEntryNames {
 		linkPath := filepath.Join(shimDir, name)
-		// Idempotent refresh: remove whatever is there (a prior symlink, a
-		// stale copy, or nothing) and recreate. os.Remove on a nonexistent
-		// path is reported via the returned error, which is intentionally
-		// ignored here — "nothing to remove" is not a failure.
-		_ = os.Remove(linkPath)
-		if err := os.Symlink(exe, linkPath); err != nil {
+		if err := atomicReplaceShim(exe, linkPath); err != nil {
 			return fmt.Errorf("omca: installShims: %s: %w", name, err)
 		}
+	}
+	return nil
+}
+
+// atomicReplaceShim refreshes linkPath without a remove-then-create window.
+// `omca env` and `omca run` can legitimately start at the same time in two
+// terminals for one worktree. Removing the shared link before recreating it
+// let both processes observe "missing", after which one os.Symlink lost with
+// EEXIST. It also briefly left concurrent readers with no shim at all.
+//
+// A uniquely named sibling symlink followed by same-directory os.Rename gives
+// readers either the old complete link or the new complete link. POSIX rename
+// replaces an existing non-directory destination atomically, so concurrent
+// refreshes are idempotent: whichever identical link wins last is harmless.
+func atomicReplaceShim(target, linkPath string) error {
+	suffix := fmt.Sprintf(".tmp-%d-%d", os.Getpid(), shimTempCounter.Add(1))
+	tmpLink := linkPath + suffix
+	_ = os.Remove(tmpLink) // clear only a stale temp path from a reused PID
+	if err := os.Symlink(target, tmpLink); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpLink, linkPath); err != nil {
+		_ = os.Remove(tmpLink)
+		return err
 	}
 	return nil
 }

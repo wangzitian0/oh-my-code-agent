@@ -172,8 +172,8 @@ func TestCompileFuncForMCP_CorruptCachedManifest_FailsClosed(t *testing.T) {
 	if testFixtureBinaries.fakeHost == "" {
 		t.Skip("fixture binaries not built (TestMain)")
 	}
-	xdgStateHome := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", xdgStateHome)
+	env := setupManagedTestEnv(t, false, false)
+	xdgStateHome := env.StateRoot
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	restoreWritableTree(t, xdgStateHome) // ensure t.TempDir()'s own cleanup can remove the read-only compiled tree
 	binDir := t.TempDir()

@@ -68,6 +68,16 @@ The bootstrap generation contains:
 All broad observation, profile selection, activation, and repair can happen
 after launch through the OMCA MCP or TUI.
 
+Codex permission defaults use a read-only sandbox and an untrusted project
+entry for the exact worktree, without an explicit `approval_policy`. This is
+the [documented migration](https://learn.chatgpt.com/docs/agent-approvals-security)
+from the removed `approval_policy="untrusted"` setting. It preserves stricter
+command approvals and disables project-local Codex configuration. OMCA emits
+selected assets in its isolated user home. Bootstrap and full generation IDs
+include a shared host compiler version so a compiler upgrade cannot silently
+reuse incompatible cached configuration. Real-host evidence is scoped to the
+tested version; this migration does not expand any Knowledge capability.
+
 ## 4. direnv and Host Shims
 
 Recommended `.envrc` integration:
@@ -90,6 +100,13 @@ PATH=$OMCA_SHIM_DIR:$PATH
 The shim locates the real host binary without recursively invoking itself,
 selects the current generation, injects host-specific environment, and uses
 `exec` so signal and exit behavior remain native.
+
+Shim refresh is safe when multiple terminals enter the same worktree at once.
+`omca env` and `omca run` create uniquely named sibling symlinks and atomically
+rename them over the stable `codex`, `claude`, and `omca` entries. A concurrent
+reader therefore sees either the previous complete shim or the refreshed one;
+it never observes a remove-then-create gap, and concurrent refreshers do not
+fail merely because another process installed the identical entry first.
 
 Inside the direnv environment:
 
@@ -349,6 +366,55 @@ repository .claude assets and .mcp.json chain
 plugin and marketplace state
 CLI and session flags
 ```
+
+### 7.3 Interactive TUI qualification
+
+Managed launch and the host's actual interactive TUI are separate proof
+boundaries. A `--version` smoke test proves binary resolution only; it does not
+prove that Skills and MCP servers visible inside a real session match the
+generation, that the OMCA MCP completes startup, or that a restarted session
+selects the same isolated state.
+
+`omca qualify tui` owns this boundary. It creates a disposable HOME, XDG
+configuration/state roots, worktree, and OMCA state tree, then plants native
+user-global MCP/Skill entries named `omca-native-sentinel` and a
+repository-scoped Skill named `omca-managed-sentinel`. It snapshots the real
+native roots before the probe and again afterward. The automatic phase is safe
+for unattended execution and never calls a model:
+
+```text
+Codex mcp list --json                  -> host-reported MCP inventory
+Codex app-server skills/list          -> host-reported Skill inventory
+Claude Code mcp list                  -> host-reported MCP inventory + health
+Claude Code Skill inventory           -> UNKNOWN when no safe interface exists
+```
+
+The probe passes a concept only when the managed source is visible and the
+native sentinel is absent. For Codex Skills this requires the repository
+sentinel in the exact requested cwd's host-reported inventory, not merely a
+well-formed empty response. Missing interfaces, unqualified host versions,
+native-state changes during the observation window, malformed output, and host
+command failures are UNKNOWN or FAIL; absence is never inferred from an empty
+or unparsed response.
+
+The remaining interactive phase is explicitly human-owned:
+
+```bash
+OMCA_QUALIFY_INTERACTIVE=1 omca qualify tui --host <host> --interactive
+```
+
+It attaches the real terminal to the isolated host twice (initial launch and
+restart). In each launch the human verifies `/mcp`, verifies `/skills` excludes
+the sentinel, and asks the model to call `omca_status`. The phase may consume
+network/model quota and may present login or OS-keyring UI, so automation must
+never set the acknowledgement or attest on a human's behalf. Raw transcripts,
+credentials, and model output are not persisted in the qualification artifact;
+only the check status, evidence level, host version, and sanitized explanation
+are emitted. Scratch state is deleted by default and retained only with an
+explicit `--keep`.
+
+The evidence produced on the first macOS reference machine is recorded in
+[`../evidence/interactive-tui-v0.1.0.md`](../evidence/interactive-tui-v0.1.0.md).
 
 ## 8. Authentication and Secrets
 

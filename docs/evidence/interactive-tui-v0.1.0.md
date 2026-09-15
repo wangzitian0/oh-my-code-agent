@@ -1,0 +1,111 @@
+# Interactive TUI Qualification Evidence — v0.1.0
+
+Date: 2026-08-18  
+Platform: macOS 15.3.2, arm64  
+Command under test: candidate `omca qualify tui --json`
+
+## Scope
+
+This artifact records only the safe automatic phase. It did not open an
+interactive host session, call a model, authenticate, or consume model quota.
+The command created a disposable HOME/XDG/worktree/state lane containing native
+user-global MCP/Skill entries named `omca-native-sentinel` plus a
+repository-scoped Skill named `omca-managed-sentinel`. The native canaries must
+be absent and the managed repository Skill must be present in every applicable
+host-reported inventory.
+
+The relevant real native configuration roots were content-snapshotted before
+and after the command. The automated run reported no differences, and an
+independent shell-side content digest over the same roots also remained equal.
+Raw native content, host output, credentials, and absolute scratch paths are
+intentionally not stored here.
+
+The qualification client follows the current official Codex app-server
+handshake and scopes `skills/list` to the exact scratch cwd. The current
+[app-server reference](https://developers.openai.com/codex/app-server) documents
+`initialize`/`initialized`, `cwds`, and `forceReload`; the current
+[Skills reference](https://developers.openai.com/codex/skills) documents
+repository `.agents/skills` discovery.
+
+## Results
+
+| Host | Version | Check | Evidence | Result |
+|---|---:|---|---|---|
+| Codex CLI | 0.147.0 | `mcp list --json` reports `omca`; native sentinel absent | E3 host-reported | PASS |
+| Codex CLI | 0.147.0 | app-server `skills/list` for the exact cwd reports 7 Skills; managed repository sentinel present; native sentinels absent | E3 host-reported | PASS |
+| Codex CLI | 0.147.0 | matching Knowledge Pack `codex:cli:0.146-0.147` | E2 | PASS |
+| Codex CLI | 0.147.0 | initial/restart TUI plus `omca_status` model canary | E0 | UNKNOWN — human gate not run |
+| Claude Code | 2.1.228 | `mcp list` reports `omca` connected; native sentinel absent | E3 host-reported | PASS |
+| Claude Code | 2.1.228 | matching Knowledge Pack `claude-code:cli:2.1` | E2 | PASS |
+| Claude Code | 2.1.228 | managed repository Skill inclusion plus native Skill exclusion | E1 | UNKNOWN — no safe non-interactive Skill inventory exposed |
+| Claude Code | 2.1.228 | initial/restart TUI plus `omca_status` model canary | E0 | UNKNOWN — human gate not run |
+| Both | — | relevant real native roots unchanged during probe window | internal byte snapshot + independent content digest | PASS |
+
+An earlier 2026-07-30 run established the same automatic MCP/Skill boundary for
+Codex 0.146.0 and the MCP boundary for Claude Code 2.1.220. Together the two
+exact Codex observations bound the conservative `>=0.146.0 <0.148.0` pack.
+
+The automatic command exits non-zero because UNKNOWN is not completion. Every
+automatic host result includes the unrun human TUI/model gate, and Claude Code
+also retains its Skill-inventory UNKNOWN. A Codex-only automatic run therefore
+cannot report a false complete result even though all automatic checks pass.
+
+## Current-host recheck — 2026-09-15
+
+The safe automatic lane was repeated at `2026-09-15T06:14:31Z` on macOS arm64
+with Codex 0.153.4 and Claude Code 2.1.267. Codex MCP inventory contained only
+`omca`; its Skills inventory contained seven entries, including the managed
+repository sentinel and excluding native sentinels. Claude reported `omca`
+connected and excluded its native MCP sentinel. The native configuration
+before/after snapshot was unchanged (`realNativeStateClean=true`). No
+interactive session or model call was attempted.
+
+Before this repair, Codex rejected generated configuration because
+`approval_policy="untrusted"` is no longer supported. The shared compiler now
+omits that setting and emits an untrusted-project entry for the exact worktree,
+following the [official approval migration](https://learn.chatgpt.com/docs/agent-approvals-security).
+The read-only sandbox default remains. The documentation supports the command
+approval semantics; the executed probe proves configuration loading and
+inventory isolation, not approvals during a model turn. Regression fixtures
+cover escaped project paths and the absence of an overriding approval policy.
+
+The new exact-version `codex:cli:0.153.4` pack records these facts with all
+reconciliation modes still `OBSERVED`. Earlier packs and their historical
+evidence remain unchanged. Full and bootstrap cache identities include the
+host compiler revision. Diagnostic truncation now retains the tail of a host
+failure so startup estimates cannot conceal the actual configuration error.
+
+Both hosts still report the human TUI/restart/model canary as UNKNOWN. Claude
+Skill inventory remains UNKNOWN. Overall completion remains false and the
+automatic command exits 1 as designed; passing these inventory checks does not
+complete the interactive MVP.
+
+## Human completion procedure
+
+The remaining E4 proof is:
+
+```bash
+OMCA_QUALIFY_INTERACTIVE=1 omca qualify tui --host codex --interactive
+OMCA_QUALIFY_INTERACTIVE=1 omca qualify tui --host claude-code --interactive
+```
+
+For each host the harness launches the isolated TUI twice. A human must verify
+that `/mcp` contains only managed entries, `/skills` includes
+`omca-managed-sentinel` while excluding `omca-native-sentinel`, and a minimal
+model prompt can call `omca_status` and return the managed host/generation. This
+has not yet been run and must not be represented as complete.
+
+## Safety finding during harness development
+
+An early cleanup implementation called `chmod` on every scratch entry before
+removal. Codex creates scratch-local symlinks back to its installed native
+binary; on macOS, `chmod` followed those links and removed the target's
+executable bit. The installed Codex binary was immediately restored to mode
+`0755`, `codex --version` succeeded afterward, and a regression test now proves
+that scratch cleanup never chmods an external symlink target. A repeated real
+qualification run preserved mode `0755` before and after.
+
+`claude doctor` was also rejected as an automatic qualification primitive:
+despite being non-interactive, version 2.1.220 probes Keychain write capability
+and reports virtual-HOME installation warnings. `omca qualify tui` uses the
+narrow `mcp list` surface instead and never invokes `doctor`.

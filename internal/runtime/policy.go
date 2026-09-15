@@ -11,6 +11,10 @@ import "github.com/wangzitian0/oh-my-code-agent/internal/domain"
 // BootstrapPolicyDigest into its input set (generationid.go).
 const BootstrapPolicyVersion = "bootstrap-policy/v1"
 
+// HostCompilerVersion invalidates both bootstrap and full-generation caches
+// when the shared host artifact compiler changes its emitted configuration.
+const HostCompilerVersion = "host-compiler/v2"
+
 // bootstrapPolicyValue is the fixed, explicitly-named "no desired state,
 // hardcoded minimal policy" value substituted for
 // domain.GenerationSpec.DesiredGraphDigest, which the schema marks required
