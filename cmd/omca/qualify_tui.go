@@ -411,16 +411,17 @@ func tuiQualificationEnvironment(root string, hosts []string, realEnv hostcontex
 		"XDG_STATE_HOME":  filepath.Join(root, "state"),
 		"TMPDIR":          filepath.Join(root, "tmp"),
 		"PATH":            path,
-		"TERM":            "dumb",
-		"NO_COLOR":        "1",
-		"LC_ALL":          "C",
-		"LANG":            "C",
-		"LC_CTYPE":        "C",
 	}
 	return shim.InjectEnv(detectEnv.Vars, overrides), detections, nil
 }
 
 func probeTUIHost(runner tuiQualificationRunner, env []string, repo string, detection hostcontext.HostDetection) tuiHostQualification {
+	// Plain output and portable locale are automatic-probe settings only.
+	// The human TUI receives the isolated environment with its terminal and
+	// locale capabilities preserved from the caller.
+	env = shim.InjectEnv(env, map[string]string{
+		"TERM": "dumb", "NO_COLOR": "1", "LC_ALL": "C", "LANG": "C", "LC_CTYPE": "C",
+	})
 	result := tuiHostQualification{Host: detection.Host, Version: detection.Version}
 	repository, repositoryErr := knowledge.Default()
 	if repositoryErr != nil {

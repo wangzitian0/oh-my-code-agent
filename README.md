@@ -53,6 +53,9 @@ sentinel. The automatic phase uses only host-reported, non-model introspection.
 fail-closed behind a human acknowledgement because it launches the real host
 TUI twice and may consume network/model quota; autonomous agents must not run
 that phase.
+Automatic probes use plain terminal output and a portable locale. Human TUI
+launches preserve the caller's terminal and locale settings inside the same
+isolated HOME/XDG lane.
 
 Requires Go 1.22+. CI runs build+test with a 67% coverage floor, lint, a
 markdown link check, and a secret-leak scan on every pull request.

@@ -6,7 +6,27 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	hostcontext "github.com/wangzitian0/oh-my-code-agent/internal/context"
 )
+
+func TestQualificationEnvironmentPreservesHumanTerminal(t *testing.T) {
+	root := t.TempDir()
+	realEnv := hostcontext.Environment{Vars: []string{
+		"HOME=/native/home", "TERM=xterm-256color", "LANG=en_US.UTF-8",
+	}}
+	env, _, err := tuiQualificationEnvironment(root, nil, realEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := hostcontext.Environment{Vars: env}
+	if got.Get("TERM") != "xterm-256color" || got.Get("LANG") != "en_US.UTF-8" || got.Get("NO_COLOR") != "" {
+		t.Fatalf("human terminal capabilities were overridden: %v", env)
+	}
+	if got.Get("HOME") != filepath.Join(root, "home") || got.Get("XDG_STATE_HOME") != filepath.Join(root, "state") {
+		t.Fatalf("preserving the terminal must retain isolation: %v", env)
+	}
+}
 
 func TestQualificationDiagnosticRetainsHostFailureAfterLaunchReport(t *testing.T) {
 	stderr := strings.Repeat("launch context-cost estimate; ", 30) + "\nError: unsupported host setting"
