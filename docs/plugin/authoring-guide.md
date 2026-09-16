@@ -330,7 +330,7 @@ than gloss over it. Two apply here:
    (`internal/plugin/manifest.go`) is validated against a closed vocabulary
    (`internal/domain/host.go`'s `KnownHostIDs`, backing
    `docs/ontology/README.md` §4's Host Registry) — every entry in it names a
-   real product (Claude Code, Codex, OpenCode, Cursor, GitHub Copilot,
+   real product (Claude Code, Codex, Cursor, GitHub Copilot,
    Antigravity CLI, Pi, OpenClaw, Hermes Agent). This example's host is
    entirely invented, so its manifest deliberately uses the host ID
    `demo-observer-host`, which is *not* in that vocabulary — and therefore

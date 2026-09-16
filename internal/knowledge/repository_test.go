@@ -207,9 +207,9 @@ func TestResolve_NoQualifiedPack_DegradesToObserved(t *testing.T) {
 	}
 }
 
-func TestResolve_NoQualifiedPack_UnknownHostHasNoMatchingPacks(t *testing.T) {
+func TestResolve_NoQualifiedPack_HostWithNoLoadedPacks(t *testing.T) {
 	repo := testRepository(t)
-	res := repo.Resolve("opencode", "cli", "1.0.0")
+	res := repo.Resolve("cursor", "cli", "1.0.0")
 	if res.Qualified {
 		t.Fatal("Resolve: Qualified = true, want false for a host with zero loaded packs")
 	}

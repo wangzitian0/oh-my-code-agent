@@ -37,7 +37,7 @@ func TestNewSandboxClaudeCode(t *testing.T) {
 }
 
 func TestNewSandboxUnsupportedHost(t *testing.T) {
-	if _, err := NewSandbox(t.TempDir(), "opencode"); err == nil {
+	if _, err := NewSandbox(t.TempDir(), "cursor"); err == nil {
 		t.Error("NewSandbox(unsupported host) error = nil, want error")
 	}
 }

@@ -176,8 +176,8 @@ failed verification leaves a recoverable previous generation
 - Qualify the out-of-process plugin transport: an adapter as a separate
   executable speaking the versioned contract over stdio.
 - Publish plugin authoring documentation and the qualification checklist.
-- Port one host (OpenCode is the first candidate) through the external plugin
-  path, observation tier first.
+- Port one host through the external plugin path, observation tier first
+  (first candidate selected from the remaining knowledge-tier hosts).
 - Add isolated runtime mechanisms only when the host exposes a reversible
   config/home boundary or a qualified overlay strategy.
 - Mark every operation EXACT, COMPATIBLE, PARTIAL, OPAQUE, UNKNOWN, or UNSUPPORTED.

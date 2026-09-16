@@ -103,14 +103,14 @@ func TestClassificationTable_UnknownHost(t *testing.T) {
 }
 
 func TestClassificationTable_KnownButUnimplementedHost(t *testing.T) {
-	// "opencode" is a valid domain.KnownHostIDs entry this package has no
+	// "cursor" is a valid domain.KnownHostIDs entry this package has no
 	// classification rows for -- must return an empty, non-error result
 	// rather than a fabricated table.
-	items, err := ClassificationTable("opencode")
+	items, err := ClassificationTable("cursor")
 	if err != nil {
-		t.Fatalf("ClassificationTable(opencode): %v", err)
+		t.Fatalf("ClassificationTable(cursor): %v", err)
 	}
 	if len(items) != 0 {
-		t.Errorf("ClassificationTable(opencode) = %d items, want 0", len(items))
+		t.Errorf("ClassificationTable(cursor) = %d items, want 0", len(items))
 	}
 }

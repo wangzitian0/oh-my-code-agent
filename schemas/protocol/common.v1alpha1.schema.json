@@ -61,7 +61,6 @@
       "enum": [
         "claude-code",
         "codex",
-        "opencode",
         "cursor",
         "github-copilot",
         "antigravity-cli",

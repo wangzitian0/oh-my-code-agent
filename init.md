@@ -166,8 +166,8 @@ blocked planning.
   inside the MVP. Codex leads each runtime milestone because `CODEX_HOME` is
   the cleanest documented isolation boundary; Claude Code follows within the
   same milestone through its own qualified mechanisms.
-- OpenCode and every other host remain inventory and Knowledge targets until an
-  adapter plugin qualifies them per capability.
+- Every other host remains an inventory and Knowledge target until an
+  adapter plugin qualifies it per capability.
 
 ### Concepts
 

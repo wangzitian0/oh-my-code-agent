@@ -4,7 +4,7 @@ Status: draft v0.3
 
 Evidence snapshot: 2026-07-16
 
-Scope: Claude Code, Codex, OpenCode, Cursor, GitHub Copilot, Google
+Scope: Claude Code, Codex, Cursor, GitHub Copilot, Google
 Antigravity CLI (`agy`), Pi, OpenClaw, and NousResearch Hermes Agent
 (`hermess` alias).
 
@@ -208,7 +208,6 @@ Examples:
 |---|---|---|---|
 | `claude-code` | `claude` | CLI, editor integrations | documented |
 | `codex` | `openai-codex` | CLI, app | documented |
-| `opencode` | `open-code` | CLI, app | documented with duplicate-resolution gaps |
 | `cursor` | `cursor-agent` | editor, CLI, cloud | documented with path gaps |
 | `github-copilot` | `copilot`, `gh-copilot` | CLI, VS Code, GitHub.com | documented; surface split required |
 | `antigravity-cli` | `agy`, `google-antigravity` | CLI with shared GUI engine | partial, version-pinned adapter required |
@@ -229,19 +228,19 @@ per capability.
 Legend: `E` = `EXACT`, `P` = `PARTIAL`, `V` = `VENDOR_ONLY`, `-` = `ABSENT`,
 `?` = `UNKNOWN`.
 
-| Concept | Claude | Codex | OpenCode | Cursor | Copilot | Agy | Pi | OpenClaw | Hermes |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Always-on instructions | E | E | E | E | E | P | E | E | E |
-| Path-scoped rules | E | E | P | E | E | ? | P | P | P |
-| Skill | E | E | E | E | E | P | E | E | E |
-| Custom agent/subagent | E | E | E | E | E | P | P | E | P |
-| MCP client registry | E | E | E | E | E | E | P | E | E |
-| Hook/lifecycle callback | E | E | P | E | E | E | P | E | E |
-| Plugin/package | E | E | E | E | E | E | E | E | E |
-| Enforced sandbox/permission | E | E | P | E | E | E | P | E | E |
-| Native profile isolation | P | E | P | P | P | P | P | E | E |
-| Automatic durable memory | E | P | ? | P | P | ? | P | E | E |
-| Connector/app control plane | E | E | - | P | E | P | - | P | P |
+| Concept | Claude | Codex | Cursor | Copilot | Agy | Pi | OpenClaw | Hermes |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Always-on instructions | E | E | E | E | P | E | E | E |
+| Path-scoped rules | E | E | E | E | ? | P | P | P |
+| Skill | E | E | E | E | P | E | E | E |
+| Custom agent/subagent | E | E | E | E | P | P | E | P |
+| MCP client registry | E | E | E | E | E | P | E | E |
+| Hook/lifecycle callback | E | E | E | E | E | P | E | E |
+| Plugin/package | E | E | E | E | E | E | E | E |
+| Enforced sandbox/permission | E | E | E | E | E | P | E | E |
+| Native profile isolation | P | E | P | P | P | P | E | E |
+| Automatic durable memory | E | P | P | P | ? | P | E | E |
+| Connector/app control plane | E | E | P | E | P | - | P | P |
 
 `P` does not mean safe interchange. For example, Pi extensions can implement
 MCP or hooks, but an extension runs code with the Pi process permissions and is
@@ -282,24 +281,7 @@ Primary evidence: [Codex CLI](https://learn.chatgpt.com/docs/codex/cli),
 [AGENTS.md](https://learn.chatgpt.com/docs/agent-configuration/agents-md), and
 [skills](https://learn.chatgpt.com/docs/build-skills).
 
-### 6.3 OpenCode
-
-| Concept | Physical source and scope | Effective semantics |
-|---|---|---|
-| Settings | managed configuration; organization `.well-known/opencode`; global `~/.config/opencode/opencode.json`; `OPENCODE_CONFIG`; project `opencode.json`; `.opencode` roots; inline `OPENCODE_CONFIG_CONTENT` | Configuration sources merge. Later sources override conflicting values, while managed configuration remains an immutable constraint. Bind this order to the detected version. |
-| Instructions | project/ancestor `AGENTS.md` with `CLAUDE.md` fallback; global `~/.config/opencode/AGENTS.md` with `~/.claude/CLAUDE.md` fallback; config `instructions` entries | The first matching file wins inside each fallback category. Configured instruction files compose with the selected AGENTS context; contradictory text remains advisory. |
-| Skills | project and ancestor `.opencode/skills`, `.agents/skills`, `.claude/skills`; matching global roots | Discovery locations are native. Same-name duplicate behavior remains `UNKNOWN` until a versioned fixture proves the scan order. |
-| Agents | Markdown agent definitions under project/global `.opencode/agents`; agents in configuration | Agent-specific tools, model, prompt and permissions override or constrain global defaults according to their field semantics. |
-| MCP | `mcp` definitions in merged OpenCode configuration | Definitions follow configuration source merging by ID. Unknown same-ID behavior or transport fields block destructive generation. |
-| Hooks/plugins | JavaScript/TypeScript plugins under project/global `.opencode/plugins` and configured packages | Plugins are executable code with lifecycle access, not portable declarative hooks. Inventory and trust reporting precede any activation. |
-| Policy/state | permission rules, enabled/disabled providers, trust and application state | The last matching permission pattern determines the result; disabled providers take precedence over enabled providers. State and credentials are not Profile payloads. |
-
-Primary evidence: [configuration](https://opencode.ai/docs/config/),
-[rules](https://opencode.ai/docs/rules),
-[skills](https://opencode.ai/docs/skills/), and
-[agents](https://opencode.ai/docs/agents/).
-
-### 6.4 Cursor
+### 6.3 Cursor
 
 | Concept | Physical source and scope | Effective semantics |
 |---|---|---|
@@ -314,7 +296,7 @@ Primary evidence: [Cursor 2.4 agent harness changes](https://cursor.com/changelo
 [Cursor 2.5 plugins and sandbox controls](https://cursor.com/changelog/2-5), and
 [Cursor documentation](https://cursor.com/docs).
 
-### 6.5 GitHub Copilot
+### 6.4 GitHub Copilot
 
 Copilot must be modeled as separate `cli`, `vscode`, and `github.com` surfaces.
 The table below is CLI-first; editor/cloud policy is attached as a separate
@@ -335,7 +317,7 @@ Primary evidence: [CLI config directory](https://docs.github.com/en/copilot/refe
 [CLI skills](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-skills),
 and [hooks](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/use-hooks).
 
-### 6.6 Google Antigravity CLI (`agy`)
+### 6.5 Google Antigravity CLI (`agy`)
 
 This adapter is deliberately `PARTIAL`. The official CLI repository currently
 ships a binary-oriented README/changelog rather than a complete configuration
@@ -355,7 +337,7 @@ Primary evidence: official
 and
 [changelog](https://github.com/google-antigravity/antigravity-cli/blob/main/CHANGELOG.md).
 
-### 6.7 Pi
+### 6.6 Pi
 
 | Concept | Physical source and scope | Effective semantics |
 |---|---|---|
@@ -371,7 +353,7 @@ Primary evidence: [settings](https://pi.dev/docs/latest/settings),
 [skills](https://pi.dev/docs/latest/skills), and
 [extensions](https://pi.dev/docs/latest/extensions).
 
-### 6.8 OpenClaw
+### 6.7 OpenClaw
 
 | Concept | Physical source and scope | Effective semantics |
 |---|---|---|
@@ -388,7 +370,7 @@ Primary evidence: [configuration](https://docs.openclaw.ai/gateway/configuration
 [skills and precedence](https://docs.openclaw.ai/skills), and
 [MCP](https://docs.openclaw.ai/cli/mcp).
 
-### 6.9 NousResearch Hermes Agent (`hermess`)
+### 6.8 NousResearch Hermes Agent (`hermess`)
 
 Current mappings were verified against the official repository source revision,
 not inferred from compatibility filenames.
@@ -499,11 +481,10 @@ rollback, and reporting belong to the control plane rather than an Adapter.
    rules for a pinned `agy` release.
 4. Prove Pi duplicate skill behavior and decide whether known MCP extensions
    deserve a named adapter capability rather than `PARTIAL` core support.
-5. Prove OpenCode duplicate Skill and same-ID MCP behavior for pinned releases.
-6. Model Copilot editor/cloud enterprise policy separately from Copilot CLI.
-7. Define logical tool fingerprints for duplicate detection across built-in,
+5. Model Copilot editor/cloud enterprise policy separately from Copilot CLI.
+6. Define logical tool fingerprints for duplicate detection across built-in,
    MCP, connector/app, and plugin sources.
-8. Add a policy lattice that can prove `deny`, managed allowlists, filesystem,
+7. Add a policy lattice that can prove `deny`, managed allowlists, filesystem,
    network, approval, and sandbox outcomes without invoking an LLM.
 
 ## 10. Source Policy

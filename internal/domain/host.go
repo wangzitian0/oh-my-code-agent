@@ -8,7 +8,6 @@ import "fmt"
 var KnownHostIDs = map[string]bool{
 	"claude-code":     true,
 	"codex":           true,
-	"opencode":        true,
 	"cursor":          true,
 	"github-copilot":  true,
 	"antigravity-cli": true,

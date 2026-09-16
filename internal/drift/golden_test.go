@@ -20,7 +20,7 @@ func TestGolden_DR017WorkedExample(t *testing.T) {
 	const remediation = "rebuild 38 artifacts; retain 2 explicit exceptions"
 
 	projects := []string{"infra2", "finance", "truealpha", "gateway", "billing", "search", "notify", "admin"}
-	hosts := []string{"codex", "claude-code", "cursor", "opencode", "github-copilot"}
+	hosts := []string{"codex", "claude-code", "cursor", "pi", "github-copilot"}
 
 	var signals []Signal
 	n := 0

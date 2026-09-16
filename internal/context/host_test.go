@@ -53,13 +53,13 @@ func TestDetectHost_UnknownHostID(t *testing.T) {
 }
 
 func TestDetectHost_KnownButUnimplementedHostID(t *testing.T) {
-	// "opencode" is a canonical host ID (domain.KnownHostIDs) but this
+	// "cursor" is a canonical host ID (domain.KnownHostIDs) but this
 	// package only implements detection for codex and claude-code — a
 	// distinct failure mode from an unknown ID entirely.
 	env := Environment{Vars: []string{"HOME=" + t.TempDir()}}
-	_, err := DetectHost(context.Background(), env, "opencode")
+	_, err := DetectHost(context.Background(), env, "cursor")
 	if err == nil {
-		t.Fatal("DetectHost(opencode): want error, got nil")
+		t.Fatal("DetectHost(cursor): want error, got nil")
 	}
 	if !strings.Contains(err.Error(), "does not implement detection") {
 		t.Errorf("error = %q, want it to explain detection is unimplemented for this known host", err.Error())

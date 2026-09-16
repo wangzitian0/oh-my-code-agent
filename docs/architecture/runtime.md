@@ -21,7 +21,6 @@ to locations such as:
 ```text
 ~/.codex
 ~/.claude
-~/.config/opencode
 ~/.agents/skills
 ```
 
@@ -121,7 +120,6 @@ Inside the direnv environment:
 ```bash
 codex       # managed current generation
 claude      # managed current generation
-opencode    # unmanaged until an adapter plugin qualifies it
 omca        # management TUI
 ```
 
