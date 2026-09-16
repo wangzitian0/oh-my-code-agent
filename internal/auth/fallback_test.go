@@ -212,13 +212,13 @@ func TestDecide_RejectsUnknownHost(t *testing.T) {
 }
 
 func TestDecide_RejectsHostWithNoFallbackWiring(t *testing.T) {
-	// "opencode" is a valid domain.KnownHostIDs entry but this package does
+	// "cursor" is a valid domain.KnownHostIDs entry but this package does
 	// not implement fallback wiring for it (SupportedHosts is only codex
 	// and claude-code) -- Decide must fail loudly, not silently pick a
 	// wrong rung.
 	qual := KeyringQualification("darwin-arm64")
-	if _, err := Decide(context.Background(), "opencode", envWith(), nil, qual); err == nil {
-		t.Error("Decide(opencode) error = nil, want error (no fallback wiring for this host)")
+	if _, err := Decide(context.Background(), "cursor", envWith(), nil, qual); err == nil {
+		t.Error("Decide(cursor) error = nil, want error (no fallback wiring for this host)")
 	}
 }
 

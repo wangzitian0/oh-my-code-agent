@@ -91,8 +91,8 @@ func TestNormalizeHostArg_MissingHost(t *testing.T) {
 // TestNormalizeHostArg_Unrecognized proves an unrecognized host argument
 // (e.g. a typo, or a host this project does not detect) is rejected.
 func TestNormalizeHostArg_Unrecognized(t *testing.T) {
-	if _, err := normalizeHostArg("opencode"); err == nil {
-		t.Fatal("normalizeHostArg(opencode): want error, got nil")
+	if _, err := normalizeHostArg("cursor"); err == nil {
+		t.Fatal("normalizeHostArg(cursor): want error, got nil")
 	}
 }
 

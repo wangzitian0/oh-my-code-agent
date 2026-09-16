@@ -20,14 +20,14 @@ func TestObserve_UnknownHostID(t *testing.T) {
 }
 
 func TestObserve_KnownButUnimplementedHostID(t *testing.T) {
-	// "opencode" is a canonical host ID (domain.KnownHostIDs) but this
+	// "cursor" is a canonical host ID (domain.KnownHostIDs) but this
 	// package only implements physical-mapping knowledge for codex and
 	// claude-code — the same distinct failure mode
 	// internal/context/host.go's DetectHost draws between "not a host ID at
 	// all" and "a known host ID we don't implement."
-	_, err := Observe(Request{Detection: hostcontext.HostDetection{Host: "opencode"}})
+	_, err := Observe(Request{Detection: hostcontext.HostDetection{Host: "cursor"}})
 	if err == nil {
-		t.Fatal("Observe(opencode): want error, got nil")
+		t.Fatal("Observe(cursor): want error, got nil")
 	}
 	if !strings.Contains(err.Error(), "does not implement observation") {
 		t.Errorf("error = %q, want it to explain observation is unimplemented for this known host", err.Error())

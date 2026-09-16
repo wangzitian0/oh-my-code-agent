@@ -9,7 +9,6 @@ func TestValidateHostID(t *testing.T) {
 	}{
 		{"claude-code", false},
 		{"codex", false},
-		{"opencode", false},
 		{"cursor", false},
 		{"github-copilot", false},
 		{"antigravity-cli", false},
