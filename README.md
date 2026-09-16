@@ -99,3 +99,8 @@ Rollback now checks the parent's immutable compilation host version before
 switching state. Legacy generations remain launchable under their existing
 version guard, but must be recompiled and activated before they can be rollback
 targets; see [rollback compatibility](docs/architecture/runtime.md#rollback-compatibility-and-compiler-upgrades).
+
+`omca run codex --mode native` preserves the complete calling environment. It
+bypasses generation selection, but does not undo an inherited managed HOME or
+host configuration. OMCA context markers trigger an additional warning that the
+launch is not a clean native comparison, without printing their values.

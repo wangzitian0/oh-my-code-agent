@@ -530,8 +530,16 @@ omca doctor codex
 ```
 
 - `isolated` is the default managed path.
-- `native` is an explicit diagnostic baseline and may execute native Hooks or
-  MCP servers; it requires a warning.
+- `native` executes the real host with the caller's ambient environment unchanged
+  and bypasses generation selection for this invocation. It may execute Hooks or
+  MCP servers from inherited configuration and always warns. It does not restore
+  HOME or clear user-supplied CODEX_HOME/CLAUDE_CONFIG_DIR, PATH or OMCA markers.
+  Nonempty OMCA_RUN_ID, OMCA_REAL_HOME, OMCA_CONTEXT_ID, OMCA_WORKTREE_ID,
+  OMCA_STATE_DIR or OMCA_SHIM_DIR adds a warning that this is not a clean native
+  comparison; no marker values are printed. This includes direnv shells and
+  nested managed-host calls. No markers is not proof of a pristine environment:
+  prepare a separate shell with the intended native configuration for a baseline.
+  Only binary resolution filters the OMCA shim; the child's PATH is unchanged.
 - `bisect` builds disposable generations that import candidate sources one at a
   time, in stable content-addressed order, and never activates any of them.
   `omca bisect --dry-run <host>` is a mandatory, always-available mode that
