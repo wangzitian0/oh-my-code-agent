@@ -17,6 +17,7 @@ single global priority:
 | Third-party evidence, versioning, and update policy | [`knowledge/README.md`](knowledge/README.md) |
 | Component, data, interface, and storage architecture | [`architecture/README.md`](architecture/README.md) |
 | Bootstrap, isolation, generations, and restart behavior | [`architecture/runtime.md`](architecture/runtime.md) |
+| Candidate environment passthrough validation (preview only) | [`architecture/passthrough.md`](architecture/passthrough.md) |
 | Drift, evidence, report UX, MCP queries, and debugging | [`architecture/reporting.md`](architecture/reporting.md) |
 | Frozen cross-cutting decisions (isolation, ownership, credentials, knowledge update, plugin distribution) | [`adr/`](adr/) |
 | Building and qualifying a host adapter plugin | [`plugin/authoring-guide.md`](plugin/authoring-guide.md) |

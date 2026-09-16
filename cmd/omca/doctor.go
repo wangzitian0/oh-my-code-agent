@@ -79,6 +79,7 @@ func runDoctor(stdout, stderr io.Writer) int {
 
 	var findings []doctorFinding
 	findings = append(findings, checkSessionManaged(realEnv, wt))
+	findings = append(findings, checkPassthrough(wt.Root, realEnv))
 	for _, host := range hostcontext.DetectedHostIDs {
 		binName, _ := hostcontext.BinaryName(host) // hostcontext.DetectedHostIDs are always known to BinaryName
 		findings = append(findings, checkPathBypass(host, binName, shimDir))
