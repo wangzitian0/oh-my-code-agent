@@ -40,6 +40,8 @@ type JSONRPCError struct {
 // ManagedTool manages the lifecycle and multiplexing of one singleton MCP tool process.
 type ManagedTool struct {
 	mu           sync.Mutex
+	writeMu      sync.Mutex
+	pendingMu    sync.Mutex
 	config       ToolConfig
 	cmd          *exec.Cmd
 	stdin        io.WriteCloser
@@ -228,12 +230,12 @@ func (t *ManagedTool) readLoop(stdout io.Reader) {
 
 		if len(resp.ID) > 0 {
 			idStr := string(resp.ID)
-			t.mu.Lock()
+			t.pendingMu.Lock()
 			ch, ok := t.pending[idStr]
 			if ok {
 				delete(t.pending, idStr)
 			}
-			t.mu.Unlock()
+			t.pendingMu.Unlock()
 
 			if ok && ch != nil {
 				ch <- &resp
@@ -244,16 +246,25 @@ func (t *ManagedTool) readLoop(stdout io.Reader) {
 	t.mu.Lock()
 	t.status = "STOPPED"
 	t.pid = 0
-	// Notify remaining pending requests
+	t.mu.Unlock()
+
+	t.pendingMu.Lock()
 	for k, ch := range t.pending {
 		delete(t.pending, k)
 		close(ch)
 	}
-	t.mu.Unlock()
+	t.pendingMu.Unlock()
 }
 
 func (t *ManagedTool) callRawLocked(ctx context.Context, req *JSONRPCRequest) (*JSONRPCResponse, error) {
-	if t.stdin == nil {
+	return t.callRaw(ctx, req)
+}
+
+func (t *ManagedTool) callRaw(ctx context.Context, req *JSONRPCRequest) (*JSONRPCResponse, error) {
+	t.mu.Lock()
+	stdin := t.stdin
+	t.mu.Unlock()
+	if stdin == nil {
 		return nil, errors.New("tool stdin not available")
 	}
 
@@ -262,23 +273,34 @@ func (t *ManagedTool) callRawLocked(ctx context.Context, req *JSONRPCRequest) (*
 	req.ID = json.RawMessage(fmt.Sprintf("%q", reqID))
 
 	ch := make(chan *JSONRPCResponse, 1)
+	t.pendingMu.Lock()
 	t.pending[fmt.Sprintf("%q", reqID)] = ch
+	t.pendingMu.Unlock()
 
 	data, err := json.Marshal(req)
 	if err != nil {
+		t.pendingMu.Lock()
 		delete(t.pending, fmt.Sprintf("%q", reqID))
+		t.pendingMu.Unlock()
 		return nil, err
 	}
 	data = append(data, '\n')
 
-	if _, err := t.stdin.Write(data); err != nil {
+	t.writeMu.Lock()
+	_, err = stdin.Write(data)
+	t.writeMu.Unlock()
+	if err != nil {
+		t.pendingMu.Lock()
 		delete(t.pending, fmt.Sprintf("%q", reqID))
+		t.pendingMu.Unlock()
 		return nil, fmt.Errorf("write stdin: %w", err)
 	}
 
 	select {
 	case <-ctx.Done():
+		t.pendingMu.Lock()
 		delete(t.pending, fmt.Sprintf("%q", reqID))
+		t.pendingMu.Unlock()
 		return nil, ctx.Err()
 	case resp, ok := <-ch:
 		if !ok {
@@ -325,10 +347,10 @@ func (t *ManagedTool) HandleClientRequest(ctx context.Context, req *JSONRPCReque
 		}
 		t.mu.Lock()
 	}
+	t.mu.Unlock()
 
 	// 3. Forward all other calls (e.g. tools/call, prompts/list, etc.)
-	resp, err := t.callRawLocked(ctx, req)
-	t.mu.Unlock()
+	resp, err := t.callRaw(ctx, req)
 	if err != nil {
 		return nil, err
 	}
