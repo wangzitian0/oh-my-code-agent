@@ -36,6 +36,9 @@ func TestBootstrap_RebuildingIntoFreshOutputDir_YieldsIdenticalID(t *testing.T) 
 		t.Fatalf("Bootstrap (1st): %v", err)
 	}
 	restoreWritable(t, dir1)
+	if gen1.Spec.Hosts["codex"].HostVersion != req.Detection.Version {
+		t.Fatal("bootstrap omitted immutable compilation host version")
+	}
 
 	dir2 := filepath.Join(t.TempDir(), "generation")
 	gen2, err := Bootstrap(req, dir2)

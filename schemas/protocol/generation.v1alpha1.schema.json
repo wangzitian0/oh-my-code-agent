@@ -58,6 +58,7 @@
               "surface": { "type": "string" },
               "adapterId": { "type": "string", "minLength": 1 },
               "adapterVersion": { "type": "string" },
+              "hostVersion": { "type": "string", "minLength": 1 },
               "ownership": { "$ref": "common.v1alpha1.schema.json#/$defs/ownership" },
               "artifacts": {
                 "type": "array",

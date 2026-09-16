@@ -49,6 +49,10 @@ type GenerationArtifact struct {
 // GenerationHostEntry is one host's compiled artifact tree within a
 // Generation (docs/architecture/README.md §5.4).
 type GenerationHostEntry struct {
+	// HostVersion is the exact host version targeted at compilation, not the
+	// adapter version or a later activation observation. Omitted by legacy
+	// manifests, which remain readable but cannot prove rollback compatibility.
+	HostVersion    string               `json:"hostVersion,omitempty"`
 	Surface        string               `json:"surface,omitempty"`
 	AdapterID      string               `json:"adapterId"`
 	AdapterVersion string               `json:"adapterVersion,omitempty"`

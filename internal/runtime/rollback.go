@@ -116,6 +116,10 @@ func Rollback(worktreeStateDir, generationsRoot, host string, detection hostcont
 		return RollbackResult{}, fmt.Errorf("runtime: Rollback: %s contains a manifest for generation %q, expected the parent %q", parentDir, parentGen.Metadata.ID, parentID)
 	}
 
+	if err := validateCompiledHost(parentGen, host, detection); err != nil {
+		return RollbackResult{}, fmt.Errorf("runtime: Rollback: %w", err)
+	}
+
 	if err := SetCurrentGeneration(worktreeStateDir, host, parentDir, parentGen, detection, now); err != nil {
 		return RollbackResult{}, fmt.Errorf("runtime: Rollback: switching current for %s: %w", host, err)
 	}

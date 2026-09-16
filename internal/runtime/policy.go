@@ -13,7 +13,7 @@ const BootstrapPolicyVersion = "bootstrap-policy/v1"
 
 // HostCompilerVersion invalidates both bootstrap and full-generation caches
 // when the shared host artifact compiler changes its emitted configuration.
-const HostCompilerVersion = "host-compiler/v2"
+const HostCompilerVersion = "host-compiler/v3"
 
 // bootstrapPolicyValue is the fixed, explicitly-named "no desired state,
 // hardcoded minimal policy" value substituted for

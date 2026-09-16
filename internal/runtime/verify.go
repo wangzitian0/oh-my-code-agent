@@ -279,19 +279,9 @@ func knowledgePackByID(repo knowledge.Repository, packID string) (knowledge.Pack
 // fresh effective.EffectiveGraph, and cross-checks it against sources
 // (normally gen.Spec.Sources) via crossCheckEffectiveGraph.
 //
-// hostVersion is read from worktreeStateDir's own CurrentRecord sidecar
-// (ReadCurrentRecord -- the same "current" pointer SetCurrentGeneration
-// wrote host's real detected version into at activation time), not from the
-// Generation document itself: domain.GenerationHostEntry records no host
-// version field (only Surface/AdapterID/Ownership/Artifacts), so this is the
-// one place that fact is still available. A missing or unreadable
-// CurrentRecord degrades hostVersion to "" rather than failing this check
-// outright: knowledge.Repository.Resolve's own "zero matches degrades
-// honestly" contract turns an empty version into an unqualified Resolution
-// (hk stays domain.HostKnowledge{}), which still lets
-// effective.ComputeEffectiveGraph run and extract/match candidates -- this
-// check's cross-check step only cares about identity/discoverability, never
-// evidence level, so it stays meaningful even without a resolved Pack.
+// Host version comes from immutable compilation provenance when available.
+// Legacy manifests predate that field; they retain their existing current-record
+// fallback for observation only. Neither path promotes Knowledge capabilities.
 //
 // Any internal error while re-observing or re-computing the graph (an
 // unsupported host, a malformed synthetic detection, etc.) is folded into a
@@ -317,9 +307,11 @@ func verifyEffectiveGraphAgainstManifest(worktreeStateDir, generationDir, host s
 		return []string{setupFailureIdent}, []string{fmt.Sprintf("effective-graph re-derivation: %v", err)}
 	}
 
-	var hostVersion string
-	if rec, recErr := ReadCurrentRecord(worktreeStateDir, host); recErr == nil {
-		hostVersion = rec.HostVersion
+	hostVersion := entry.HostVersion
+	if hostVersion == "" {
+		if rec, recErr := ReadCurrentRecord(worktreeStateDir, host); recErr == nil {
+			hostVersion = rec.HostVersion
+		}
 	}
 
 	hostPrefix := filepath.Join(generationDir, "hosts", host, surface)

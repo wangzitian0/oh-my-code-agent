@@ -111,6 +111,14 @@ func EnsureLaunchGeneration(req BootstrapRequest, worktreeStateDir string) (doma
 			return domain.Generation{}, "", fmt.Errorf("runtime: current generation does not contain host %s", host)
 		}
 		if current.Spec.DesiredState != nil {
+			// Legacy selected runtimes retain the existing record check below:
+			// upgrading OMCA must not silently replace or stop a selected loadout.
+			// Newly compiled runtimes also carry immutable target evidence.
+			if current.Spec.Hosts[host].HostVersion != "" {
+				if err := validateCompiledHost(current, host, req.Detection); err != nil {
+					return domain.Generation{}, "", err
+				}
+			}
 			record, recordErr := ReadCurrentRecord(worktreeStateDir, host)
 			if recordErr != nil || record.GenerationID != current.Metadata.ID {
 				return domain.Generation{}, "", fmt.Errorf("runtime: selected %s generation has missing or inconsistent activation evidence; restore its current pointer and record before launch", host)
