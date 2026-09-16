@@ -213,11 +213,16 @@ func (h *Hub) dispatchLine(ctx context.Context, targetTool string, line []byte, 
 
 	// Apply worker pool semaphore if tool is a subagent execution tool
 	var release func()
-	if targetTool == "subagent-worker" {
+	if targetTool == "subagent-worker" && req.Method == "tools/call" {
+		var toolCall struct {
+			Name string `json:"name"`
+		}
+		_ = json.Unmarshal(req.Params, &toolCall)
+
 		var err error
-		if req.Method == "subagent_batch" {
+		if toolCall.Name == "subagent_batch" {
 			release, err = h.pool.AcquireBatchSlot(ctx)
-		} else {
+		} else if toolCall.Name == "subagent_task" || toolCall.Name == "subagent_code_transform" {
 			release, err = h.pool.AcquireTaskSlot(ctx)
 		}
 		if err != nil {
@@ -232,7 +237,9 @@ func (h *Hub) dispatchLine(ctx context.Context, targetTool string, line []byte, 
 			h.writeResponse(writer, resp)
 			return
 		}
-		defer release()
+		if release != nil {
+			defer release()
+		}
 	}
 
 	resp, err := tool.HandleClientRequest(ctx, &req)

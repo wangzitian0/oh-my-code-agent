@@ -290,9 +290,16 @@ func (t *ManagedTool) callRawLocked(ctx context.Context, req *JSONRPCRequest) (*
 
 // HandleClientRequest processes a JSON-RPC request from an attached client.
 func (t *ManagedTool) HandleClientRequest(ctx context.Context, req *JSONRPCRequest) (*JSONRPCResponse, error) {
+	t.mu.Lock()
+	if t.status != "RUNNING" {
+		if err := t.startLocked(ctx); err != nil {
+			t.mu.Unlock()
+			return nil, err
+		}
+	}
+
 	// 1. Intercept "initialize": return cached handshake result
 	if req.Method == "initialize" {
-		t.mu.Lock()
 		cached := t.initResult
 		t.mu.Unlock()
 		if len(cached) > 0 {
@@ -302,11 +309,11 @@ func (t *ManagedTool) HandleClientRequest(ctx context.Context, req *JSONRPCReque
 				Result:  cached,
 			}, nil
 		}
+		t.mu.Lock()
 	}
 
 	// 2. Intercept "tools/list": return cached tools list if available
 	if req.Method == "tools/list" {
-		t.mu.Lock()
 		cached := t.toolsResult
 		t.mu.Unlock()
 		if len(cached) > 0 {
@@ -316,16 +323,10 @@ func (t *ManagedTool) HandleClientRequest(ctx context.Context, req *JSONRPCReque
 				Result:  cached,
 			}, nil
 		}
+		t.mu.Lock()
 	}
 
 	// 3. Forward all other calls (e.g. tools/call, prompts/list, etc.)
-	t.mu.Lock()
-	if t.status != "RUNNING" {
-		if err := t.startLocked(ctx); err != nil {
-			t.mu.Unlock()
-			return nil, err
-		}
-	}
 	resp, err := t.callRawLocked(ctx, req)
 	t.mu.Unlock()
 	if err != nil {
