@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/wangzitian0/oh-my-code-agent/internal/hub"
@@ -117,6 +118,10 @@ func runHubServe(stdout, stderr io.Writer, args []string) int {
 	}
 	fmt.Fprintf(stdout, "omca resident hub running at %s\n", cfg.SocketPath)
 
+	pidFile := strings.TrimSuffix(cfg.SocketPath, ".sock") + ".pid"
+	_ = os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", os.Getpid())), 0600)
+	defer os.Remove(pidFile)
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	<-sigCh
@@ -139,16 +144,27 @@ func runHubStop(stdout, stderr io.Writer, args []string) int {
 		sock = hub.DefaultSocketPath()
 	}
 
-	conn, err := net.Dial("unix", sock)
-	if err != nil {
-		fmt.Fprintf(stdout, "omca hub is not running (%v)\n", err)
-		return 0
+	pidFile := strings.TrimSuffix(sock, ".sock") + ".pid"
+	stopped := false
+	if data, err := os.ReadFile(pidFile); err == nil {
+		var pid int
+		if _, err := fmt.Sscanf(string(data), "%d", &pid); err == nil && pid > 0 {
+			if proc, err := os.FindProcess(pid); err == nil {
+				_ = proc.Signal(syscall.SIGTERM)
+				stopped = true
+			}
+		}
 	}
-	conn.Close()
 
-	// Remove socket to signal shutdown
+	// Remove socket and pidfile
 	_ = os.Remove(sock)
-	fmt.Fprintf(stdout, "stopped omca hub at %s\n", sock)
+	_ = os.Remove(pidFile)
+
+	if stopped {
+		fmt.Fprintf(stdout, "stopped omca hub daemon (socket %s)\n", sock)
+	} else {
+		fmt.Fprintf(stdout, "omca hub is not running\n")
+	}
 	return 0
 }
 

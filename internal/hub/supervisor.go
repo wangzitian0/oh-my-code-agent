@@ -186,29 +186,31 @@ func (t *ManagedTool) startLocked(ctx context.Context) error {
 		}`),
 	}
 
-	initResp, err := t.callRawLocked(ctx, initReq)
-	if err == nil && initResp != nil {
-		t.initResult = initResp.Result
-		// Send notifications/initialized
-		notif := &JSONRPCRequest{
-			JSONRPC: "2.0",
-			Method:  "notifications/initialized",
-		}
-		data, _ := json.Marshal(notif)
-		data = append(data, '\n')
-		_, _ = t.stdin.Write(data)
+		initCtx, initCancel := context.WithTimeout(ctx, 10*time.Second)
+		defer initCancel()
+		initResp, err := t.callRawLocked(initCtx, initReq)
+		if err == nil && initResp != nil {
+			t.initResult = initResp.Result
+			// Send notifications/initialized
+			notif := &JSONRPCRequest{
+				JSONRPC: "2.0",
+				Method:  "notifications/initialized",
+			}
+			data, _ := json.Marshal(notif)
+			data = append(data, '\n')
+			_, _ = t.stdin.Write(data)
 
-		// Fetch and cache tools list
-		toolsReq := &JSONRPCRequest{
-			JSONRPC: "2.0",
-			ID:      json.RawMessage(`"tools-1"`),
-			Method:  "tools/list",
+			// Fetch and cache tools list
+			toolsReq := &JSONRPCRequest{
+				JSONRPC: "2.0",
+				ID:      json.RawMessage(`"tools-1"`),
+				Method:  "tools/list",
+			}
+			toolsResp, err := t.callRawLocked(initCtx, toolsReq)
+			if err == nil && toolsResp != nil {
+				t.toolsResult = toolsResp.Result
+			}
 		}
-		toolsResp, err := t.callRawLocked(ctx, toolsReq)
-		if err == nil && toolsResp != nil {
-			t.toolsResult = toolsResp.Result
-		}
-	}
 
 	return nil
 }
@@ -261,10 +263,7 @@ func (t *ManagedTool) callRawLocked(ctx context.Context, req *JSONRPCRequest) (*
 }
 
 func (t *ManagedTool) callRaw(ctx context.Context, req *JSONRPCRequest) (*JSONRPCResponse, error) {
-	t.mu.Lock()
-	stdin := t.stdin
-	t.mu.Unlock()
-	if stdin == nil {
+	if t.stdin == nil {
 		return nil, errors.New("tool stdin not available")
 	}
 
@@ -287,7 +286,7 @@ func (t *ManagedTool) callRaw(ctx context.Context, req *JSONRPCRequest) (*JSONRP
 	data = append(data, '\n')
 
 	t.writeMu.Lock()
-	_, err = stdin.Write(data)
+	_, err = t.stdin.Write(data)
 	t.writeMu.Unlock()
 	if err != nil {
 		t.pendingMu.Lock()
@@ -312,16 +311,9 @@ func (t *ManagedTool) callRaw(ctx context.Context, req *JSONRPCRequest) (*JSONRP
 
 // HandleClientRequest processes a JSON-RPC request from an attached client.
 func (t *ManagedTool) HandleClientRequest(ctx context.Context, req *JSONRPCRequest) (*JSONRPCResponse, error) {
-	t.mu.Lock()
-	if t.status != "RUNNING" {
-		if err := t.startLocked(ctx); err != nil {
-			t.mu.Unlock()
-			return nil, err
-		}
-	}
-
-	// 1. Intercept "initialize": return cached handshake result
+	// 1. Intercept "initialize": return cached handshake result if present
 	if req.Method == "initialize" {
+		t.mu.Lock()
 		cached := t.initResult
 		t.mu.Unlock()
 		if len(cached) > 0 {
@@ -331,11 +323,11 @@ func (t *ManagedTool) HandleClientRequest(ctx context.Context, req *JSONRPCReque
 				Result:  cached,
 			}, nil
 		}
-		t.mu.Lock()
 	}
 
-	// 2. Intercept "tools/list": return cached tools list if available
+	// 2. Intercept "tools/list": return cached tools list if present
 	if req.Method == "tools/list" {
+		t.mu.Lock()
 		cached := t.toolsResult
 		t.mu.Unlock()
 		if len(cached) > 0 {
@@ -345,11 +337,44 @@ func (t *ManagedTool) HandleClientRequest(ctx context.Context, req *JSONRPCReque
 				Result:  cached,
 			}, nil
 		}
-		t.mu.Lock()
+	}
+
+	// 3. Otherwise, ensure tool is running and dispatch
+	t.mu.Lock()
+	if t.status != "RUNNING" {
+		if err := t.startLocked(ctx); err != nil {
+			t.mu.Unlock()
+			return nil, err
+		}
 	}
 	t.mu.Unlock()
 
-	// 3. Forward all other calls (e.g. tools/call, prompts/list, etc.)
+	// If initialize/tools list was populated by startLocked, return the cached version
+	if req.Method == "initialize" {
+		t.mu.Lock()
+		cached := t.initResult
+		t.mu.Unlock()
+		if len(cached) > 0 {
+			return &JSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Result:  cached,
+			}, nil
+		}
+	}
+	if req.Method == "tools/list" {
+		t.mu.Lock()
+		cached := t.toolsResult
+		t.mu.Unlock()
+		if len(cached) > 0 {
+			return &JSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Result:  cached,
+			}, nil
+		}
+	}
+
 	resp, err := t.callRaw(ctx, req)
 	if err != nil {
 		return nil, err
