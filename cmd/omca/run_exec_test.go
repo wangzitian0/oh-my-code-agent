@@ -540,3 +540,59 @@ func TestRunNative_EndToEnd_NoGenerationEnvInjected(t *testing.T) {
 		t.Errorf("stderr does not contain the unmanaged warning: %q", stderr)
 	}
 }
+
+// Native is ambient passthrough, including explicit user overrides and inherited
+// managed state. These fake hosts only echo synthetic environment values.
+func TestRunNative_AmbientContexts(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("exec replacement is POSIX-only")
+	}
+	for _, host := range []string{"codex", "claude"} {
+		for _, context := range []string{"clean", "direnv", "nested", "real-home-marker-only", "run-marker-only"} {
+			t.Run(host+"/"+context, func(t *testing.T) {
+				worktree := t.TempDir()
+				realBin := t.TempDir()
+				shimBin := t.TempDir()
+				if err := os.Symlink(testFixtureBinaries.fakeHost, filepath.Join(realBin, host)); err != nil {
+					t.Fatal(err)
+				}
+				// A conflicting shim would recurse or fail without filtering binary lookup.
+				if err := os.Symlink(testFixtureBinaries.omca, filepath.Join(shimBin, host)); err != nil {
+					t.Fatal(err)
+				}
+				environ := []string{"HOME=" + t.TempDir(), "PATH=" + realBin, "CODEX_HOME=synthetic-user-codex-override", "CLAUDE_CONFIG_DIR=synthetic-user-claude-override", "USER_SETTING=synthetic-private-value"}
+				if context == "direnv" || context == "nested" {
+					environ[1] = "PATH=" + shimBin + string(os.PathListSeparator) + realBin
+					environ = append(environ, "OMCA_SHIM_DIR="+shimBin, "OMCA_CONTEXT_ID=synthetic-private-context", "OMCA_WORKTREE_ID=synthetic-private-worktree", "OMCA_STATE_DIR=synthetic-private-state", "OMCA_REAL_HOME=synthetic-private-original-home")
+				}
+				if context == "nested" || context == "run-marker-only" {
+					environ = append(environ, "OMCA_RUN_ID=synthetic-private-generation")
+				}
+				if context == "real-home-marker-only" {
+					environ = append(environ, "OMCA_REAL_HOME=synthetic-private-original-home")
+				}
+				stdout, stderr, code := runOmcaSubprocess(t, worktree, []string{"run", host, "--mode", "native"}, environ)
+				if code != 0 {
+					t.Fatalf("native launch failed: %d %s", code, stderr)
+				}
+				for _, kv := range environ {
+					key, want, _ := strings.Cut(kv, "=")
+					got, ok := dumpedEnvLine(stdout, key)
+					if !ok || got != want {
+						t.Fatalf("native changed %s: got %q want %q", key, got, want)
+					}
+					if want != "" && strings.Contains(stderr, want) {
+						t.Fatalf("warning disclosed value of %s", key)
+					}
+				}
+				warned := strings.Contains(stderr, "not a clean native comparison")
+				if warned != (context != "clean") {
+					t.Fatalf("wrong inherited-context warning: %s", stderr)
+				}
+				if !strings.Contains(stderr, "ambient environment unchanged") {
+					t.Fatalf("missing ambient semantics: %s", stderr)
+				}
+			})
+		}
+	}
+}

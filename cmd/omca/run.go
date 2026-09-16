@@ -111,10 +111,9 @@ func runRun(stdout, stderr io.Writer, args []string) int {
 }
 
 // runNative is `--mode native`: docs/architecture/runtime.md §11's
-// "explicit diagnostic baseline" and issue #14's literal AC, "prints an
-// explicit unmanaged warning" before running the host's plain native binary
-// with the calling process's ambient environment completely unmodified —
-// no generation, no CODEX_HOME/CLAUDE_CONFIG_DIR override, nothing.
+// ambient-environment passthrough with an explicit warning. This invocation
+// does not select or apply a generation, but inherited managed overrides may
+// still be present. Never restore HOME or discard user configuration implicitly.
 //
 // It still resolves the real binary through internal/shim.ResolveReal with
 // whatever shim directory is currently on PATH filtered out, rather than a
@@ -124,7 +123,14 @@ func runRun(stdout, stderr io.Writer, args []string) int {
 // silently defeating the entire point of asking for the native, unmanaged
 // binary.
 func runNative(stderr io.Writer, host, binName string, env hostcontext.Environment, passthrough []string) int {
-	fmt.Fprintf(stderr, "omca: run: WARNING — running %s in UNMANAGED native mode: no generation is applied, and native user-global Instructions, Skills, MCP servers, Hooks, and Plugins may load (docs/architecture/runtime.md §11 diagnostic baseline).\n", host)
+	fmt.Fprintf(stderr, "omca: run: WARNING — running %s in native mode (UNMANAGED launch): bypassing generation selection with the ambient environment unchanged; Instructions, Skills, MCP servers, Hooks, and Plugins may load from inherited configuration.\n", host)
+	for _, key := range []string{"OMCA_RUN_ID", "OMCA_REAL_HOME", "OMCA_CONTEXT_ID", "OMCA_WORKTREE_ID", "OMCA_STATE_DIR", "OMCA_SHIM_DIR"} {
+		if env.Get(key) != "" {
+			// Report presence only: values may contain private paths or identifiers.
+			fmt.Fprintln(stderr, "omca: run: WARNING — inherited OMCA context detected; this is not a clean native comparison. HOME, host configuration overrides and OMCA markers are preserved; use a separately prepared shell for a native baseline.")
+			break
+		}
+	}
 
 	shimDir := env.Get("OMCA_SHIM_DIR")
 	realPath, err := shim.ResolveReal(binName, env.Get("PATH"), shimDir)
