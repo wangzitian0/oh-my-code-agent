@@ -372,3 +372,14 @@ the corresponding milestone:
 5. Whether the TUI can restart a host process directly or only stage and instruct the user to restart.
 6. Whether Claude Code's configuration-directory override yields complete
    user-global isolation, or a virtual process home is required as for Codex.
+
+## Candidate passthrough inspection
+
+Before enabling new environment passthrough behavior, users can validate a
+versioned `passthrough.env` declaration and inspect source-variable presence
+without exposing values or mutating runtime state. A declaration expresses
+cache/runtime intent; it is not proof of safe contents or host compatibility.
+Identity and reserved runtime variables are rejected. Missing evidence remains
+unqualified, including when all source variables are present. The first
+increment is [preview-only](../architecture/passthrough.md); it changes no
+launch, HOME, credential or generation behavior.
