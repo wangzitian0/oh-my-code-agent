@@ -112,6 +112,30 @@ var Ceilings = []CeilingEntry{
 		Citation:             "knowledge/hosts/claude-code/cli/2.1/manifest.json; fixtures/README.md; issue #47",
 	},
 	{
+		Host: "pi", Concept: "instruction",
+		Ceiling:              domain.EvidenceLevelParsed,
+		IntrospectionSurface: "none documented",
+		ResolveCapability:    domain.CapabilityUnknown,
+		Reason:               "knowledge/hosts/pi/cli/0.85/manifest.json declares capabilities.instruction.resolve: UNKNOWN, so the E2 gate never opens. The official docs describe context-file discovery order but no safe, non-interactive, no-network, no-model-call interface that dumps the effective/merged context; pi's non-interactive -p mode performs a model call, so it is outside the safety boundary by definition.",
+		Citation:             "knowledge/hosts/pi/cli/0.85/manifest.json; docs/ontology/README.md section 6.7",
+	},
+	{
+		Host: "pi", Concept: "skill",
+		Ceiling:              domain.EvidenceLevelParsed,
+		IntrospectionSurface: "none documented",
+		ResolveCapability:    domain.CapabilityUnknown,
+		Reason:               "knowledge/hosts/pi/cli/0.85/manifest.json declares capabilities.skill.resolve: UNKNOWN; its knownUnknowns record that duplicate-name resolution across the four skill roots is unproven and that root-level .md skill discovery is a declared adapter gap. No native interface dumps the discovered skill list without launching a session.",
+		Citation:             "knowledge/hosts/pi/cli/0.85/manifest.json; docs/ontology/README.md section 6.7",
+	},
+	{
+		Host: "pi", Concept: "mcp_server",
+		Ceiling:              domain.EvidenceLevelParsed,
+		IntrospectionSurface: "none documented",
+		ResolveCapability:    domain.CapabilityUnsupported,
+		Reason:               "pi has no declarative native MCP registry: MCP servers are implemented through extensions (executable code). knowledge/hosts/pi/cli/0.85/manifest.json declares capabilities.mcp_server discover/resolve UNSUPPORTED, and the adapter deliberately does not translate extension code into mcp_server entities, so this cell's ceiling is the observation tier's E1.",
+		Citation:             "knowledge/hosts/pi/cli/0.85/manifest.json; docs/ontology/README.md section 6.7",
+	},
+	{
 		Host: "codex", Concept: HostConceptClaim,
 		Ceiling:              domain.EvidenceLevelHostReported,
 		IntrospectionSurface: "codex --version",
@@ -124,6 +148,13 @@ var Ceilings = []CeilingEntry{
 		IntrospectionSurface: "claude --version",
 		Reason:               "claude --version is safe (non-interactive, no network, no model call) and is the only invocation internal/context/host.go's probeVersion ever makes for Claude Code; its output is a native, host-reported version string, matching the codex / host row's reasoning.",
 		Citation:             "fixtures/README.md; internal/context/host.go",
+	},
+	{
+		Host: "pi", Concept: HostConceptClaim,
+		Ceiling:              domain.EvidenceLevelHostReported,
+		IntrospectionSurface: "pi --version",
+		Reason:               "pi --version is safe (non-interactive, no network, no model call; prints a bare MAJOR.MINOR.PATCH line, verified against the installed 0.85.1 release) and is the only invocation internal/context/host.go's probeVersion ever makes for pi; its output is a native, host-reported version string, matching the codex/claude host rows' reasoning.",
+		Citation:             "internal/context/host.go; knowledge/hosts/pi/cli/0.85/manifest.json",
 	},
 }
 

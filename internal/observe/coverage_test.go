@@ -7,16 +7,16 @@ import (
 	"github.com/wangzitian0/oh-my-code-agent/internal/domain"
 )
 
-// TestCoverage_CompleteForBothHosts is issue #20's round-2 acceptance
-// criterion, exercised directly: "Concept coverage is explicit and complete
-// for both hosts: Instructions, Skills, MCP, Hooks, permissions/trust, and
-// Plugins/Extensions." This asserts the full 2-host x 6-concept cross
-// product (12 cells) is present, with no duplicates and no extra/unexpected
-// cell, so a future edit that silently drops a cell (or forgets to add one
-// for a new concept) fails a test rather than only being caught by manual
-// review.
+// TestCoverage_CompleteForAllHosts is issue #20's round-2 acceptance
+// criterion, extended to the three first-party hosts: "Concept coverage is
+// explicit and complete for both hosts: Instructions, Skills, MCP, Hooks,
+// permissions/trust, and Plugins/Extensions." This asserts the full
+// 3-host x 6-concept cross product (18 cells) is present, with no
+// duplicates and no extra/unexpected cell, so a future edit that silently
+// drops a cell (or forgets to add one for a new concept or host) fails a
+// test rather than only being caught by manual review.
 func TestCoverage_CompleteForBothHosts(t *testing.T) {
-	wantHosts := []string{"codex", "claude-code"}
+	wantHosts := []string{"codex", "claude-code", "pi"}
 	wantConcepts := []string{conceptInstruction, conceptSkill, conceptMCPServer, conceptHook, conceptPolicy, conceptPlugin}
 
 	cov := Coverage()

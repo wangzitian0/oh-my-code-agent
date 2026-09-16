@@ -21,14 +21,16 @@ import (
 // qualification... Claude Code follows inside the same milestones";
 // docs/project/roadmap.md: "Codex leads inside each milestone") — so a
 // Report's Hosts slice always has the same shape regardless of any map
-// iteration internally.
-var DetectedHostIDs = []string{"codex", "claude-code"}
+// iteration internally. Pi joins third as the first observation-tier-only
+// first-party host: detection and inventory, no runtime activation.
+var DetectedHostIDs = []string{"codex", "claude-code", "pi"}
 
 // binaryNames maps a canonical host ID this package knows how to detect to
 // the executable name resolved on PATH.
 var binaryNames = map[string]string{
 	"codex":       "codex",
 	"claude-code": "claude",
+	"pi":          "pi",
 }
 
 // detectTimeout hard-bounds every host binary invocation this package makes,
@@ -147,6 +149,26 @@ func claudeNativeHomes(env Environment) []NativeHome {
 	return homes
 }
 
+// piNativeHomes computes Pi's native home locations from env, per
+// docs/ontology/README.md §6.7. `PI_CODING_AGENT_DIR` (documented in the
+// official environment-variables reference) relocates the whole agent
+// config directory the same way CODEX_HOME/CLAUDE_CONFIG_DIR do for the
+// other first-party hosts — a reversible config/home boundary a future
+// runtime tier can build on. `~/.agents/skills` is a shared cross-host
+// skill root Pi documents alongside `~/.pi/agent/skills`.
+func piNativeHomes(env Environment) []NativeHome {
+	home := env.Get("HOME")
+	piDir := env.Get("PI_CODING_AGENT_DIR")
+	homes := []NativeHome{}
+	if piDir != "" {
+		homes = append(homes, NativeHome{Name: "PI_CODING_AGENT_DIR", Path: piDir, FromEnvVar: "PI_CODING_AGENT_DIR"})
+	} else {
+		homes = append(homes, NativeHome{Name: "PI_CODING_AGENT_DIR", Path: filepath.Join(home, ".pi", "agent")})
+	}
+	homes = append(homes, NativeHome{Name: "HOME/.agents/skills", Path: filepath.Join(home, ".agents", "skills")})
+	return homes
+}
+
 // platformString reports this process's platform in the "<goos>-<goarch>"
 // shape docs/knowledge/README.md §4's metadata.platforms uses (e.g.
 // "darwin-arm64").
@@ -208,6 +230,8 @@ func DetectHost(ctx context.Context, env Environment, host string) (HostDetectio
 		det.NativeHomes = codexNativeHomes(env)
 	case "claude-code":
 		det.NativeHomes = claudeNativeHomes(env)
+	case "pi":
+		det.NativeHomes = piNativeHomes(env)
 	}
 
 	binPath, err := lookPathIn(binName, env.Get("PATH"))
@@ -284,6 +308,13 @@ var versionNumberPattern = regexp.MustCompile(`\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]
 var strictVersionLinePattern = map[string]*regexp.Regexp{
 	"codex":       regexp.MustCompile(`^codex-cli\s+(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$`),
 	"claude-code": regexp.MustCompile(`^(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\s*\(Claude Code\)$`),
+	// `pi --version` prints a bare MAJOR.MINOR.PATCH line and nothing else
+	// (verified against the installed 0.85.1 release; same acquisition
+	// method as fixtures/README.md's per-host notes). The whole-line anchor
+	// matters here more than for the other two: a bare-number line is the
+	// easiest shape for an unrelated wrapper line to accidentally match,
+	// so only an exactly-bare-version line qualifies.
+	"pi": regexp.MustCompile(`^(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$`),
 }
 
 // extractVersion first looks for host's known, exact --version line shape

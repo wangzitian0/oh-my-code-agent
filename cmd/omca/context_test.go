@@ -35,10 +35,10 @@ func TestRunContext_ProducesStableShapedJSON(t *testing.T) {
 	}
 
 	hosts, ok := report["hosts"].([]any)
-	if !ok || len(hosts) != 2 {
-		t.Fatalf("hosts is not a 2-element array: %s", stdout.String())
+	if !ok || len(hosts) != 3 {
+		t.Fatalf("hosts is not a 3-element array: %s", stdout.String())
 	}
-	wantHostIDs := []string{"codex", "claude-code"}
+	wantHostIDs := []string{"codex", "claude-code", "pi"}
 	for i, raw := range hosts {
 		h, ok := raw.(map[string]any)
 		if !ok {
