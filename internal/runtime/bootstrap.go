@@ -132,7 +132,8 @@ func Bootstrap(req BootstrapRequest, outputDir string) (domain.Generation, error
 			KnowledgePacks: []domain.KnowledgePackRef{},
 			Hosts: map[string]domain.GenerationHostEntry{
 				req.Detection.Host: {
-					Surface: req.surface(),
+					Surface:     req.surface(),
+					HostVersion: req.Detection.Version,
 					// AdapterVersion is the ADAPTER/plugin's own version
 					// (see internal/domain/testdata/generation-valid.json's
 					// golden fixture: "adapter:codex" at "0.1.0" -- a

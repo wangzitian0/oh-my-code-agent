@@ -495,6 +495,27 @@ asset from loading through a proven host mechanism, it reports the limitation
 instead of claiming a clean runtime. A future overlay workspace is a separate
 capability, not an assumed behavior.
 
+### Rollback compatibility and compiler upgrades
+
+New generation host entries record `hostVersion`, the exact version targeted at
+compilation, separately from `adapterVersion` and the mutable current-record
+observation. Manual and automatic rollback require the parent's recorded host
+version and surface to match current detection **before** changing the current
+pointer or recording rollback success. Unknown detection or a legacy parent
+without this evidence is rejected with a recompile/activate diagnostic. An exact
+version match is a conservative compatibility prerequisite, not new behavioral
+qualification or an expansion of a Knowledge Pack's supported capabilities.
+
+The host compiler revision invalidates bootstrap/full compilation caches so new
+compilations acquire this provenance. Already selected legacy generations keep
+their existing launch/version checks and are not silently replaced on upgrade;
+they cannot become rollback targets until explicitly recompiled and activated.
+New selected generations check the immutable target as well as the current
+record, so rewriting an observation cannot relabel their compilation version.
+If automatic rollback is rejected, activation reports failed verification and
+failed recovery; it does not claim rollback success. Configuration rollback does
+not reverse host executable upgrades or mutable database migrations.
+
 ## 11. Diagnostic Modes
 
 ```bash

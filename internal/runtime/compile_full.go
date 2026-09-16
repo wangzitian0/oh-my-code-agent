@@ -662,10 +662,11 @@ func Compile(req CompileRequest, outputDir string) (domain.Generation, error) {
 		}
 
 		hosts[h.Detection.Host] = domain.GenerationHostEntry{
-			Surface:   surface,
-			AdapterID: AdapterID,
-			Ownership: domain.OwnershipManaged,
-			Artifacts: artifacts,
+			Surface:     surface,
+			HostVersion: h.Detection.Version,
+			AdapterID:   AdapterID,
+			Ownership:   domain.OwnershipManaged,
+			Artifacts:   artifacts,
 		}
 
 		perHost = append(perHost, hostSourceEntry{Host: h.Detection.Host, Sources: sources})

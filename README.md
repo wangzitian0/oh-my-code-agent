@@ -94,3 +94,8 @@ Re-entering a worktree with `omca env` or launching through `omca run` preserves
 the runtime you explicitly activated. Pending changes stay inactive. A broken
 selection or host-version mismatch fails with a repair message instead of
 silently reverting to bootstrap; activation and rollback remain explicit.
+
+Rollback now checks the parent's immutable compilation host version before
+switching state. Legacy generations remain launchable under their existing
+version guard, but must be recompiled and activated before they can be rollback
+targets; see [rollback compatibility](docs/architecture/runtime.md#rollback-compatibility-and-compiler-upgrades).

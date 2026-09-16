@@ -53,6 +53,10 @@ func TestRollback_RestoresParentAndLedgers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Rollback: %v", err)
 	}
+	restored, readErr := ReadGenerationManifest(parentFx.outputDir)
+	if readErr != nil || restored.Spec.Hosts["codex"].HostVersion != parentFx.req.Hosts[0].Detection.Version {
+		t.Fatalf("rollback lost compilation provenance: %v", readErr)
+	}
 	if result.RestoredGenerationID != parentFx.gen.Metadata.ID {
 		t.Errorf("RestoredGenerationID = %q, want the parent %q", result.RestoredGenerationID, parentFx.gen.Metadata.ID)
 	}
