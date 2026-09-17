@@ -14,8 +14,16 @@ import (
 
 // RunBridge connects standard input/output of the calling process to the resident Hub.
 func RunBridge(ctx context.Context, serverName string, socketPath string, hostName string, stdin io.Reader, stdout io.Writer) error {
+	return RunBridgeWithProfile(ctx, "", "", serverName, socketPath, hostName, stdin, stdout)
+}
+
+// RunBridgeWithProfile connects standard input/output with profile and working directory metadata.
+func RunBridgeWithProfile(ctx context.Context, profile string, cwd string, serverName string, socketPath string, hostName string, stdin io.Reader, stdout io.Writer) error {
 	if socketPath == "" {
 		socketPath = DefaultSocketPath()
+	}
+	if cwd == "" {
+		cwd, _ = os.Getwd()
 	}
 
 	// 1. Ensure Hub is running; auto-start if socket is absent or unreachable
@@ -25,10 +33,12 @@ func RunBridge(ctx context.Context, serverName string, socketPath string, hostNa
 	}
 	defer conn.Close()
 
-	// 2. Send initial attach handshake
+	// 2. Send initial attach handshake with profile and cwd metadata
 	attach := AttachMessage{
 		Type:     "bridge_attach",
 		Server:   serverName,
+		Profile:  profile,
+		Cwd:      cwd,
 		HostName: hostName,
 	}
 	attachData, err := json.Marshal(attach)

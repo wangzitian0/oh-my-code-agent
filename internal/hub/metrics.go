@@ -11,6 +11,7 @@ type DashboardSnapshot struct {
 	Workers      PoolStats            `json:"workers"`
 	Tools        map[string]ToolStats `json:"tools"`
 	Storage      StorageStats         `json:"storage"`
+	ReapedCount  uint64               `json:"reaped_count"`
 	Timestamp    time.Time            `json:"timestamp"`
 }
 
@@ -21,12 +22,18 @@ func (h *Hub) DashboardSnapshot() DashboardSnapshot {
 		uptime = time.Since(h.startTime)
 	}
 
+	var reaped uint64
+	if h.reaper != nil {
+		reaped = h.reaper.ReapedCount()
+	}
+
 	return DashboardSnapshot{
-		Uptime:    uptime,
-		Connected: h.ActiveHosts(),
-		Workers:   h.pool.Stats(),
-		Tools:     h.supervisor.ListTools(),
-		Storage:   h.arbiter.Stats(),
-		Timestamp: time.Now(),
+		Uptime:      uptime,
+		Connected:   h.ActiveHosts(),
+		Workers:     h.pool.Stats(),
+		Tools:       h.supervisor.ListTools(),
+		Storage:     h.arbiter.Stats(),
+		ReapedCount: reaped,
+		Timestamp:   time.Now(),
 	}
 }

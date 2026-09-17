@@ -205,6 +205,7 @@ func runHubBridge(stdin io.Reader, stdout, stderr io.Writer, args []string) int 
 	fs := flag.NewFlagSet("omca hub bridge", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	serverName := fs.String("server", "", "target tool server name (required)")
+	profileName := fs.String("profile", "", "target profile name (optional)")
 	hostName := fs.String("host", "", "calling host client name")
 	socketPath := fs.String("socket", "", "unix socket path")
 	if err := fs.Parse(args); err != nil {
@@ -226,7 +227,8 @@ func runHubBridge(stdin io.Reader, stdout, stderr io.Writer, args []string) int 
 		cancel()
 	}()
 
-	if err := hub.RunBridge(ctx, *serverName, *socketPath, *hostName, stdin, stdout); err != nil {
+	cwd, _ := os.Getwd()
+	if err := hub.RunBridgeWithProfile(ctx, *profileName, cwd, *serverName, *socketPath, *hostName, stdin, stdout); err != nil {
 		fmt.Fprintf(stderr, "omca: bridge: %v\n", err)
 		return 1
 	}

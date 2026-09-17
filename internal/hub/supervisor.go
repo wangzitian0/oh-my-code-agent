@@ -39,21 +39,22 @@ type JSONRPCError struct {
 
 // ManagedTool manages the lifecycle and multiplexing of one singleton MCP tool process.
 type ManagedTool struct {
-	mu           sync.Mutex
-	writeMu      sync.Mutex
-	pendingMu    sync.Mutex
-	config       ToolConfig
-	cmd          *exec.Cmd
-	stdin        io.WriteCloser
-	status       string
-	pid          int
-	startTime    time.Time
-	restarts     int
-	reqSeq       uint64
-	pending      map[string]chan *JSONRPCResponse
-	initResult   json.RawMessage
-	toolsResult  json.RawMessage
-	stopCh       chan struct{}
+	mu          sync.Mutex
+	writeMu     sync.Mutex
+	pendingMu   sync.Mutex
+	config      ToolConfig
+	cmd         *exec.Cmd
+	stdin       io.WriteCloser
+	status      string
+	pid         int
+	startTime   time.Time
+	lastActive  time.Time
+	restarts    int
+	reqSeq      uint64
+	pending     map[string]chan *JSONRPCResponse
+	initResult  json.RawMessage
+	toolsResult json.RawMessage
+	stopCh      chan struct{}
 }
 
 // Supervisor coordinates multiple singleton MCP tool processes.
@@ -74,19 +75,49 @@ func (s *Supervisor) RegisterTool(cfg ToolConfig) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.tools[cfg.Name] = &ManagedTool{
-		config:  cfg,
-		status:  "REGISTERED",
-		pending: make(map[string]chan *JSONRPCResponse),
-		stopCh:  make(chan struct{}),
+		config:     cfg,
+		status:     "REGISTERED",
+		lastActive: time.Now(),
+		pending:    make(map[string]chan *JSONRPCResponse),
+		stopCh:     make(chan struct{}),
 	}
 }
 
-// GetTool returns the managed tool by name.
+// GetTool returns the managed tool by name or key.
 func (s *Supervisor) GetTool(name string) (*ManagedTool, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	t, ok := s.tools[name]
 	return t, ok
+}
+
+// GetOrCreateTool returns an existing tool or registers and returns a new tool.
+func (s *Supervisor) GetOrCreateTool(key string, cfg ToolConfig) *ManagedTool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if t, ok := s.tools[key]; ok {
+		return t
+	}
+	t := &ManagedTool{
+		config:     cfg,
+		status:     "REGISTERED",
+		lastActive: time.Now(),
+		pending:    make(map[string]chan *JSONRPCResponse),
+		stopCh:     make(chan struct{}),
+	}
+	s.tools[key] = t
+	return t
+}
+
+// ListManagedTools returns all currently managed tools.
+func (s *Supervisor) ListManagedTools() []*ManagedTool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	list := make([]*ManagedTool, 0, len(s.tools))
+	for _, t := range s.tools {
+		list = append(list, t)
+	}
+	return list
 }
 
 // ListTools returns all registered tools and their current status.
@@ -100,11 +131,16 @@ func (s *Supervisor) ListTools() map[string]ToolStats {
 		if !t.startTime.IsZero() && t.status == "RUNNING" {
 			uptime = time.Since(t.startTime)
 		}
+		idle := time.Since(t.lastActive)
+		if t.lastActive.IsZero() {
+			idle = 0
+		}
 		stats[name] = ToolStats{
 			Name:         name,
 			Status:       t.status,
 			PID:          t.pid,
 			Uptime:       uptime,
+			IdleDuration: idle,
 			RestartCount: t.restarts,
 			Command:      t.config.Command,
 		}
@@ -119,8 +155,80 @@ type ToolStats struct {
 	Status       string        `json:"status"`
 	PID          int           `json:"pid"`
 	Uptime       time.Duration `json:"uptime"`
+	IdleDuration time.Duration `json:"idle_duration"`
 	RestartCount int           `json:"restart_count"`
 	Command      string        `json:"command"`
+}
+
+// Name returns the tool's configured name.
+func (t *ManagedTool) Name() string {
+	return t.config.Name
+}
+
+// Status returns the tool's current lifecycle state.
+func (t *ManagedTool) Status() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.status
+}
+
+// LastActive returns the timestamp of the last incoming request.
+func (t *ManagedTool) LastActive() time.Time {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.lastActive
+}
+
+// Touch refreshes the tool's active timestamp.
+func (t *ManagedTool) Touch() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.lastActive = time.Now()
+}
+
+// Stop gracefully terminates the tool subprocess and resets its status to REGISTERED.
+// Cached capabilities (initialize & tools/list) are preserved.
+func (t *ManagedTool) Stop() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.status != "RUNNING" && t.status != "STARTING" {
+		return nil
+	}
+
+	t.status = "STOPPING"
+	if t.stdin != nil {
+		_ = t.stdin.Close()
+	}
+
+	if t.cmd != nil && t.cmd.Process != nil {
+		_ = t.cmd.Process.Signal(os.Interrupt)
+		done := make(chan struct{})
+		go func() {
+			_ = t.cmd.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			_ = t.cmd.Process.Kill()
+		}
+	}
+
+	t.cmd = nil
+	t.stdin = nil
+	t.pid = 0
+	t.status = "REGISTERED"
+
+	t.pendingMu.Lock()
+	for id, ch := range t.pending {
+		close(ch)
+		delete(t.pending, id)
+	}
+	t.pendingMu.Unlock()
+
+	return nil
 }
 
 // Start spawns the tool subprocess and performs initial handshake.
@@ -169,10 +277,11 @@ func (t *ManagedTool) startLocked(ctx context.Context) error {
 	t.stdin = stdin
 	t.pid = cmd.Process.Pid
 	t.startTime = time.Now()
+	t.lastActive = time.Now()
 	t.status = "RUNNING"
 
 	// Start reader loop in background
-	go t.readLoop(stdout)
+	go t.readLoop(cmd, stdout)
 
 	// Perform initialize handshake
 	initReq := &JSONRPCRequest{
@@ -186,36 +295,36 @@ func (t *ManagedTool) startLocked(ctx context.Context) error {
 		}`),
 	}
 
-		initCtx, initCancel := context.WithTimeout(ctx, 10*time.Second)
-		defer initCancel()
-		initResp, err := t.callRawLocked(initCtx, initReq)
-		if err == nil && initResp != nil {
-			t.initResult = initResp.Result
-			// Send notifications/initialized
-			notif := &JSONRPCRequest{
-				JSONRPC: "2.0",
-				Method:  "notifications/initialized",
-			}
-			data, _ := json.Marshal(notif)
-			data = append(data, '\n')
-			_, _ = t.stdin.Write(data)
-
-			// Fetch and cache tools list
-			toolsReq := &JSONRPCRequest{
-				JSONRPC: "2.0",
-				ID:      json.RawMessage(`"tools-1"`),
-				Method:  "tools/list",
-			}
-			toolsResp, err := t.callRawLocked(initCtx, toolsReq)
-			if err == nil && toolsResp != nil {
-				t.toolsResult = toolsResp.Result
-			}
+	initCtx, initCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer initCancel()
+	initResp, err := t.callRawLocked(initCtx, initReq)
+	if err == nil && initResp != nil {
+		t.initResult = initResp.Result
+		// Send notifications/initialized
+		notif := &JSONRPCRequest{
+			JSONRPC: "2.0",
+			Method:  "notifications/initialized",
 		}
+		data, _ := json.Marshal(notif)
+		data = append(data, '\n')
+		_, _ = t.stdin.Write(data)
+
+		// Fetch and cache tools list
+		toolsReq := &JSONRPCRequest{
+			JSONRPC: "2.0",
+			ID:      json.RawMessage(`"tools-1"`),
+			Method:  "tools/list",
+		}
+		toolsResp, err := t.callRawLocked(initCtx, toolsReq)
+		if err == nil && toolsResp != nil {
+			t.toolsResult = toolsResp.Result
+		}
+	}
 
 	return nil
 }
 
-func (t *ManagedTool) readLoop(stdout io.Reader) {
+func (t *ManagedTool) readLoop(cmd *exec.Cmd, stdout io.Reader) {
 	scanner := bufio.NewScanner(stdout)
 	buf := make([]byte, 1024*1024)
 	scanner.Buffer(buf, 10*1024*1024)
@@ -225,48 +334,85 @@ func (t *ManagedTool) readLoop(stdout io.Reader) {
 		if len(line) == 0 {
 			continue
 		}
+
 		var resp JSONRPCResponse
 		if err := json.Unmarshal(line, &resp); err != nil {
 			continue
 		}
 
-		if len(resp.ID) > 0 {
-			idStr := string(resp.ID)
-			t.pendingMu.Lock()
-			ch, ok := t.pending[idStr]
-			if ok {
-				delete(t.pending, idStr)
-			}
-			t.pendingMu.Unlock()
+		idKey := string(resp.ID)
+		t.pendingMu.Lock()
+		ch, ok := t.pending[idKey]
+		if ok {
+			delete(t.pending, idKey)
+		}
+		t.pendingMu.Unlock()
 
-			if ok && ch != nil {
-				ch <- &resp
-			}
+		if ok {
+			ch <- &resp
 		}
 	}
 
+	// Process exited or stdout closed
 	t.mu.Lock()
-	t.status = "STOPPED"
-	t.pid = 0
+	if t.cmd == cmd && t.status == "RUNNING" {
+		t.status = "STOPPED"
+	}
 	t.mu.Unlock()
 
+	// Drain remaining pending channels
 	t.pendingMu.Lock()
-	for k, ch := range t.pending {
-		delete(t.pending, k)
+	for id, ch := range t.pending {
 		close(ch)
+		delete(t.pending, id)
 	}
 	t.pendingMu.Unlock()
 }
 
 func (t *ManagedTool) callRawLocked(ctx context.Context, req *JSONRPCRequest) (*JSONRPCResponse, error) {
-	return t.callRaw(ctx, req)
+	seq := atomic.AddUint64(&t.reqSeq, 1)
+	reqID := fmt.Sprintf("internal-%d", seq)
+	req.ID = json.RawMessage(fmt.Sprintf("%q", reqID))
+
+	ch := make(chan *JSONRPCResponse, 1)
+	t.pendingMu.Lock()
+	t.pending[fmt.Sprintf("%q", reqID)] = ch
+	t.pendingMu.Unlock()
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.pendingMu.Lock()
+		delete(t.pending, fmt.Sprintf("%q", reqID))
+		t.pendingMu.Unlock()
+		return nil, err
+	}
+	data = append(data, '\n')
+
+	t.writeMu.Lock()
+	_, err = t.stdin.Write(data)
+	t.writeMu.Unlock()
+	if err != nil {
+		t.pendingMu.Lock()
+		delete(t.pending, fmt.Sprintf("%q", reqID))
+		t.pendingMu.Unlock()
+		return nil, fmt.Errorf("write stdin: %w", err)
+	}
+
+	select {
+	case <-ctx.Done():
+		t.pendingMu.Lock()
+		delete(t.pending, fmt.Sprintf("%q", reqID))
+		t.pendingMu.Unlock()
+		return nil, ctx.Err()
+	case resp, ok := <-ch:
+		if !ok {
+			return nil, errors.New("tool subprocess closed connection")
+		}
+		return resp, nil
+	}
 }
 
 func (t *ManagedTool) callRaw(ctx context.Context, req *JSONRPCRequest) (*JSONRPCResponse, error) {
-	if t.stdin == nil {
-		return nil, errors.New("tool stdin not available")
-	}
-
 	seq := atomic.AddUint64(&t.reqSeq, 1)
 	reqID := fmt.Sprintf("req-%d", seq)
 	req.ID = json.RawMessage(fmt.Sprintf("%q", reqID))
@@ -311,6 +457,8 @@ func (t *ManagedTool) callRaw(ctx context.Context, req *JSONRPCRequest) (*JSONRP
 
 // HandleClientRequest processes a JSON-RPC request from an attached client.
 func (t *ManagedTool) HandleClientRequest(ctx context.Context, req *JSONRPCRequest) (*JSONRPCResponse, error) {
+	t.Touch()
+
 	// 1. Intercept "initialize": return cached handshake result if present
 	if req.Method == "initialize" {
 		t.mu.Lock()
@@ -379,19 +527,10 @@ func (t *ManagedTool) HandleClientRequest(ctx context.Context, req *JSONRPCReque
 	if err != nil {
 		return nil, err
 	}
+
+	// Echo client request ID back
 	resp.ID = req.ID
 	return resp, nil
-}
-
-// Stop gracefully terminates the managed tool process.
-func (t *ManagedTool) Stop() error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.cmd != nil && t.cmd.Process != nil {
-		_ = t.cmd.Process.Kill()
-	}
-	t.status = "STOPPED"
-	return nil
 }
 
 // StopAll stops all managed tool processes.
