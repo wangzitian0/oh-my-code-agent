@@ -545,7 +545,7 @@ func TestExtractVersion(t *testing.T) {
 			"pi", "0.85.1", false,
 		},
 		{
-			"pi: a version-shaped line that is not exactly bare does not satisfy the strict shape",
+			"pi: extra text on the version line defeats the strict match, falls back loosely (same deliberate fallback as codex's extra-text case)",
 			"pi version 0.85.1\n",
 			"pi", "0.85.1", false,
 		},
