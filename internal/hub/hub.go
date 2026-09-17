@@ -139,6 +139,7 @@ func (h *Hub) Start(ctx context.Context) error {
 		return fmt.Errorf("hub: listen unix socket %s: %w", h.config.SocketPath, err)
 	}
 	h.listener = l
+	_ = os.Chmod(h.config.SocketPath, 0600) // Restrict socket to owner-only for defense-in-depth
 
 	// Accept loop
 	go h.acceptLoop(l)

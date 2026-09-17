@@ -39,14 +39,22 @@ func JSONAutoRepair(s string) string {
 		return "{}"
 	}
 
+	// Protect against unbounded memory allocation from massive payloads
+	const maxRepairInputLen = 10 * 1024 * 1024 // 10MB
+	if len(s) > maxRepairInputLen {
+		return s + "\n... [Truncated: exceeded 10MB safety limit]"
+	}
+
 	// If not an object or array, treat as text with a truncation notice
 	if !strings.HasPrefix(trimmed, "{") && !strings.HasPrefix(trimmed, "[") {
 		return s + "\n... [Truncated at 150s SLA]"
 	}
 
+	const maxStackDepth = 512
 	var stack []rune
 	inString := false
 	escaped := false
+	exceededMaxDepth := false
 
 	runes := []rune(trimmed)
 	for i := 0; i < len(runes); i++ {
@@ -66,14 +74,30 @@ func JSONAutoRepair(s string) string {
 		case '"':
 			inString = true
 		case '{':
+			if len(stack) >= maxStackDepth {
+				exceededMaxDepth = true
+				break
+			}
 			stack = append(stack, '}')
 		case '[':
+			if len(stack) >= maxStackDepth {
+				exceededMaxDepth = true
+				break
+			}
 			stack = append(stack, ']')
 		case '}', ']':
 			if len(stack) > 0 && stack[len(stack)-1] == r {
 				stack = stack[:len(stack)-1]
 			}
 		}
+
+		if exceededMaxDepth {
+			break
+		}
+	}
+
+	if exceededMaxDepth {
+		return `{"_meta":{"truncated":true,"error":"MAX_NESTING_DEPTH_EXCEEDED"}}`
 	}
 
 	var b strings.Builder
@@ -122,6 +146,10 @@ func DetectNgramLoop(text string, n int, repeatThreshold int) bool {
 	}
 
 	words := strings.Fields(text)
+	if len(words) > 2000 {
+		// Degenerative loops occur at generation tail; bound scan window to protect performance
+		words = words[len(words)-2000:]
+	}
 	if len(words) < n*repeatThreshold {
 		return false
 	}

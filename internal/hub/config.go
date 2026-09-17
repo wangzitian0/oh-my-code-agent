@@ -73,6 +73,11 @@ func (c *Config) ResolveServer(profileName, cwd, serverName string) (*ResolvedTo
 	if serverName == "" {
 		return nil, false
 	}
+	// Sanitize serverName: reject control characters, null bytes, and path traversals
+	if strings.ContainsAny(serverName, "\r\n\t\x00/\\") {
+		return nil, false
+	}
+	serverName = strings.TrimSpace(serverName)
 
 	// 1. Explicit profile requested
 	if profileName != "" {
@@ -86,29 +91,38 @@ func (c *Config) ResolveServer(profileName, cwd, serverName string) (*ResolvedTo
 				}, true
 			}
 		}
+		// Fallback to shared tools, but strictly never cross-leak to other profiles
+		if tc, ok := c.SharedTools[serverName]; ok {
+			return &ResolvedTool{
+				InstanceKey: "shared:" + serverName,
+				Config:      tc,
+				Profile:     "shared",
+			}, true
+		}
+		return nil, false
 	}
 
 	// 2. Auto-detect profile from CWD prefix match
+	var matchedProfile string
 	if cwd != "" {
 		cleanCwd := filepath.Clean(cwd)
-		var bestProfile string
 		var bestLen int
 		for pName, pCfg := range c.Profiles {
 			for _, root := range pCfg.WorkspaceRoots {
 				cleanRoot := filepath.Clean(root)
 				if strings.HasPrefix(cleanCwd, cleanRoot) && len(cleanRoot) > bestLen {
-					bestProfile = pName
+					matchedProfile = pName
 					bestLen = len(cleanRoot)
 				}
 			}
 		}
-		if bestProfile != "" {
-			pCfg := c.Profiles[bestProfile]
+		if matchedProfile != "" {
+			pCfg := c.Profiles[matchedProfile]
 			if tc, ok := pCfg.Tools[serverName]; ok {
 				return &ResolvedTool{
-					InstanceKey: bestProfile + ":" + serverName,
+					InstanceKey: matchedProfile + ":" + serverName,
 					Config:      tc,
-					Profile:     bestProfile,
+					Profile:     matchedProfile,
 					EnvFiles:    pCfg.EnvFiles,
 				}, true
 			}
@@ -133,15 +147,17 @@ func (c *Config) ResolveServer(profileName, cwd, serverName string) (*ResolvedTo
 		}, true
 	}
 
-	// 5. Fallback: check if ANY profile defines this server uniquely
-	for pName, pCfg := range c.Profiles {
-		if tc, ok := pCfg.Tools[serverName]; ok {
-			return &ResolvedTool{
-				InstanceKey: pName + ":" + serverName,
-				Config:      tc,
-				Profile:     pName,
-				EnvFiles:    pCfg.EnvFiles,
-			}, true
+	// 5. Fallback: ONLY if CWD did not match any declared profile
+	if matchedProfile == "" {
+		for pName, pCfg := range c.Profiles {
+			if tc, ok := pCfg.Tools[serverName]; ok {
+				return &ResolvedTool{
+					InstanceKey: pName + ":" + serverName,
+					Config:      tc,
+					Profile:     pName,
+					EnvFiles:    pCfg.EnvFiles,
+				}, true
+			}
 		}
 	}
 
