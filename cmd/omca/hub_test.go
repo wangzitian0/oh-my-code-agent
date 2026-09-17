@@ -77,11 +77,36 @@ func TestRunHubStop_Stopped(t *testing.T) {
 }
 
 func TestRunHubTop_Stopped(t *testing.T) {
+	sock := "/tmp/omca-nonexistent-top.sock"
 	var stdout, stderr bytes.Buffer
-	code := runHub(&bytes.Buffer{}, &stdout, &stderr, []string{"top"})
-	// When hub is stopped, top exits with 1
-	if code != 1 && code != 0 {
-		t.Errorf("expected exit 1 or 0 on top, got %d", code)
+	code := runHub(&bytes.Buffer{}, &stdout, &stderr, []string{"top", "--socket=" + sock})
+	if code != 1 {
+		t.Errorf("expected exit 1 on top stopped, got %d", code)
+	}
+}
+
+func TestRunHubWorker_Usage(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runHub(&bytes.Buffer{}, &stdout, &stderr, []string{"worker"})
+	if code != 2 {
+		t.Errorf("expected exit 2 on empty worker command, got %d", code)
+	}
+}
+
+func TestRunHubWorker_Stopped(t *testing.T) {
+	sock := "/tmp/omca-nonexistent-worker.sock"
+
+	var stdout, stderr bytes.Buffer
+	code := runHub(&bytes.Buffer{}, &stdout, &stderr, []string{"worker", "list", "--socket=" + sock})
+	if code != 1 {
+		t.Errorf("expected exit 1 on worker list stopped, got %d", code)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = runHub(&bytes.Buffer{}, &stdout, &stderr, []string{"worker", "kill", "w-1", "--socket=" + sock})
+	if code != 1 {
+		t.Errorf("expected exit 1 on worker kill stopped, got %d", code)
 	}
 }
 

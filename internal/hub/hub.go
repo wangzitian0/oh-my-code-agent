@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -15,13 +16,15 @@ import (
 	"time"
 )
 
-// AttachMessage is the initial handshake frame sent by a bridge client.
+// AttachMessage is the initial handshake frame sent by a bridge client or admin CLI.
 type AttachMessage struct {
-	Type     string `json:"type"`               // "bridge_attach"
-	Server   string `json:"server"`             // target tool name, e.g. "basic-memory", "subagent-worker"
-	Profile  string `json:"profile,omitempty"`  // target profile, e.g. "work", "personal"
-	Cwd      string `json:"cwd,omitempty"`      // caller working directory for auto-detection
-	HostName string `json:"host_name,omitempty"`// e.g. "claude-code", "antigravity", "codex"
+	Type     string `json:"type"`                // "bridge_attach" or "admin_request"
+	Server   string `json:"server,omitempty"`    // target tool name, e.g. "basic-memory", "subagent-worker"
+	Profile  string `json:"profile,omitempty"`   // target profile, e.g. "work", "personal"
+	Cwd      string `json:"cwd,omitempty"`       // caller working directory for auto-detection
+	HostName string `json:"host_name,omitempty"` // e.g. "claude-code", "antigravity", "codex"
+	Action   string `json:"action,omitempty"`    // for admin_request: "status", "worker_list", "worker_kill"
+	TargetID string `json:"target_id,omitempty"` // worker ID for worker_kill
 }
 
 // ConnectedHost tracks an active client session.
@@ -154,6 +157,20 @@ func (h *Hub) Start(ctx context.Context) error {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(h.DashboardSnapshot())
 		})
+		mux.HandleFunc("/workers", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(h.pool.ListActiveWorkers())
+		})
+		mux.HandleFunc("/workers/kill", func(w http.ResponseWriter, r *http.Request) {
+			id := r.URL.Query().Get("id")
+			w.Header().Set("Content-Type", "application/json")
+			if err := h.pool.KillWorker(id); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]any{"status": "error", "message": err.Error()})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "killed": id})
+		})
 
 		h.httpServer = &http.Server{
 			Addr:    fmt.Sprintf("127.0.0.1:%d", h.config.Port),
@@ -197,6 +214,12 @@ func (h *Hub) handleConn(conn net.Conn) {
 	var attach AttachMessage
 	_ = json.Unmarshal(firstLine, &attach)
 
+	// Check if this is an admin request from CLI
+	if attach.Type == "admin_request" {
+		h.handleAdminRequest(attach, writer)
+		return
+	}
+
 	serverName := attach.Server
 	hostName := attach.HostName
 	if hostName == "" {
@@ -227,7 +250,7 @@ func (h *Hub) handleConn(conn net.Conn) {
 
 	// If firstLine was not attach frame, it might be the first JSON-RPC request!
 	if attach.Type != "bridge_attach" {
-		h.dispatchLine(ctx, targetKey, firstLine, writer)
+		h.dispatchLine(ctx, targetKey, hostName, firstLine, writer)
 	}
 
 	// 2. Loop remaining lines
@@ -239,11 +262,35 @@ func (h *Hub) handleConn(conn net.Conn) {
 		if len(line) == 0 {
 			continue
 		}
-		h.dispatchLine(ctx, targetKey, line, writer)
+		h.dispatchLine(ctx, targetKey, hostName, line, writer)
 	}
 }
 
-func (h *Hub) dispatchLine(ctx context.Context, targetTool string, line []byte, writer *bufio.Writer) {
+func (h *Hub) handleAdminRequest(attach AttachMessage, writer *bufio.Writer) {
+	var payload []byte
+	switch attach.Action {
+	case "status":
+		payload, _ = json.Marshal(h.DashboardSnapshot())
+	case "worker_list":
+		payload, _ = json.Marshal(h.pool.ListActiveWorkers())
+	case "worker_kill":
+		err := h.pool.KillWorker(attach.TargetID)
+		if err != nil {
+			payload, _ = json.Marshal(map[string]any{"status": "error", "message": err.Error()})
+		} else {
+			payload, _ = json.Marshal(map[string]any{"status": "ok", "killed": attach.TargetID})
+		}
+	default:
+		payload, _ = json.Marshal(map[string]any{"status": "error", "message": fmt.Sprintf("unknown admin action %q", attach.Action)})
+	}
+	payload = append(payload, '\n')
+	h.mu.Lock()
+	_, _ = writer.Write(payload)
+	_ = writer.Flush()
+	h.mu.Unlock()
+}
+
+func (h *Hub) dispatchLine(ctx context.Context, targetTool string, hostName string, line []byte, writer *bufio.Writer) {
 	var req JSONRPCRequest
 	if err := json.Unmarshal(line, &req); err != nil {
 		return
@@ -269,35 +316,10 @@ func (h *Hub) dispatchLine(ctx context.Context, targetTool string, line []byte, 
 		return
 	}
 
-	// Apply worker pool semaphore if tool is a subagent execution tool
-	var release func()
+	// Route subagent-worker tool calls with active worker tracking and SLA watchdog
 	if strings.HasSuffix(targetTool, "subagent-worker") && req.Method == "tools/call" {
-		var toolCall struct {
-			Name string `json:"name"`
-		}
-		_ = json.Unmarshal(req.Params, &toolCall)
-
-		var err error
-		if toolCall.Name == "subagent_batch" {
-			release, err = h.pool.AcquireBatchSlot(ctx)
-		} else if toolCall.Name == "subagent_task" || toolCall.Name == "subagent_code_transform" {
-			release, err = h.pool.AcquireTaskSlot(ctx)
-		}
-		if err != nil {
-			resp := &JSONRPCResponse{
-				JSONRPC: "2.0",
-				ID:      req.ID,
-				Error: &JSONRPCError{
-					Code:    -32000,
-					Message: fmt.Sprintf("rate limit / queue error: %v", err),
-				},
-			}
-			h.writeResponse(writer, resp)
-			return
-		}
-		if release != nil {
-			defer release()
-		}
+		h.handleSubagentCall(ctx, targetTool, hostName, tool, &req, writer)
+		return
 	}
 
 	resp, err := tool.HandleClientRequest(ctx, &req)
@@ -313,6 +335,161 @@ func (h *Hub) dispatchLine(ctx context.Context, targetTool string, line []byte, 
 	}
 
 	h.writeResponse(writer, resp)
+}
+
+func (h *Hub) handleSubagentCall(ctx context.Context, targetTool string, hostName string, tool *ManagedTool, req *JSONRPCRequest, writer *bufio.Writer) {
+	var toolCall struct {
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	_ = json.Unmarshal(req.Params, &toolCall)
+
+	type SubagentArgs struct {
+		Prompt   string `json:"prompt"`
+		Model    string `json:"model"`
+		LeaseSec int    `json:"lease_seconds"`
+		Tasks    []struct {
+			ID     string `json:"id"`
+			Prompt string `json:"prompt"`
+		} `json:"tasks"`
+	}
+	var args SubagentArgs
+	_ = json.Unmarshal(toolCall.Arguments, &args)
+
+	isBatch := toolCall.Name == "subagent_batch"
+	workerType := "task"
+	defaultModel := "glm-5.3"
+	if isBatch {
+		workerType = "batch"
+		defaultModel = "glm-5.3-flash"
+	}
+	model := args.Model
+	if model == "" {
+		model = defaultModel
+	}
+
+	promptPreview := args.Prompt
+	if promptPreview == "" && len(args.Tasks) > 0 {
+		promptPreview = fmt.Sprintf("[%d tasks] %s", len(args.Tasks), args.Tasks[0].Prompt)
+	}
+	if len(promptPreview) > 60 {
+		promptPreview = promptPreview[:60] + "..."
+	}
+
+	// 150s SLA limit (empirical knee-of-the-curve)
+	stepTimeout := DefaultStepTimeout
+	if args.LeaseSec > 0 {
+		declared := time.Duration(args.LeaseSec) * time.Second
+		if declared > stepTimeout && declared <= time.Hour {
+			stepTimeout = declared
+		}
+	}
+
+	stepCtx, cancel := context.WithTimeout(ctx, stepTimeout)
+	defer cancel()
+
+	var release func()
+	var err error
+	if isBatch {
+		release, err = h.pool.AcquireBatchSlot(stepCtx)
+	} else {
+		release, err = h.pool.AcquireTaskSlot(stepCtx)
+	}
+	if err != nil {
+		resp := &JSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Error: &JSONRPCError{
+				Code:    -32000,
+				Message: fmt.Sprintf("rate limit / queue error: %v", err),
+			},
+		}
+		h.writeResponse(writer, resp)
+		return
+	}
+	defer release()
+
+	workerID := fmt.Sprintf("%s-%d", toolCall.Name, time.Now().UnixNano()%10000000)
+	activeWorker := &ActiveWorker{
+		ID:            workerID,
+		Type:          workerType,
+		ToolName:      toolCall.Name,
+		HostName:      hostName,
+		Model:         model,
+		PromptPreview: promptPreview,
+		StartTime:     time.Now(),
+		LastHeartbeat: time.Now(),
+		Phase:         "running",
+		DeclaredLease: time.Duration(args.LeaseSec) * time.Second,
+	}
+	h.pool.RegisterWorker(activeWorker, cancel)
+	defer h.pool.UnregisterWorker(workerID)
+
+	resp, err := tool.HandleClientRequest(stepCtx, req)
+	if err != nil {
+		if errors.Is(stepCtx.Err(), context.DeadlineExceeded) {
+			resp = &JSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Error: &JSONRPCError{
+					Code:    -32000,
+					Message: fmt.Sprintf("watchdog: step duration exceeded %v SLA limit (worker %s terminated by watchdog)", stepTimeout, workerID),
+				},
+			}
+		} else {
+			resp = &JSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Error: &JSONRPCError{
+					Code:    -32603,
+					Message: err.Error(),
+				},
+			}
+		}
+	} else if resp != nil && len(resp.Result) > 0 {
+		resp.Result = sanitizeWorkerResult(resp.Result)
+	}
+
+	h.writeResponse(writer, resp)
+}
+
+func sanitizeWorkerResult(raw json.RawMessage) json.RawMessage {
+	var result struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return raw
+	}
+
+	modified := false
+	for i := range result.Content {
+		if result.Content[i].Type == "text" {
+			text := result.Content[i].Text
+			if DetectNgramLoop(text, 8, 4) {
+				text = text + "\n\n[Warning: repetitive degeneracy loop detected and flagged by omca watchdog]"
+				result.Content[i].Text = text
+				modified = true
+			}
+			trimmed := strings.TrimSpace(text)
+			if (strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")) && !json.Valid([]byte(trimmed)) {
+				repaired := JSONAutoRepair(trimmed)
+				if json.Valid([]byte(repaired)) {
+					result.Content[i].Text = repaired
+					modified = true
+				}
+			}
+		}
+	}
+
+	if modified {
+		if data, err := json.Marshal(result); err == nil {
+			return json.RawMessage(data)
+		}
+	}
+	return raw
 }
 
 func (h *Hub) writeResponse(writer *bufio.Writer, resp *JSONRPCResponse) {

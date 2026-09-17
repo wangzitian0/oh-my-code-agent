@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -11,13 +14,14 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/wangzitian0/oh-my-code-agent/internal/hub"
 )
 
 func runHub(stdin io.Reader, stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: omca hub <start|stop|status|bridge|serve|top> [flags]")
+		fmt.Fprintln(stderr, "usage: omca hub <start|stop|status|bridge|serve|top|worker> [flags]")
 		return 2
 	}
 
@@ -34,8 +38,10 @@ func runHub(stdin io.Reader, stdout, stderr io.Writer, args []string) int {
 		return runHubBridge(stdin, stdout, stderr, args[1:])
 	case "top":
 		return runHubTop(stdout, stderr, args[1:])
+	case "worker":
+		return runHubWorker(stdout, stderr, args[1:])
 	default:
-		fmt.Fprintf(stderr, "omca: unknown hub subcommand %q\nusage: omca hub <start|stop|status|bridge|serve|top>\n", args[0])
+		fmt.Fprintf(stderr, "omca: unknown hub subcommand %q\nusage: omca hub <start|stop|status|bridge|serve|top|worker>\n", args[0])
 		return 2
 	}
 }
@@ -182,7 +188,7 @@ func runHubStatus(stdout, stderr io.Writer, args []string) int {
 		sock = hub.DefaultSocketPath()
 	}
 
-	conn, err := net.Dial("unix", sock)
+	respBytes, err := sendHubAdminRequest(sock, "status", "")
 	if err != nil {
 		if *jsonOutput {
 			fmt.Fprintln(stdout, `{"status": "stopped"}`)
@@ -191,13 +197,25 @@ func runHubStatus(stdout, stderr io.Writer, args []string) int {
 		}
 		return 0
 	}
-	conn.Close()
 
 	if *jsonOutput {
-		fmt.Fprintf(stdout, `{"status": "running", "socket": %q}`+"\n", sock)
-	} else {
-		fmt.Fprintf(stdout, "🟢 omca hub is RUNNING (socket: %s)\n", sock)
+		var pretty bytes.Buffer
+		if err := json.Indent(&pretty, respBytes, "", "  "); err == nil {
+			fmt.Fprintln(stdout, pretty.String())
+		} else {
+			fmt.Fprintln(stdout, string(respBytes))
+		}
+		return 0
 	}
+
+	var snap hub.DashboardSnapshot
+	if err := json.Unmarshal(respBytes, &snap); err != nil {
+		fmt.Fprintf(stdout, "🟢 omca hub is RUNNING (socket: %s)\n", sock)
+		return 0
+	}
+
+	fmt.Fprintf(stdout, "🟢 omca hub is RUNNING (socket: %s, uptime: %s, %d hosts, %d active workers)\n",
+		sock, snap.Uptime.Round(time.Second), len(snap.Connected), len(snap.ActiveWorkers))
 	return 0
 }
 
@@ -236,21 +254,211 @@ func runHubBridge(stdin io.Reader, stdout, stderr io.Writer, args []string) int 
 }
 
 func runHubTop(stdout, stderr io.Writer, args []string) int {
-	sock := hub.DefaultSocketPath()
-	conn, err := net.Dial("unix", sock)
+	fs := flag.NewFlagSet("omca hub top", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	socketPath := fs.String("socket", "", "override unix socket path")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	sock := *socketPath
+	if sock == "" {
+		sock = hub.DefaultSocketPath()
+	}
+
+	respBytes, err := sendHubAdminRequest(sock, "status", "")
 	if err != nil {
 		fmt.Fprintf(stderr, "omca hub top: hub is not running (%v)\nStart it with: omca hub start -d\n", err)
 		return 1
 	}
-	conn.Close()
+
+	var snap hub.DashboardSnapshot
+	if err := json.Unmarshal(respBytes, &snap); err != nil {
+		fmt.Fprintf(stderr, "omca hub top: decode status: %v\n", err)
+		return 1
+	}
 
 	fmt.Fprintln(stdout, "┌─ omca Resident Harness Hub ──────────────────────────────────────┐")
-	fmt.Fprintf(stdout, "│ Socket: %-56s │\n", sock)
-	fmt.Fprintln(stdout, "│ Status: 🟢 HEALTHY                                                │")
+	fmt.Fprintf(stdout, "│ Socket  : %-54s │\n", sock)
+	fmt.Fprintf(stdout, "│ Uptime  : %-54s │\n", snap.Uptime.Round(time.Second))
+	fmt.Fprintf(stdout, "│ Clients : %-54s │\n", fmt.Sprintf("%d connected hosts", len(snap.Connected)))
 	fmt.Fprintln(stdout, "├──────────────────────────────────────────────────────────────────┤")
-	fmt.Fprintln(stdout, "│ Execution Workers (GLM-5.3)   : [■■□□□] Max 5 concurrency        │")
-	fmt.Fprintln(stdout, "│ Swarm Workers (GLM-5.3-Flash) : [■■■■■□□□] Max 50 concurrency    │")
-	fmt.Fprintln(stdout, "│ Storage Arbiter (SQLite WAL)  : 🟢 0 contention waits             │")
+	fmt.Fprintf(stdout, "│ Execution Workers (GLM-5.3)   : [%s] %d/%d active (queued: %d)   │\n",
+		renderProgressBar(int(snap.Workers.ActiveTasks), snap.Workers.MaxTasks, 5),
+		snap.Workers.ActiveTasks, snap.Workers.MaxTasks, snap.Workers.QueuedTasks)
+	fmt.Fprintf(stdout, "│ Swarm Workers (GLM-5.3-Flash) : [%s] %d/%d active (queued: %d) │\n",
+		renderProgressBar(int(snap.Workers.ActiveBatch), snap.Workers.MaxBatch, 10),
+		snap.Workers.ActiveBatch, snap.Workers.MaxBatch, snap.Workers.QueuedBatch)
+	fmt.Fprintf(stdout, "│ Rate Limiter (Prevented 429)  : %-32d │\n", snap.Workers.Prevented429)
+	fmt.Fprintf(stdout, "│ Reaped Subprocesses (5m idle) : %-32d │\n", snap.ReapedCount)
+	fmt.Fprintln(stdout, "├──────────────────────────────────────────────────────────────────┤")
+	fmt.Fprintf(stdout, "│ Active Workers: %-48d │\n", len(snap.ActiveWorkers))
+	if len(snap.ActiveWorkers) > 0 {
+		for _, w := range snap.ActiveWorkers {
+			age := time.Since(w.StartTime).Round(time.Second)
+			fmt.Fprintf(stdout, "│  • %-20s %-6s %-12s %-6s %-20s │\n",
+				w.ID, w.Type, w.Model, age, w.Phase)
+		}
+	} else {
+		fmt.Fprintln(stdout, "│  (no active workers running)                                     │")
+	}
 	fmt.Fprintln(stdout, "└──────────────────────────────────────────────────────────────────┘")
 	return 0
+}
+
+func runHubWorker(stdout, stderr io.Writer, args []string) int {
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, "usage: omca hub worker <list|kill> [flags]")
+		return 2
+	}
+
+	switch args[0] {
+	case "list", "ls":
+		return runHubWorkerList(stdout, stderr, args[1:])
+	case "kill", "rm":
+		return runHubWorkerKill(stdout, stderr, args[1:])
+	default:
+		fmt.Fprintf(stderr, "omca: unknown worker subcommand %q\nusage: omca hub worker <list|kill>\n", args[0])
+		return 2
+	}
+}
+
+func runHubWorkerList(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("omca hub worker list", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	jsonOutput := fs.Bool("json", false, "output JSON")
+	socketPath := fs.String("socket", "", "override unix socket path")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	sock := *socketPath
+	if sock == "" {
+		sock = hub.DefaultSocketPath()
+	}
+
+	respBytes, err := sendHubAdminRequest(sock, "worker_list", "")
+	if err != nil {
+		fmt.Fprintf(stderr, "omca hub: hub daemon is not running (%v)\n", err)
+		return 1
+	}
+
+	if *jsonOutput {
+		var pretty bytes.Buffer
+		if err := json.Indent(&pretty, respBytes, "", "  "); err == nil {
+			fmt.Fprintln(stdout, pretty.String())
+		} else {
+			fmt.Fprintln(stdout, string(respBytes))
+		}
+		return 0
+	}
+
+	var workers []hub.ActiveWorker
+	if err := json.Unmarshal(respBytes, &workers); err != nil {
+		fmt.Fprintf(stderr, "omca hub: decode worker list: %v\n", err)
+		return 1
+	}
+
+	if len(workers) == 0 {
+		fmt.Fprintln(stdout, "No active workers currently executing.")
+		return 0
+	}
+
+	fmt.Fprintf(stdout, "%-24s %-6s %-16s %-12s %-8s %-10s %-10s %s\n",
+		"WORKER ID", "TYPE", "MODEL", "HOST", "AGE", "HEARTBEAT", "PHASE", "PREVIEW")
+	for _, w := range workers {
+		age := time.Since(w.StartTime).Round(time.Second)
+		hb := time.Since(w.LastHeartbeat).Round(time.Second).String() + " ago"
+		fmt.Fprintf(stdout, "%-24s %-6s %-16s %-12s %-8s %-10s %-10s %s\n",
+			w.ID, w.Type, w.Model, w.HostName, age, hb, w.Phase, w.PromptPreview)
+	}
+	return 0
+}
+
+func runHubWorkerKill(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("omca hub worker kill", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	socketPath := fs.String("socket", "", "override unix socket path")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	sock := *socketPath
+	if sock == "" {
+		sock = hub.DefaultSocketPath()
+	}
+
+	if fs.NArg() == 0 {
+		fmt.Fprintln(stderr, "error: worker ID required (usage: omca hub worker kill <worker-id>)")
+		return 2
+	}
+	targetID := fs.Arg(0)
+
+	respBytes, err := sendHubAdminRequest(sock, "worker_kill", targetID)
+	if err != nil {
+		fmt.Fprintf(stderr, "omca hub: hub daemon is not running (%v)\n", err)
+		return 1
+	}
+
+	var res struct {
+		Status  string `json:"status"`
+		Message string `json:"message"`
+		Killed  string `json:"killed"`
+	}
+	_ = json.Unmarshal(respBytes, &res)
+
+	if res.Status == "ok" {
+		fmt.Fprintf(stdout, "Worker %q terminated successfully.\n", targetID)
+		return 0
+	}
+	fmt.Fprintf(stderr, "omca hub: failed to kill worker: %s\n", res.Message)
+	return 1
+}
+
+func sendHubAdminRequest(socketPath string, action string, targetID string) ([]byte, error) {
+	if socketPath == "" {
+		socketPath = hub.DefaultSocketPath()
+	}
+	conn, err := net.DialTimeout("unix", socketPath, 1*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+
+	req := hub.AttachMessage{
+		Type:     "admin_request",
+		Action:   action,
+		TargetID: targetID,
+	}
+	data, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	data = append(data, '\n')
+	if _, err := conn.Write(data); err != nil {
+		return nil, err
+	}
+
+	reader := bufio.NewReader(conn)
+	return reader.ReadBytes('\n')
+}
+
+func renderProgressBar(current, maxVal, width int) string {
+	if maxVal <= 0 {
+		maxVal = 1
+	}
+	filled := (current * width) / maxVal
+	if filled > width {
+		filled = width
+	}
+	var b strings.Builder
+	for i := 0; i < filled; i++ {
+		b.WriteString("■")
+	}
+	for i := filled; i < width; i++ {
+		b.WriteString("□")
+	}
+	return b.String()
 }
