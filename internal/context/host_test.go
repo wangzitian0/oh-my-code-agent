@@ -241,6 +241,77 @@ func TestDetectHost_ClaudeInstalledDefaultHome(t *testing.T) {
 	}
 }
 
+func TestDetectHost_PiInstalledDefaultHome(t *testing.T) {
+	binDir := t.TempDir()
+	writeFakeBinary(t, binDir, "pi", "0.85.1\n")
+	home := t.TempDir()
+	env := Environment{Vars: []string{"HOME=" + home, "PATH=" + binDir}}
+
+	det, err := DetectHost(context.Background(), env, "pi")
+	if err != nil {
+		t.Fatalf("DetectHost: %v", err)
+	}
+	if !det.Installed {
+		t.Fatal("Installed = false, want true")
+	}
+	if det.Version != "0.85.1" {
+		t.Errorf("Version = %q, want %q", det.Version, "0.85.1")
+	}
+	if det.BinaryPath != filepath.Join(binDir, "pi") {
+		t.Errorf("BinaryPath = %q, want %q", det.BinaryPath, filepath.Join(binDir, "pi"))
+	}
+
+	wantAgentDir := filepath.Join(home, ".pi", "agent")
+	foundAgent, foundShared := false, false
+	for _, nh := range det.NativeHomes {
+		switch nh.Name {
+		case "PI_CODING_AGENT_DIR":
+			foundAgent = true
+			if nh.Path != wantAgentDir {
+				t.Errorf("PI_CODING_AGENT_DIR Path = %q, want %q", nh.Path, wantAgentDir)
+			}
+			if nh.FromEnvVar != "" {
+				t.Errorf("PI_CODING_AGENT_DIR FromEnvVar = %q, want empty (unset, default in use)", nh.FromEnvVar)
+			}
+		case "HOME/.agents/skills":
+			foundShared = true
+			if nh.Path != filepath.Join(home, ".agents", "skills") {
+				t.Errorf("HOME/.agents/skills Path = %q, want the default under HOME", nh.Path)
+			}
+		}
+	}
+	if !foundAgent || !foundShared {
+		t.Errorf("NativeHomes = %+v, want both PI_CODING_AGENT_DIR and HOME/.agents/skills entries", det.NativeHomes)
+	}
+}
+
+func TestDetectHost_PiConfigDirOverride(t *testing.T) {
+	binDir := t.TempDir()
+	writeFakeBinary(t, binDir, "pi", "0.85.1\n")
+	home := t.TempDir()
+	override := t.TempDir()
+	env := Environment{Vars: []string{
+		"HOME=" + home,
+		"PATH=" + binDir,
+		"PI_CODING_AGENT_DIR=" + override,
+	}}
+
+	det, err := DetectHost(context.Background(), env, "pi")
+	if err != nil {
+		t.Fatalf("DetectHost: %v", err)
+	}
+	for _, nh := range det.NativeHomes {
+		if nh.Name == "PI_CODING_AGENT_DIR" {
+			if nh.Path != override {
+				t.Errorf("PI_CODING_AGENT_DIR Path = %q, want override %q", nh.Path, override)
+			}
+			if nh.FromEnvVar != "PI_CODING_AGENT_DIR" {
+				t.Errorf("PI_CODING_AGENT_DIR FromEnvVar = %q, want %q", nh.FromEnvVar, "PI_CODING_AGENT_DIR")
+			}
+		}
+	}
+}
+
 func TestDetectHost_ClaudeConfigDirOverride(t *testing.T) {
 	binDir := t.TempDir()
 	writeFakeBinary(t, binDir, "claude", "2.1.211 (Claude Code)\n")
@@ -437,6 +508,7 @@ func TestExtractVersion(t *testing.T) {
 	}{
 		{"codex format", "codex-cli 0.144.5\n", "codex", "0.144.5", false},
 		{"claude format", "2.1.211 (Claude Code)\n", "claude-code", "2.1.211", false},
+		{"pi format", "0.85.1\n", "pi", "0.85.1", false},
 		{"no version, known host", "not a version string\n", "codex", "", true},
 		{"empty, known host", "", "codex", "", true},
 		{"unknown host falls back to loose scan", "9.9.9\n", "some-other-host", "9.9.9", false},
@@ -466,6 +538,16 @@ func TestExtractVersion(t *testing.T) {
 			"codex: extra text on the version line itself defeats the strict match, falls back loosely",
 			"codex-cli 0.144.5 (extra trailing text)\n",
 			"codex", "0.144.5", false,
+		},
+		{
+			"pi: decoy version on an earlier line is not picked",
+			"(node:12345) DeprecationWarning: something (node 18.17.0)\n0.85.1\n",
+			"pi", "0.85.1", false,
+		},
+		{
+			"pi: extra text on the version line defeats the strict match, falls back loosely (same deliberate fallback as codex's extra-text case)",
+			"pi version 0.85.1\n",
+			"pi", "0.85.1", false,
 		},
 	}
 	for _, c := range cases {
@@ -544,7 +626,7 @@ func TestPlatformStringShape(t *testing.T) {
 }
 
 func TestDetectedHostIDsOrder(t *testing.T) {
-	want := []string{"codex", "claude-code"}
+	want := []string{"codex", "claude-code", "pi"}
 	if len(DetectedHostIDs) != len(want) {
 		t.Fatalf("DetectedHostIDs = %v, want %v", DetectedHostIDs, want)
 	}

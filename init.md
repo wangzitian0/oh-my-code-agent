@@ -166,6 +166,11 @@ blocked planning.
   inside the MVP. Codex leads each runtime milestone because `CODEX_HOME` is
   the cleanest documented isolation boundary; Claude Code follows within the
   same milestone through its own qualified mechanisms.
+- Pi is a third first-party host at the detection and observation tier:
+  qualified Knowledge, binary detection, and native-home inventory feed the
+  trusted report, while runtime activation stays out of MVP scope (its
+  `PI_CODING_AGENT_DIR` is a documented reversible config boundary a later
+  milestone can build on).
 - Every other host remains an inventory and Knowledge target until an
   adapter plugin qualifies it per capability.
 

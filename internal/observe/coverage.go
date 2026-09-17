@@ -58,6 +58,31 @@ var coverageEntries = []ConceptCoverage{
 	{"claude-code", conceptHook, domain.CapabilityOps{Discover: domain.CapabilityExact, Parse: domain.CapabilityExact, Normalize: domain.CapabilityUnsupported, Resolve: domain.CapabilityUnsupported}},
 	{"claude-code", conceptPolicy, domain.CapabilityOps{Discover: domain.CapabilityPartial, Parse: domain.CapabilityExact, Normalize: domain.CapabilityUnsupported, Resolve: domain.CapabilityUnsupported}},
 	{"claude-code", conceptPlugin, domain.CapabilityOps{Discover: domain.CapabilityPartial, Parse: domain.CapabilityExact, Normalize: domain.CapabilityUnsupported, Resolve: domain.CapabilityUnsupported}},
+
+	// pi — first-party observation tier only (no runtime activation).
+	// instruction: every documented candidate file (AGENTS.md/AGENTS.override.md/
+	// CLAUDE.md/SYSTEM.md/APPEND_SYSTEM.md) is walked, so discovery is EXACT;
+	// precedence between same-directory candidates is a later resolver's job.
+	// skill: PARTIAL — the SKILL.md-marker walk misses root-level .md skills
+	// that ~/.pi/agent/skills and .pi/skills natively discover.
+	// mcp_server/hook: UNSUPPORTED in every dimension this package could
+	// claim — Pi has no declarative native registry for either; both are
+	// implemented through extensions, which are executable code this
+	// package deliberately does not translate (ontology §6.7's "PARTIAL;
+	// do not translate a native MCP or agent definition into arbitrary
+	// extension code automatically").
+	// policy: PARTIAL — settings.json and trust.json are walked, but package
+	// and session-level policy surfaces are not.
+	// plugin: PARTIAL — the extensions/ walk is deliberately over-inclusive
+	// (every regular file, not just loadable entrypoints) and npm/ package
+	// roots are keyed on package.json presence, not on a pi.skills/
+	// pi.extensions declaration.
+	{"pi", conceptInstruction, domain.CapabilityOps{Discover: domain.CapabilityExact, Parse: domain.CapabilityOpaque, Normalize: domain.CapabilityUnsupported, Resolve: domain.CapabilityUnsupported}},
+	{"pi", conceptSkill, domain.CapabilityOps{Discover: domain.CapabilityPartial, Parse: domain.CapabilityOpaque, Normalize: domain.CapabilityUnsupported, Resolve: domain.CapabilityUnsupported}},
+	{"pi", conceptMCPServer, domain.CapabilityOps{Discover: domain.CapabilityUnsupported, Parse: domain.CapabilityUnsupported, Normalize: domain.CapabilityUnsupported, Resolve: domain.CapabilityUnsupported}},
+	{"pi", conceptHook, domain.CapabilityOps{Discover: domain.CapabilityUnsupported, Parse: domain.CapabilityUnsupported, Normalize: domain.CapabilityUnsupported, Resolve: domain.CapabilityUnsupported}},
+	{"pi", conceptPolicy, domain.CapabilityOps{Discover: domain.CapabilityPartial, Parse: domain.CapabilityOpaque, Normalize: domain.CapabilityUnsupported, Resolve: domain.CapabilityUnsupported}},
+	{"pi", conceptPlugin, domain.CapabilityOps{Discover: domain.CapabilityPartial, Parse: domain.CapabilityOpaque, Normalize: domain.CapabilityUnsupported, Resolve: domain.CapabilityUnsupported}},
 }
 
 // Coverage returns this package's per-host, per-concept, per-dimension

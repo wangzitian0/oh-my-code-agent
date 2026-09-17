@@ -52,6 +52,11 @@ var officialSources = []Source{
 	{Host: "codex", SourceID: "codex-cli-doc", Kind: "official-doc", URL: "https://learn.chatgpt.com/docs/codex/cli"},
 	{Host: "codex", SourceID: "codex-agents-md-doc", Kind: "official-doc", URL: "https://learn.chatgpt.com/docs/agent-configuration/agents-md"},
 	{Host: "codex", SourceID: "codex-skills-doc", Kind: "official-doc", URL: "https://learn.chatgpt.com/docs/build-skills"},
+	{Host: "pi", SourceID: "pi-settings-doc", Kind: "official-doc", URL: "https://pi.dev/docs/latest/settings"},
+	{Host: "pi", SourceID: "pi-usage-doc", Kind: "official-doc", URL: "https://pi.dev/docs/latest/usage"},
+	{Host: "pi", SourceID: "pi-skills-doc", Kind: "official-doc", URL: "https://pi.dev/docs/latest/skills"},
+	{Host: "pi", SourceID: "pi-extensions-doc", Kind: "official-doc", URL: "https://pi.dev/docs/latest/extensions"},
+	{Host: "pi", SourceID: "pi-environment-variables-doc", Kind: "official-doc", URL: "https://pi.dev/docs/latest/environment-variables"},
 }
 
 // OfficialSources returns a defensive copy of the current closed allowlist.
@@ -125,6 +130,7 @@ func validateOfficialSourceURL(s Source) error {
 var allowlistedOfficialDomains = map[string]bool{
 	"code.claude.com":   true,
 	"learn.chatgpt.com": true,
+	"pi.dev":            true,
 }
 
 func init() {

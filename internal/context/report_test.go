@@ -21,6 +21,7 @@ func fakeDetectionEnvironment(t *testing.T) (startDir string, env Environment) {
 	binDir := t.TempDir()
 	writeFakeBinary(t, binDir, "codex", "codex-cli 0.144.5")
 	writeFakeBinary(t, binDir, "claude", "2.1.211 (Claude Code)")
+	writeFakeBinary(t, binDir, "pi", "0.85.1")
 	home := t.TempDir()
 	env = Environment{Vars: []string{"HOME=" + home, "PATH=" + binDir}}
 	return root, env
@@ -36,8 +37,8 @@ func TestDetect_WorktreeAndHostsPopulated(t *testing.T) {
 	if report.Worktree.ID == "" {
 		t.Error("Worktree.ID is empty")
 	}
-	if len(report.Hosts) != 2 {
-		t.Fatalf("len(Hosts) = %d, want 2", len(report.Hosts))
+	if len(report.Hosts) != 3 {
+		t.Fatalf("len(Hosts) = %d, want 3", len(report.Hosts))
 	}
 	if report.Hosts[0].Host != "codex" {
 		t.Errorf("Hosts[0].Host = %q, want %q", report.Hosts[0].Host, "codex")
@@ -45,11 +46,17 @@ func TestDetect_WorktreeAndHostsPopulated(t *testing.T) {
 	if report.Hosts[1].Host != "claude-code" {
 		t.Errorf("Hosts[1].Host = %q, want %q", report.Hosts[1].Host, "claude-code")
 	}
+	if report.Hosts[2].Host != "pi" {
+		t.Errorf("Hosts[2].Host = %q, want %q", report.Hosts[2].Host, "pi")
+	}
 	if !report.Hosts[0].Installed || report.Hosts[0].Version != "0.144.5" {
 		t.Errorf("Hosts[0] = %+v, want Installed=true Version=0.144.5", report.Hosts[0])
 	}
 	if !report.Hosts[1].Installed || report.Hosts[1].Version != "2.1.211" {
 		t.Errorf("Hosts[1] = %+v, want Installed=true Version=2.1.211", report.Hosts[1])
+	}
+	if !report.Hosts[2].Installed || report.Hosts[2].Version != "0.85.1" {
+		t.Errorf("Hosts[2] = %+v, want Installed=true Version=0.85.1", report.Hosts[2])
 	}
 }
 
@@ -127,8 +134,8 @@ func TestDetect_JSONShape(t *testing.T) {
 		}
 	}
 	hosts, ok := generic["hosts"].([]any)
-	if !ok || len(hosts) != 2 {
-		t.Fatalf("hosts is not a 2-element JSON array: %s", raw)
+	if !ok || len(hosts) != 3 {
+		t.Fatalf("hosts is not a 3-element JSON array: %s", raw)
 	}
 	firstHost, ok := hosts[0].(map[string]any)
 	if !ok {

@@ -11,8 +11,10 @@ import (
 )
 
 // supportedHosts are the canonical host IDs this package implements
-// observation for — the two first-party hosts named in issue #12's scope
-// (codex, claude-code). This mirrors internal/context/host.go's
+// observation for. codex and claude-code are the two runtime-qualified
+// first-party hosts from issue #12's scope; pi joins as the third,
+// observation-tier-only first-party host (detection + inventory, no
+// runtime activation). This mirrors internal/context/host.go's
 // binaryNames/DetectedHostIDs split: domain.KnownHostIDs is the wider,
 // closed vocabulary of every host this project's ontology knows about,
 // while this map is the much smaller set this package actually implements
@@ -20,6 +22,7 @@ import (
 var supportedHosts = map[string]bool{
 	"codex":       true,
 	"claude-code": true,
+	"pi":          true,
 }
 
 // Request specifies exactly what one Observe call should inventory.
@@ -103,7 +106,7 @@ func Observe(req Request) ([]domain.Observation, error) {
 		return nil, fmt.Errorf("observe: Observe: %w", err)
 	}
 	if !supportedHosts[host] {
-		return nil, fmt.Errorf("observe: Observe: host %q is a known canonical host ID but this package does not implement observation for it (only codex, claude-code)", host)
+		return nil, fmt.Errorf("observe: Observe: host %q is a known canonical host ID but this package does not implement observation for it (only codex, claude-code, pi)", host)
 	}
 
 	surface := req.Detection.Surface
@@ -128,6 +131,8 @@ func Observe(req Request) ([]domain.Observation, error) {
 			rules = codexUserRules(home.Name)
 		case "claude-code":
 			rules = claudeUserRules(home.Name)
+		case "pi":
+			rules = piUserRules(home.Name)
 		}
 		if len(rules) == 0 {
 			continue
@@ -171,6 +176,8 @@ func Observe(req Request) ([]domain.Observation, error) {
 				rules = codexWorkspaceRules()
 			case "claude-code":
 				rules = claudeWorkspaceRules()
+			case "pi":
+				rules = piWorkspaceRules()
 			}
 			recs, err := observeRoot(host, hostVersion, surface, "workspace", req.WorktreeRoot, rules)
 			if err != nil {
@@ -250,6 +257,8 @@ func Observe(req Request) ([]domain.Observation, error) {
 				rules = codexDirectoryChainRules()
 			case "claude-code":
 				rules = claudeDirectoryChainRules()
+			case "pi":
+				rules = piDirectoryChainRules()
 			}
 
 				// tainted latches once any chain segment is found to be a

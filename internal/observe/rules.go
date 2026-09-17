@@ -325,3 +325,95 @@ func claudeLocalRules() []sourceRule {
 		{concept: conceptInstruction, kind: ruleCandidateFiles, files: []string{"CLAUDE.local.md"}},
 	}
 }
+
+// piUserRules returns the source rules for one of Pi's native home
+// locations (internal/context/host.go's piNativeHomes), or nil if this
+// package has nothing to look for under a native home by that name (same
+// forward-compatibility stance codexUserRules/claudeUserRules take).
+//
+// Physical mapping per docs/ontology/README.md §6.7, verified against the
+// official docs and the installed 0.85.1 release: global instructions live
+// at ~/.pi/agent/AGENTS.md; SYSTEM.md replaces the base prompt and
+// APPEND_SYSTEM.md appends to it, in both the global and project scope;
+// settings.json is the global Policy surface; trust.json is the project
+// trust decision store (Policy); auth.json is provider credential state,
+// so — exactly like Codex's $CODEX_HOME/auth.json — it is discoverOnly:
+// existence is recorded at E0, content is never read.
+//
+// Two deliberate nuances, both reflected in coverage.go's PARTIAL cells:
+// (1) In ~/.pi/agent/skills (unlike ~/.agents/skills) a root-level .md
+// file with valid skill frontmatter is itself a discoverable skill; the
+// SKILL.md-marker walk below only finds directory-shaped skills, so
+// root-file skills are a known discovery gap, not an invented claim.
+// (2) Extensions auto-discovery loads root *.ts files and */index.ts
+// entrypoints; walking every regular file under extensions/ is
+// over-inclusive (helper modules surface as records too) — lossless
+// inventory prefers over-reporting existence over silently missing an
+// entrypoint. ~/.pi/agent/npm holds user-scoped installed packages whose
+// package.json may declare pi.skills / pi.extensions, so each package.json
+// found there is one plugin-concept record.
+func piUserRules(nativeHomeName string) []sourceRule {
+	switch nativeHomeName {
+	case "PI_CODING_AGENT_DIR":
+		return []sourceRule{
+			{concept: conceptInstruction, kind: ruleCandidateFiles, files: []string{"AGENTS.md", "SYSTEM.md", "APPEND_SYSTEM.md"}},
+			{concept: conceptPolicy, kind: ruleCandidateFiles, files: []string{"settings.json", "trust.json"}},
+			{concept: conceptPolicy, kind: ruleCandidateFiles, files: []string{"auth.json"}, discoverOnly: true},
+			{concept: conceptSkill, kind: ruleWalkDir, dir: "skills", marker: "SKILL.md"},
+			{concept: conceptPlugin, kind: ruleWalkDir, dir: "extensions"},
+			{concept: conceptPlugin, kind: ruleWalkDir, dir: "npm", marker: "package.json"},
+		}
+	case "HOME/.agents/skills":
+		// Shared cross-host root Pi documents alongside ~/.pi/agent/skills;
+		// root .md files are NOT individual skills here (only SKILL.md-
+		// containing directories and nested grouping-folder .md files), so
+		// the plain marker walk is the complete, documented discovery shape.
+		return []sourceRule{
+			{concept: conceptSkill, kind: ruleWalkDir, dir: "", marker: "SKILL.md"},
+		}
+	default:
+		return nil
+	}
+}
+
+// piWorkspaceRules returns the source rules checked directly under the
+// worktree root for Pi's repository sources (docs/ontology/README.md
+// §6.7): project instructions are AGENTS.override.md else AGENTS.md else
+// CLAUDE.md per directory (the same FIRST_MATCH shape Codex documents —
+// lossless inventory still records every candidate that exists); project
+// system-prompt files are .pi/SYSTEM.md and .pi/APPEND_SYSTEM.md; project
+// settings are .pi/settings.json (deep-merged over global); project skills
+// load from .pi/skills and .agents/skills; project extensions from
+// .pi/extensions; project-scoped packages install under .pi/npm. Project
+// resources are only read after the project is trusted (trust.json), but
+// observation is read-only inventory of what exists on disk, not
+// activation, so trust gating does not change what this walk reports.
+func piWorkspaceRules() []sourceRule {
+	return []sourceRule{
+		{concept: conceptInstruction, kind: ruleCandidateFiles, files: []string{"AGENTS.override.md", "AGENTS.md", "CLAUDE.md"}},
+		{concept: conceptInstruction, kind: ruleCandidateFiles, files: []string{filepath.Join(".pi", "SYSTEM.md"), filepath.Join(".pi", "APPEND_SYSTEM.md")}},
+		{concept: conceptPolicy, kind: ruleCandidateFiles, files: []string{filepath.Join(".pi", "settings.json")}},
+		{concept: conceptSkill, kind: ruleWalkDir, dir: filepath.Join(".pi", "skills"), marker: "SKILL.md"},
+		{concept: conceptSkill, kind: ruleWalkDir, dir: filepath.Join(".agents", "skills"), marker: "SKILL.md"},
+		{concept: conceptPlugin, kind: ruleWalkDir, dir: filepath.Join(".pi", "extensions")},
+		{concept: conceptPlugin, kind: ruleWalkDir, dir: filepath.Join(".pi", "npm"), marker: "package.json"},
+	}
+}
+
+// piDirectoryChainRules is what this package applies at every intermediate
+// directory in the root-to-cwd chain (directory.go): Instructions
+// ("AGENTS.md or CLAUDE.md ... from the project root down to the current
+// directory", with AGENTS.override.md replacing both per directory) and
+// Skills (".agents/skills in cwd and ancestor directories (up to git repo
+// root)") are the two concepts Pi documents as resolving through the
+// ancestor chain. .pi/settings.json, .pi/skills, and .pi/extensions are
+// documented at "the project" scope without an ancestor-chain claim, so
+// they deliberately stay root-only in piWorkspaceRules rather than
+// appearing here — the same documented-asymmetry stance
+// claudeDirectoryChainRules takes versus claudeWorkspaceRules.
+func piDirectoryChainRules() []sourceRule {
+	return []sourceRule{
+		{concept: conceptInstruction, kind: ruleCandidateFiles, files: []string{"AGENTS.override.md", "AGENTS.md", "CLAUDE.md"}},
+		{concept: conceptSkill, kind: ruleWalkDir, dir: filepath.Join(".agents", "skills"), marker: "SKILL.md"},
+	}
+}
