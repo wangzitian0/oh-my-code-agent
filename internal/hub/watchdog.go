@@ -103,9 +103,13 @@ func JSONAutoRepair(s string) string {
 	var b strings.Builder
 	b.WriteString(trimmed)
 
-	// If cut in the middle of an escape sequence, strip it
+	// If cut in the middle of an escape sequence, strip trailing backslash
 	if escaped {
-		// remove trailing backslash if present
+		str := b.String()
+		if len(str) > 0 && str[len(str)-1] == '\\' {
+			b.Reset()
+			b.WriteString(str[:len(str)-1])
+		}
 	}
 
 	// If cut inside a string, close quote

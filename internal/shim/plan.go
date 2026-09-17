@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/wangzitian0/oh-my-code-agent/internal/domain"
 	"github.com/wangzitian0/oh-my-code-agent/internal/runtime"
 )
 
@@ -110,6 +111,10 @@ type Plan struct {
 	// case is codex's own asdf-installed binary being a
 	// "#!/usr/bin/env node" script, where node is *also* asdf-managed.
 	InterpreterPath string
+	// CanVirtualizeHome indicates whether the host supports virtualizing HOME
+	// without breaking credential or Keychain state. When false (e.g. Tier 2 Bridge-Managed),
+	// Exec leaves HOME and NativeHomeEnvVar pointing at the user's real home.
+	CanVirtualizeHome bool
 }
 
 // getEnv returns the value of the last environ entry named key
@@ -275,15 +280,18 @@ func Build(invokedName string, environ []string) (Plan, error) {
 		return Plan{}, fmt.Errorf("shim: Build: current generation %s for %s has no %s directory at %s; run `omca env` again", genDir, host, runtime.VirtualHomeDirName, virtualHomeDir)
 	}
 
+	cap := domain.DefaultHostCapability(host)
+
 	return Plan{
-		Host:             host,
-		RealBinaryPath:   realPath,
-		NativeHomeEnvVar: envVar,
-		NativeHomeDir:    mutableHomeDir,
-		GenerationID:     genID,
-		GenerationDir:    genDir,
-		VirtualHomeDir:   virtualHomeDir,
-		RealHomeDir:      realHome,
-		InterpreterPath:  interpreterPath,
+		Host:              host,
+		RealBinaryPath:    realPath,
+		NativeHomeEnvVar:  envVar,
+		NativeHomeDir:     mutableHomeDir,
+		GenerationID:      genID,
+		GenerationDir:     genDir,
+		VirtualHomeDir:    virtualHomeDir,
+		RealHomeDir:       realHome,
+		InterpreterPath:   interpreterPath,
+		CanVirtualizeHome: cap.CanVirtualizeHome,
 	}, nil
 }

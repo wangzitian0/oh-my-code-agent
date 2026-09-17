@@ -10,6 +10,7 @@ import (
 	"time"
 
 	hostcontext "github.com/wangzitian0/oh-my-code-agent/internal/context"
+	"github.com/wangzitian0/oh-my-code-agent/internal/domain"
 	"github.com/wangzitian0/oh-my-code-agent/internal/observe"
 	"github.com/wangzitian0/oh-my-code-agent/internal/runtime"
 	"github.com/wangzitian0/oh-my-code-agent/internal/shim"
@@ -356,13 +357,16 @@ func runIsolated(stderr io.Writer, host string, realEnv hostcontext.Environment,
 		return 1
 	}
 
+	cap := domain.DefaultHostCapability(host)
 	overrides := map[string]string{
-		envVar:             mutableHomeDir,
-		"HOME":             virtualHomeDir,
 		"OMCA_REAL_HOME":   realEnv.Get("HOME"),
 		"OMCA_RUN_ID":      gen.Metadata.ID,
 		"OMCA_STATE_DIR":   worktreeStateDir,
 		"OMCA_WORKTREE_ID": wt.ID,
+	}
+	if cap.CanVirtualizeHome {
+		overrides[envVar] = mutableHomeDir
+		overrides["HOME"] = virtualHomeDir
 	}
 	envp := shim.InjectEnv(os.Environ(), overrides)
 
