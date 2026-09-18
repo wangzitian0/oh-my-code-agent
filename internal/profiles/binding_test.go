@@ -344,3 +344,33 @@ func TestGlobMatch_PatternGrammar(t *testing.T) {
 		}
 	}
 }
+
+func TestMatchBindingsWithMain_LinkedWorktreeMatchesMainRepository(t *testing.T) {
+	binding := domain.Binding{
+		APIVersion: "omca.dev/v1alpha1",
+		Kind:       "Binding",
+		Metadata:   domain.Metadata{ID: "binding:workspace"},
+		Spec: domain.BindingSpec{
+			Match:    domain.BindingMatch{RepositoryGlob: "/Users/example/workspace/**"},
+			Profiles: []string{"company:workspace"},
+		},
+	}
+
+	linkedWorktree := "/Users/example/.gemini/antigravity/worktrees/scan_order/branch1"
+	mainRepo := "/Users/example/workspace/scan_order"
+
+	// Without mainRepository, does not match
+	withoutMain := MatchBindings([]domain.Binding{binding}, linkedWorktree, "")
+	if len(withoutMain) != 0 {
+		t.Errorf("MatchBindings without mainRepository = %v, want 0", withoutMain)
+	}
+
+	// With mainRepository matching the glob, matches successfully
+	withMain := MatchBindingsWithMain([]domain.Binding{binding}, linkedWorktree, mainRepo, "")
+	if len(withMain) != 1 {
+		t.Fatalf("MatchBindingsWithMain with mainRepository = %v, want 1 match", withMain)
+	}
+	if withMain[0].Metadata.ID != "binding:workspace" {
+		t.Errorf("matched ID = %q, want binding:workspace", withMain[0].Metadata.ID)
+	}
+}

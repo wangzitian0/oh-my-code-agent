@@ -171,10 +171,11 @@ func compileFuncForMCP(stderr io.Writer) mcp.CompileFunc {
 		if err != nil {
 			return domain.Generation{}, nil, err
 		}
-		profileDirs, bindingDirs, exceptionDirs := compositionDirsFor(configRoot, wt.Root)
+		profileDirs, bindingDirs, exceptionDirs := compositionDirsFor(configRoot, wt.Root, wt.MainRoot)
 		now := time.Now()
 		composition, err := profiles.Compose(profiles.CompositionInput{
 			Repository:       wt.Root,
+			MainRepository:   wt.MainRoot,
 			ProfileDirs:      profileDirs,
 			BindingDirs:      bindingDirs,
 			ExceptionDirs:    exceptionDirs,

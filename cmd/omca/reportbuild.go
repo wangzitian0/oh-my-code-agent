@@ -102,9 +102,10 @@ func composeDesiredStateForCLI(stderr io.Writer, wt hostcontext.Worktree, worktr
 		fmt.Fprintf(stderr, "omca: warning: resolving config root, continuing without Desired Graph data: %v\n", err)
 		return profiles.CompositionResult{}, false
 	}
-	profileDirs, bindingDirs, exceptionDirs := compositionDirsFor(configRoot, wt.Root)
+	profileDirs, bindingDirs, exceptionDirs := compositionDirsFor(configRoot, wt.Root, wt.MainRoot)
 	composed, err := profiles.Compose(profiles.CompositionInput{
 		Repository:       wt.Root,
+		MainRepository:   wt.MainRoot,
 		ProfileDirs:      profileDirs,
 		BindingDirs:      bindingDirs,
 		ExceptionDirs:    exceptionDirs,
