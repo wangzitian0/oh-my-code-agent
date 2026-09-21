@@ -48,7 +48,31 @@ func runContext(stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	report, err := hostcontext.Detect(stdcontext.Background(), cwd, hostcontext.RealEnvironment())
+	// Detect through a PATH with this worktree's shim directory removed,
+	// like every other command that detects a host (env, doctor, run,
+	// activate, rollback, bisect, mcp, tui, reportbuild, qualify).
+	//
+	// This was the one caller passing the raw environment, and inside a
+	// managed shell -- the normal case, where direnv has put the shim
+	// directory first on PATH -- that made `codex --version` resolve to the
+	// shim and exec the real binary under the generation's virtualized
+	// HOME. For an asdf-installed host that is the exit-126 dispatch
+	// failure runtime.md §7.1.1 documents, so `omca context` reported codex
+	// as installed with no version and a probe error, on a machine where
+	// `omca env` and `omca doctor` both detected it fine.
+	//
+	// Version detection must observe the native binary, never the managed
+	// wrapper: the wrapper's job is to launch a generation, and asking it
+	// what version it is conflates the two.
+	realEnv := hostcontext.RealEnvironment()
+	detectEnv := realEnv
+	if wt, wtErr := hostcontext.DetectWorktree(cwd); wtErr == nil {
+		if stateRoot, srErr := realStateRoot(); srErr == nil {
+			detectEnv = envWithFilteredPath(realEnv, shimDirPath(worktreeStateDirPath(stateRoot, wt.ID)))
+		}
+	}
+
+	report, err := hostcontext.Detect(stdcontext.Background(), cwd, detectEnv)
 	if err != nil {
 		fmt.Fprintf(stderr, "omca: context: %v\n", err)
 		return 1
