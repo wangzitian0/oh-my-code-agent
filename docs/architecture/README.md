@@ -348,7 +348,7 @@ both its pinned list and this table are updated.
 | `internal/context` | `host.go` | Binary name and `--version` probe shape |
 | `internal/auth` | `invoke.go`, `mutablestate.go` | Credential invocation and mutable-state classification |
 | `internal/qualify` | `sandbox.go`, `realhome.go` | Qualification sandbox layout |
-| `internal/domain` | `host_tier.go` | Tier and capability defaults (see [ADR 0006](../adr/0006-host-tiers.md)) |
+| `internal/domain` | `host_tier.go` | Tier and capability defaults (ADR 0006, landing separately) |
 | `cmd/omca` | `qualify_tui.go`, `run.go` | Host-specific CLI invocation |
 
 Two consequences worth stating plainly, because the contract's existence
