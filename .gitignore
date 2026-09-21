@@ -3,3 +3,9 @@
 /bin/
 *.test
 .DS_Store
+
+# Hub runtime state and config. harness.json carries per-tool `env` blocks that
+# in practice hold live API tokens, so it must never be committed -- ADR 0003
+# and the secret-safe non-functional requirement.
+.omca/
+.claude/

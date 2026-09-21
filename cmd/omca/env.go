@@ -131,6 +131,19 @@ func runEnv(stdout, stderr io.Writer, args []string) int {
 			continue
 		}
 
+		// A tier-3 (OBSERVED) host is never launched managed, so it has no
+		// generation to compile -- ADR 0006 decision 1. Before this check,
+		// an installed observation-tier host (pi, added in #108) reached
+		// EnsureLaunchGeneration and failed there on NativeHomeDirName's
+		// "unsupported host" error, which this loop treats as fatal: one
+		// installed observation-tier host made the whole `omca env` exit 1
+		// even though every managed host's generation had already compiled
+		// fine. CI never saw it because CI has no such host installed.
+		if domain.DefaultHostCapability(host).Tier == domain.TierObserved {
+			fmt.Fprintf(stderr, "omca: env: %s is installed (%s) at the observation tier; no runtime activation is qualified for it, so no generation is compiled\n", host, hd.Version)
+			continue
+		}
+
 		obs, err := observe.Observe(observe.Request{Detection: hd, WorktreeRoot: wt.Root})
 		if err != nil {
 			fmt.Fprintf(stderr, "omca: env: observing %s: %v\n", host, err)

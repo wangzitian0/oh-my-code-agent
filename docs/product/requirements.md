@@ -269,6 +269,13 @@ The first managed host launch must use a minimal runtime that does not inherit
 user-global native configuration. It must contain only the safe baseline,
 selected project-loadable inputs, and the OMCA MCP server.
 
+This requirement is satisfied only by Tier 1 (`MANAGED`) hosts, where the shim
+virtualizes `HOME`. A Tier 2 (`BRIDGE`) host launches on the real user home and
+does inherit the user-global scope; it is a recorded capability gap against
+this requirement, not a variant way of meeting it, and it must state its
+residual load wherever it is reported. See
+[ADR 0006](../adr/0006-host-tiers.md).
+
 ### FR-8: Immutable generations
 
 The active generation is immutable. Desired-state changes compile into a
@@ -370,8 +377,14 @@ the corresponding milestone:
 3. Whether repository Instructions are always active or can become `AVAILABLE` through an isolated overlay workspace.
 4. The exact context-cost metric exposed to users when a host does not publish prompt assembly details.
 5. Whether the TUI can restart a host process directly or only stage and instruct the user to restart.
-6. Whether Claude Code's configuration-directory override yields complete
-   user-global isolation, or a virtual process home is required as for Codex.
+6. ~~Whether Claude Code's configuration-directory override yields complete
+   user-global isolation, or a virtual process home is required as for
+   Codex.~~ **Resolved** by [ADR 0006](../adr/0006-host-tiers.md): neither.
+   A virtual process home would force a fresh login on every generation,
+   which `runtime.md` §7.2 forbids, so Claude Code is Tier 2 and does not
+   achieve user-global isolation at all. What remains open is narrower and
+   tracked there: qualifying what the Tier 2 bridge actually governs, and
+   moving tier facts out of a hardcoded switch into Knowledge Packs.
 
 ## Candidate passthrough inspection
 

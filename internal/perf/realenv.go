@@ -7,6 +7,7 @@ import (
 	"time"
 
 	hostcontext "github.com/wangzitian0/oh-my-code-agent/internal/context"
+	"github.com/wangzitian0/oh-my-code-agent/internal/domain"
 	"github.com/wangzitian0/oh-my-code-agent/internal/mcp"
 	"github.com/wangzitian0/oh-my-code-agent/internal/runtime"
 )
@@ -122,8 +123,29 @@ func measureRealEnvironmentHost(baseDir, host string, realEnv hostcontext.Enviro
 	if !hd.Installed {
 		return RealEnvironmentHostResult{Host: host, Installed: false, Detail: fmt.Sprintf("%s is not installed on this machine", host)}, nil
 	}
-	if _, err := runtime.NativeHomeDirName(host); err != nil {
-		return RealEnvironmentHostResult{Host: host, Installed: false, Detail: fmt.Sprintf("%s is installed at observation tier only (runtime activation out of scope)", host)}, nil
+	// A tier-3 (OBSERVED) host has no managed launch path, so there is no
+	// bootstrap to time -- ADR 0006 decision 1. Measuring it is not merely
+	// meaningless, it fails: runHostPass reaches EnsureGeneration, which
+	// rejects the host in NativeHomeDirName. That turned this whole test red
+	// on any machine with an observation-tier host installed (pi, #108) while
+	// staying green in CI, which has none.
+	//
+	// Two deliberate differences from the first fix for this on main, which
+	// probed NativeHomeDirName's error and returned Installed: false.
+	// Installed is now true, because it is: the field's own doc comment
+	// defines it as "whether this real machine actually has Host installed,"
+	// and an observation-tier host it detected and version-probed plainly
+	// does. Saying otherwise makes a report state something false to explain
+	// an absent measurement, when Detail already carries that. And the tier
+	// is read directly rather than inferred from another function's error,
+	// so the reason a host is skipped stays the reason, not a symptom that
+	// some unrelated refactor could silently change.
+	if domain.DefaultHostCapability(host).Tier == domain.TierObserved {
+		return RealEnvironmentHostResult{
+			Host:      host,
+			Installed: true,
+			Detail:    fmt.Sprintf("%s is installed (%s) at the observation tier; no managed launch path exists to measure", host, hd.Version),
+		}, nil
 	}
 
 	hostRoot := filepath.Join(baseDir, host)

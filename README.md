@@ -4,8 +4,16 @@
 
 It observes native host configuration without trusting it, models the parts
 that can be proven through a vendor-neutral ontology, and reconciles an
-explicit desired state into an isolated runtime for each directory or Git
+explicit desired state into a per-worktree runtime for each directory or Git
 worktree.
+
+How much of the native user-global scope that runtime actually excludes
+depends on the host's tier ([ADR 0006](docs/adr/0006-host-tiers.md)). Codex is
+Tier 1: `HOME` is virtualized and the user-global scope is excluded. Claude
+Code is Tier 2: its credentials are Keychain-bound, so `HOME` is left pointing
+at the real user home and the native user-global Skills and MCP registrations
+still load. `omca env` and `omca_status` state that residual rather than
+reporting a clean runtime.
 
 The primary product outcome is a trusted, explainable report. Configuration
 management is deliberately limited to capabilities that have versioned
@@ -84,7 +92,7 @@ implicit parent of an OMCA-managed runtime.
 ```text
 Native configuration -> observed and explained
 Desired state        -> explicitly composed
-Runtime generation   -> isolated, immutable, restartable
+Runtime generation   -> immutable, restartable; isolated at tier 1
 ```
 
 The CLI, adapters and runtime generations are implemented. Passing build and unit

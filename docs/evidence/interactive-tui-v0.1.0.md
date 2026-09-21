@@ -4,6 +4,16 @@ Date: 2026-08-18
 Platform: macOS 15.3.2, arm64  
 Command under test: candidate `omca qualify tui --json`
 
+> **Superseded for Claude Code as of PR #109.** Every Claude Code row below was
+> measured against the pre-#109 shim, which virtualized `HOME` unconditionally.
+> PR #109 made virtualization conditional and set `CanVirtualizeHome: false`
+> for `claude-code`, so on any build carrying that flag the host launches on
+> the real user home and its native user-global MCP registrations and Skills
+> are no longer excluded. The `PASS` on the Claude Code MCP-exclusion row does
+> not describe current behavior and must be re-measured before it is cited
+> again. Codex rows are unaffected — it remains Tier 1. See
+> [ADR 0006](../adr/0006-host-tiers.md).
+
 ## Scope
 
 This artifact records only the safe automatic phase. It did not open an

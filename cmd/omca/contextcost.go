@@ -19,8 +19,14 @@ import (
 func contextCostSummaryLine(host string, gen domain.Generation) string {
 	cap := domain.DefaultHostCapability(host)
 	if cap.Tier == domain.TierBridge {
+		// ADR 0006 decision 3: a tier-2 line states the residual load. The
+		// earlier wording ("native credentials and skills retained for
+		// Keychain/OAuth integrity") named the reason but not the cost, so
+		// it read as a feature rather than as the FR-7 gap it is.
 		return fmt.Sprintf(
-			"%s: Tier 2 (Bridge-Managed); native credentials and skills retained for Keychain/OAuth integrity; governed via MCP Hub Bridge",
+			"%s: Tier 2 (Bridge-Managed); HOME is NOT virtualized, so excluded 0 native sources -- "+
+				"the real user-global configuration (Skills, MCP registrations, settings) still loads in full. "+
+				"Keychain-bound credentials are why (ADR 0006); governed via MCP Hub Bridge",
 			host,
 		)
 	}

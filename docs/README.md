@@ -19,7 +19,7 @@ single global priority:
 | Bootstrap, isolation, generations, and restart behavior | [`architecture/runtime.md`](architecture/runtime.md) |
 | Candidate environment passthrough validation (preview only) | [`architecture/passthrough.md`](architecture/passthrough.md) |
 | Drift, evidence, report UX, MCP queries, and debugging | [`architecture/reporting.md`](architecture/reporting.md) |
-| Frozen cross-cutting decisions (isolation, ownership, credentials, knowledge update, plugin distribution) | [`adr/`](adr/) |
+| Frozen cross-cutting decisions (isolation, host tiers, ownership, credentials, knowledge update, plugin distribution) | [`adr/`](adr/) |
 | Building and qualifying a host adapter plugin | [`plugin/authoring-guide.md`](plugin/authoring-guide.md) |
 | Implementation order and milestone exit gates | [`project/roadmap.md`](project/roadmap.md) |
 
@@ -54,10 +54,14 @@ them.
   output are English unless localization is the explicit subject.
 - Generated reports and Knowledge Packs record their schema and source document
   versions.
-- A frozen cross-cutting decision (isolation, ownership, credentials,
-  knowledge update, plugin distribution) lives in [`docs/adr/`](adr/) as one
-  ADR per decision. An accepted ADR changes by a new ADR superseding it, not
-  by an in-place edit.
+- A frozen cross-cutting decision (isolation, host tiers, ownership,
+  credentials, knowledge update, plugin distribution) lives in
+  [`docs/adr/`](adr/) as one ADR per decision. An accepted ADR changes by a
+  new ADR superseding it, not by an in-place edit.
+- Weakening an invariant counts as a frozen decision. A change that makes an
+  invariant conditional — on a host, a tier, a flag — lands with the ADR that
+  records it and with every claim it invalidates corrected in the same change,
+  never as a side effect of a feature.
 
 ## Status Vocabulary
 
