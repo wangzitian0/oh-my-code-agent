@@ -85,11 +85,23 @@ func ensureHubConnection(ctx context.Context, socketPath string) (net.Conn, erro
 		return conn, nil
 	}
 
-	// Try to auto-start hub daemon
+	// Try to auto-start the hub daemon. Two bridges racing here is expected
+	// and safe: `hub serve` takes an exclusive instance lock before it
+	// touches the socket (instancelock.go), so the loser exits instead of
+	// unlinking the winner's socket, and the poll below simply connects to
+	// whichever one won. A spawn failure is recorded rather than discarded,
+	// because it is the difference between "the hub is slow to come up" and
+	// "this build cannot start a hub at all" — the poll timeout below cannot
+	// tell those apart on its own.
+	var startErr error
 	exe, err := os.Executable()
-	if err == nil {
+	if err != nil {
+		startErr = fmt.Errorf("locate own executable: %w", err)
+	} else {
 		cmd := exec.Command(exe, "hub", "start", "-d")
-		_ = cmd.Start()
+		if err := cmd.Start(); err != nil {
+			startErr = fmt.Errorf("spawn %s hub start -d: %w", exe, err)
+		}
 	}
 
 	// Poll socket up to 3 seconds
@@ -107,5 +119,8 @@ func ensureHubConnection(ctx context.Context, socketPath string) (net.Conn, erro
 		}
 	}
 
+	if startErr != nil {
+		return nil, fmt.Errorf("hub daemon socket unreachable at %s (auto-start failed: %v): %w", socketPath, startErr, err)
+	}
 	return nil, fmt.Errorf("hub daemon socket unreachable at %s: %w", socketPath, err)
 }

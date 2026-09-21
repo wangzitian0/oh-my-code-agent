@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -49,6 +50,14 @@ type Hub struct {
 	hostSeq    uint64
 	startTime  time.Time
 	stopCh     chan struct{}
+	// lock is the exclusive single-instance lock held for config.SocketPath
+	// for this process's whole lifetime. See instancelock.go for why the
+	// socket cannot safely be replaced without it.
+	lock *InstanceLock
+	// httpListenErr records why the optional HTTP endpoint is not serving,
+	// when Config.Port was set but the bind failed. Surfaced through
+	// DashboardSnapshot so a degraded hub cannot look healthy.
+	httpListenErr error
 }
 
 // New creates a new Hub instance.
@@ -150,14 +159,38 @@ func (h *Hub) Start(ctx context.Context) error {
 		return fmt.Errorf("hub: create run dir %s: %w", dir, err)
 	}
 
-	// Socket self-healing: do not stomp live daemon; clean up stale socket
+	// Two guards, in this order, before the socket is touched at all.
+	//
+	// 1. The instance lock is the authority. ProbeSocket alone cannot make
+	//    this safe: dialing is a check, not a lock, so two hubs that both
+	//    find a cold socket both proceed to the unlink below and the loser
+	//    is orphaned. flock closes that window because the kernel, not this
+	//    code, decides who holds it.
+	lock, err := AcquireInstanceLock(InstanceLockPath(h.config.SocketPath))
+	if err != nil {
+		return err
+	}
+	h.lock = lock
+
+	// 2. ProbeSocket still earns its place, for one case the lock cannot
+	//    cover: a daemon from a build that predates the lock holds the
+	//    socket while holding no lock at all. During that rollout we would
+	//    acquire the lock cleanly and then stomp a live daemon. Refuse
+	//    instead, and give the lock back so the next attempt is not blocked
+	//    by our own abandoned hold.
 	if ProbeSocket(h.config.SocketPath) {
+		_ = h.lock.Release()
+		h.lock = nil
 		return fmt.Errorf("hub: another omca hub daemon is already running and listening on %s", h.config.SocketPath)
 	}
+
+	// Safe now: any socket still at this path belongs to a dead holder.
 	_ = os.Remove(h.config.SocketPath)
 
 	l, err := net.Listen("unix", h.config.SocketPath)
 	if err != nil {
+		_ = h.lock.Release()
+		h.lock = nil
 		return fmt.Errorf("hub: listen unix socket %s: %w", h.config.SocketPath, err)
 	}
 	h.listener = l
@@ -195,13 +228,29 @@ func (h *Hub) Start(ctx context.Context) error {
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "killed": id})
 		})
 
-		h.httpServer = &http.Server{
-			Addr:    fmt.Sprintf("127.0.0.1:%d", h.config.Port),
-			Handler: mux,
+		addr := fmt.Sprintf("127.0.0.1:%d", h.config.Port)
+		// Bind synchronously so a failure is observable. ListenAndServe in a
+		// goroutine with its error discarded meant an occupied port (the
+		// fixed 8765 default has no fallback) left the daemon running with no
+		// HTTP endpoint while `hub status` still reported a healthy hub.
+		//
+		// A bind failure is reported, not fatal: the unix socket is the
+		// primary interface and HTTP is documented as optional, so refusing
+		// to start the whole daemon because an unrelated process holds 8765
+		// would turn a cosmetic loss into an outage of every tool the hub
+		// brokers.
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			h.httpListenErr = fmt.Errorf("hub: HTTP endpoint disabled: listen %s: %w", addr, err)
+			log.Printf("%v", h.httpListenErr)
+		} else {
+			h.httpServer = &http.Server{Handler: mux}
+			go func() {
+				if serveErr := h.httpServer.Serve(ln); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+					log.Printf("hub: HTTP endpoint stopped: %v", serveErr)
+				}
+			}()
 		}
-		go func() {
-			_ = h.httpServer.ListenAndServe()
-		}()
 	}
 
 	return nil
@@ -571,6 +620,13 @@ func (h *Hub) Close() error {
 	}
 
 	h.supervisor.StopAll()
+
+	// Release last: while this is held, no second hub can replace the socket
+	// this function just removed.
+	if h.lock != nil {
+		_ = h.lock.Release()
+		h.lock = nil
+	}
 	return nil
 }
 

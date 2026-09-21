@@ -14,6 +14,10 @@ type DashboardSnapshot struct {
 	Storage       StorageStats         `json:"storage"`
 	ReapedCount   uint64               `json:"reaped_count"`
 	Timestamp     time.Time            `json:"timestamp"`
+	// HTTPError is non-empty when Config.Port was set but the HTTP endpoint
+	// could not bind, so a hub serving only its unix socket is never
+	// reported as fully healthy.
+	HTTPError string `json:"http_error,omitempty"`
 }
 
 // DashboardSnapshot returns a point-in-time state of the entire hub.
@@ -28,6 +32,11 @@ func (h *Hub) DashboardSnapshot() DashboardSnapshot {
 		reaped = h.reaper.ReapedCount()
 	}
 
+	httpErr := ""
+	if h.httpListenErr != nil {
+		httpErr = h.httpListenErr.Error()
+	}
+
 	return DashboardSnapshot{
 		Uptime:        uptime,
 		Connected:     h.ActiveHosts(),
@@ -37,5 +46,6 @@ func (h *Hub) DashboardSnapshot() DashboardSnapshot {
 		Storage:       h.arbiter.Stats(),
 		ReapedCount:   reaped,
 		Timestamp:     time.Now(),
+		HTTPError:     httpErr,
 	}
 }

@@ -124,9 +124,13 @@ func runHubServe(stdout, stderr io.Writer, args []string) int {
 	}
 	fmt.Fprintf(stdout, "omca resident hub running at %s\n", cfg.SocketPath)
 
-	pidFile := strings.TrimSuffix(cfg.SocketPath, ".sock") + ".pid"
-	_ = os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", os.Getpid())), 0600)
-	defer os.Remove(pidFile)
+	// The pid file is written and removed by hub.Start/hub.Close, which hold
+	// an exclusive flock on it for this process's lifetime (internal/hub/
+	// instancelock.go). Writing it here too was not merely redundant: the
+	// deferred os.Remove would unlink the lock file while the lock was still
+	// held, letting a second hub create a fresh file, lock that new inode,
+	// and proceed to replace the socket — reintroducing the exact orphan the
+	// lock exists to prevent.
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
