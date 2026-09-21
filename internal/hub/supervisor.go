@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -202,7 +203,15 @@ func (t *ManagedTool) Stop() error {
 	}
 
 	if t.cmd != nil && t.cmd.Process != nil {
-		_ = t.cmd.Process.Signal(os.Interrupt)
+		pid := t.cmd.Process.Pid
+		pgid, err := syscall.Getpgid(pid)
+
+		if err == nil && pgid > 0 {
+			_ = syscall.Kill(-pgid, syscall.SIGTERM)
+		} else {
+			_ = t.cmd.Process.Signal(os.Interrupt)
+		}
+
 		done := make(chan struct{})
 		go func() {
 			_ = t.cmd.Wait()
@@ -212,7 +221,12 @@ func (t *ManagedTool) Stop() error {
 		select {
 		case <-done:
 		case <-time.After(2 * time.Second):
-			_ = t.cmd.Process.Kill()
+			if err == nil && pgid > 0 {
+				_ = syscall.Kill(-pgid, syscall.SIGKILL)
+			} else {
+				_ = t.cmd.Process.Kill()
+			}
+			<-done
 		}
 	}
 
@@ -246,6 +260,7 @@ func (t *ManagedTool) Start(ctx context.Context) error {
 func (t *ManagedTool) startLocked(ctx context.Context) error {
 	t.status = "STARTING"
 	cmd := exec.CommandContext(ctx, t.config.Command, t.config.Args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if t.config.WorkingDir != "" {
 		cmd.Dir = t.config.WorkingDir
 	}

@@ -451,3 +451,48 @@ func TestBridge_RunBridge(t *testing.T) {
 		t.Errorf("expected bridge to pipe response containing 'pong', got %q", stdout.String())
 	}
 }
+
+func TestHub_ProbeSocket_And_StaleSocketRecovery(t *testing.T) {
+	sockPath := shortSocketPath(t)
+
+	// 1. Non-existent socket -> ProbeSocket returns false
+	if ProbeSocket(sockPath) {
+		t.Fatalf("expected non-existent socket to be not alive")
+	}
+
+	// 2. Start listener -> ProbeSocket returns true
+	l, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("listen error: %v", err)
+	}
+	if !ProbeSocket(sockPath) {
+		t.Fatalf("expected listening socket to be probed alive")
+	}
+
+	// 3. Close listener without unlinking (simulates crash leaving stale socket file)
+	_ = l.Close()
+	if ProbeSocket(sockPath) {
+		t.Fatalf("expected stale closed socket to probe as dead")
+	}
+
+	// 4. Starting Hub on stale socket path should self-heal (unlink and succeed)
+	cfg := &Config{
+		SocketPath: sockPath,
+		Port:       0,
+	}
+	h := New(cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := h.Start(ctx); err != nil {
+		t.Fatalf("expected hub to self-heal stale socket and start, got %v", err)
+	}
+	defer h.Close()
+
+	// 5. Trying to start another Hub while first is running should fail with error
+	secondHub := New(cfg)
+	if err := secondHub.Start(ctx); err == nil {
+		t.Fatalf("expected second hub start to fail due to live socket, got nil")
+	}
+}
+

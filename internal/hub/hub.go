@@ -121,6 +121,25 @@ func (h *Hub) Arbiter() *StorageArbiter {
 	return h.arbiter
 }
 
+// ProbeSocket tests whether a unix domain socket is alive or stale.
+// Returns true if an active hub daemon is currently listening on path.
+// Returns false if the socket does not exist, is not a socket, or connection was refused (stale).
+func ProbeSocket(path string) bool {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	if fi.Mode()&os.ModeSocket == 0 {
+		return false
+	}
+	conn, err := net.DialTimeout("unix", path, 200*time.Millisecond)
+	if err != nil {
+		return false // Stale socket from dead process
+	}
+	_ = conn.Close()
+	return true // Live daemon actively responding
+}
+
 // Start launches the Unix domain socket listener, optional HTTP server, and idle reaper.
 func (h *Hub) Start(ctx context.Context) error {
 	h.startTime = time.Now()
@@ -131,7 +150,10 @@ func (h *Hub) Start(ctx context.Context) error {
 		return fmt.Errorf("hub: create run dir %s: %w", dir, err)
 	}
 
-	// Remove stale socket if present
+	// Socket self-healing: do not stomp live daemon; clean up stale socket
+	if ProbeSocket(h.config.SocketPath) {
+		return fmt.Errorf("hub: another omca hub daemon is already running and listening on %s", h.config.SocketPath)
+	}
 	_ = os.Remove(h.config.SocketPath)
 
 	l, err := net.Listen("unix", h.config.SocketPath)
