@@ -43,7 +43,7 @@
       "id": "pi-0.86.1-safe-host-qualification",
       "kind": "maintainer-observation",
       "path": "docs/evidence/pi-0.86.1-candidate-qualification.json",
-      "digest": "sha256:99907987051ddc4cb244826a7ba2f361da07068670f9e6f6e6a00995ec5cac86"
+      "digest": "sha256:270fefa71752c5b9439d991ed3e8aff29bb627c6f076aed854d472dd0c3f4746"
     }
   ],
   "capabilities": {

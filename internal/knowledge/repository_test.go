@@ -329,7 +329,8 @@ func TestDefault_LoadsRealCommittedPacks(t *testing.T) {
 	if !piInstalled.Qualified || piInstalled.PackID != "pi:cli:0.86.1" {
 		t.Fatalf("installed exact-version qualification missing: %+v", piInstalled)
 	}
-	for _, concept := range []string{"instruction", "skill", "mcp_server", "hook"} {
+	for _, concept := range []string{"instruction", "skill", "mcp_server", "hook",
+		"policy", "plugin"} {
 		if mode := piInstalled.CapabilityFor(concept).ReconcileMode; mode != ReconcileModeObserved {
 			t.Errorf("pi 0.86.1 %s mode = %q, want OBSERVED", concept, mode)
 		}
