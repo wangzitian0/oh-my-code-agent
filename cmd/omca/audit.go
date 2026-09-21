@@ -4,27 +4,37 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"strings"
 
 	"github.com/wangzitian0/oh-my-code-agent/internal/audit"
 )
 
 // runAudit implements `omca audit [flags] [path]`.
-// Executes the 3-category 4+3+2=9 Doomsday Swarm Audit.
+// Executes the 3-category audit: either Lean (1+1+1=3) or Doomsday (4+3+2=9).
 func runAudit(stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("audit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
+	defaultMode := "doomsday"
+	if env := os.Getenv("OMCA_AUDIT_MODE"); env != "" {
+		defaultMode = env
+	}
+
 	jsonOut := fs.Bool("json", false, "Output results as JSON")
-	mode := fs.String("mode", "doomsday", "Audit mode: doomsday (4+3+2=9), blindfold, or contract")
+	mode := fs.String("mode", defaultMode, "Audit mode: doomsday (4+3+2=9) or lean (1+1+1=3, token-saving)")
 	profile := fs.String("profile", "", "Alias for mode")
 
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
-	_ = *mode
+	selectedMode := strings.ToLower(strings.TrimSpace(*mode))
 	if *profile != "" {
-		_ = *profile
+		selectedMode = strings.ToLower(strings.TrimSpace(*profile))
+	}
+	if selectedMode == "" {
+		selectedMode = audit.ModeDoomsday
 	}
 
 	targetDir := "."
@@ -41,6 +51,14 @@ func runAudit(stdout, stderr io.Writer, args []string) int {
 
 	findings := make([]audit.ScoutFinding, 0)
 
+	// Determine scout role assignment based on mode
+	scoutTestHoles := audit.ScoutG3
+	scoutPPT := audit.ScoutM2
+	if selectedMode == audit.ModeLean {
+		scoutTestHoles = audit.ScoutG_Lean
+		scoutPPT = audit.ScoutM_Lean
+	}
+
 	// Automated baseline observations from the barrier:
 	hasTests := false
 	for _, f := range barrier.BlindfoldFiles {
@@ -52,7 +70,7 @@ func runAudit(stdout, stderr io.Writer, args []string) int {
 	if !hasTests && len(barrier.BlindfoldFiles) > 0 {
 		findings = append(findings, audit.ScoutFinding{
 			Category: audit.CatEngineeringBlind,
-			Scout:    audit.ScoutG3,
+			Scout:    scoutTestHoles,
 			Topic:    "No Automated Tests Found",
 			Severity: "HIGH",
 			Details:  "No test files detected in source tree under information barrier",
@@ -64,7 +82,7 @@ func runAudit(stdout, stderr io.Writer, args []string) int {
 	if len(barrier.DocFiles) > 0 && len(barrier.BlindfoldFiles) == 0 {
 		findings = append(findings, audit.ScoutFinding{
 			Category: audit.CatModuleContract,
-			Scout:    audit.ScoutM2,
+			Scout:    scoutPPT,
 			Topic:    "PPT Only Project (No Implementation)",
 			Severity: "CRITICAL",
 			Details:  "Documentation exists but zero compilable source code was found",
@@ -72,7 +90,7 @@ func runAudit(stdout, stderr io.Writer, args []string) int {
 		})
 	}
 
-	result := audit.SynthesizeDoomsdayAudit(targetDir, findings)
+	result := audit.SynthesizeAudit(targetDir, selectedMode, findings)
 
 	if *jsonOut {
 		jsonStr, err := audit.FormatJSON(result)

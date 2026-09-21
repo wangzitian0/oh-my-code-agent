@@ -122,6 +122,9 @@ func measureRealEnvironmentHost(baseDir, host string, realEnv hostcontext.Enviro
 	if !hd.Installed {
 		return RealEnvironmentHostResult{Host: host, Installed: false, Detail: fmt.Sprintf("%s is not installed on this machine", host)}, nil
 	}
+	if _, err := runtime.NativeHomeDirName(host); err != nil {
+		return RealEnvironmentHostResult{Host: host, Installed: false, Detail: fmt.Sprintf("%s is installed at observation tier only (runtime activation out of scope)", host)}, nil
+	}
 
 	hostRoot := filepath.Join(baseDir, host)
 

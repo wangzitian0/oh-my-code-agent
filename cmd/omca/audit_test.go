@@ -65,3 +65,42 @@ func TestRunAuditCatchesPPTProject(t *testing.T) {
 		t.Errorf("expected PPT blocker, got: %s", output)
 	}
 }
+
+func TestRunAuditLeanModeCLI(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "audit_cli_lean_*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	_ = os.WriteFile(filepath.Join(tmpDir, "main.go"), []byte("package main\nfunc main(){}"), 0644)
+	_ = os.WriteFile(filepath.Join(tmpDir, "main_test.go"), []byte("package main\nimport \"testing\"\nfunc TestMain(t *testing.T){}"), 0644)
+
+	var stdout, stderr bytes.Buffer
+	code := runAudit(&stdout, &stderr, []string{"--mode", "lean", tmpDir})
+	if code != 0 {
+		t.Errorf("expected exit code 0, got %d. stderr: %s", code, stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "3 马仔精简代码审计报告") {
+		t.Errorf("expected 3 马仔精简 header, got: %s", output)
+	}
+	if !strings.Contains(output, "1 + 1 + 1 = 3 位") {
+		t.Errorf("expected 3 scouts deployed text, got: %s", output)
+	}
+
+	// Test JSON in lean mode
+	stdout.Reset()
+	stderr.Reset()
+	code = runAudit(&stdout, &stderr, []string{"--mode", "lean", "--json", tmpDir})
+	if code != 0 {
+		t.Errorf("expected exit code 0 for json lean mode, got %d", code)
+	}
+	jsonOut := stdout.String()
+	if !strings.Contains(jsonOut, `"total_scouts_deployed": 3`) {
+		t.Errorf("expected json with total_scouts_deployed: 3, got: %s", jsonOut)
+	}
+	if !strings.Contains(jsonOut, `"mode": "lean"`) {
+		t.Errorf("expected json with mode: lean, got: %s", jsonOut)
+	}
+}
