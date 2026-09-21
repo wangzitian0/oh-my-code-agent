@@ -619,3 +619,50 @@ func TestCheckObservationTierHost(t *testing.T) {
 		t.Errorf("not-on-PATH = %s, want WARN (absent is not broken); %s", missing.Status, missing.Detail)
 	}
 }
+
+// TestDirenvAllowedValue_ReadsWholeToken guards against substring matching
+// on the state value.
+//
+// strings.Contains(text, "Found RC allowed 1") also matches "allowed 12",
+// which would silently classify a state this code has never seen as
+// not-approved. An unknown value has to fall through so the user is shown
+// the raw output instead of a confident wrong answer.
+func TestDirenvAllowedValue_ReadsWholeToken(t *testing.T) {
+	for _, tc := range []struct{ text, want string }{
+		{"Found RC allowed 0\n", "0"},
+		{"Found RC allowed 1\n", "1"},
+		{"Found RC allowed 2\n", "2"},
+		{"Found RC allowed true\n", "true"},
+		{"Found RC allowed 12\n", "12"},
+		{"Loaded RC allowed 0\nFound RC allowed 1\n", "1"},
+		{"no such line\n", ""},
+	} {
+		if got := direnvAllowedValue(tc.text); got != tc.want {
+			t.Errorf("direnvAllowedValue(%q) = %q, want %q", tc.text, got, tc.want)
+		}
+	}
+}
+
+// TestRunDoctor_DirenvApproval_UnknownStateIsNotGuessed is the behavioral
+// half: a multi-digit state must reach the unknown branch, not be read as
+// "1" by a substring match.
+func TestRunDoctor_DirenvApproval_UnknownStateIsNotGuessed(t *testing.T) {
+	env := setupManagedTestEnv(t, false, false)
+	if err := os.WriteFile(filepath.Join(env.WorktreeRoot, ".envrc"), []byte(`eval "$(omca env --shell bash)"`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\necho \"Found RC allowed 12\"\n"
+	if err := os.WriteFile(filepath.Join(env.BinDir, "direnv"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	_ = runDoctor(&stdout, &stderr)
+	out := stdout.String()
+	if !strings.Contains(out, "could not determine direnv approval state") {
+		t.Errorf("an unrecognized state was classified instead of reported as unknown:\n%s", out)
+	}
+	if strings.Contains(out, "is NOT approved") {
+		t.Errorf("\"allowed 12\" was substring-matched as \"allowed 1\" and reported as not approved:\n%s", out)
+	}
+}
