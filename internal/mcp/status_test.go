@@ -297,6 +297,12 @@ func TestComputeStatus_Tier2_StatesResidualLoad_NeverClaimsIsolation(t *testing.
 	if !strings.Contains(claude.ContextCost.Confidence, "tier 2") {
 		t.Errorf("claude-code ContextCost.Confidence = %q, want it to name the tier so a consumer cannot read the zero as a measured saving", claude.ContextCost.Confidence)
 	}
+	// Method is not `omitempty` and its doc comment promises a reader never
+	// has to take the number on faith, so a blank one ships a JSON field
+	// that says nothing about where the zero came from.
+	if claude.ContextCost.Method == "" {
+		t.Error("claude-code ContextCost.Method is empty; every estimate must explain how it was computed, including a zero one")
+	}
 }
 
 // TestComputeStatus_Tier1_ReportsIsolated is the positive control for

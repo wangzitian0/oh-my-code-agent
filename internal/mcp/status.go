@@ -235,8 +235,15 @@ func hostStatus(worktreeStateDir, host string) HostStatus {
 		// without saying that is exactly the "claiming a clean runtime"
 		// docs/architecture/runtime.md §7.2 forbids, so the residual is
 		// stated in Detail and UserGlobalIsolated is false.
+		// Method is populated for the same reason the zero is explained at
+		// all: its doc comment promises a reader "never has to take the
+		// number on faith," and it is not `omitempty`, so leaving it blank
+		// ships a JSON field that silently says nothing. A zero whose
+		// method is absent is exactly the un-auditable report this change
+		// exists to stop producing.
 		cost := ContextCostEstimate{
 			EstimatedTokensExcluded: 0,
+			Method:                  "not computed: a tier-2 host excludes no native user-global source, so there is no excluded-item count to multiply by a per-item average (the tier-1 method). The zero is the true exclusion count, not an unmeasured estimate.",
 			Confidence:              "n/a (tier 2: no user-global exclusion; native credentials, Skills and MCP registrations are retained for Keychain/OAuth integrity)",
 		}
 		return HostStatus{
