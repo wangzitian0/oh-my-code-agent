@@ -335,9 +335,10 @@ Until a first-party adapter exists, host-specific behavior is hardcoded as
 `switch host` branches spread across the core. This inventory exists so that
 the gap is a known, bounded list rather than something the next reader has to
 rediscover by grepping, and so that a migration to the adapter contract can be
-scoped against a real count. `internal/plugin/importboundary_test.go` keeps it
-honest: adding a host branch in a new file fails that test until this table is
-updated.
+scoped against a real count. `TestHostSwitchInventory`
+(`internal/plugin/hostswitch_test.go`) keeps it honest: adding a host branch in
+a new file, or removing the last one from a listed file, fails that test until
+both its pinned list and this table are updated.
 
 | Package | File | What is host-specific |
 |---|---|---|

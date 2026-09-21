@@ -70,14 +70,23 @@ func TestHostSwitchInventory(t *testing.T) {
 
 	listed := runGoList(t, "-f", `{{$d := .Dir}}{{range .GoFiles}}{{$d}}/{{.}}{{"\n"}}{{end}}`, modulePrefix+"...")
 
+	// Split on newlines, not whitespace: the template above emits one path
+	// per line precisely so a module directory containing a space (common
+	// enough on developer machines) does not get torn into fragments that
+	// fail this test for a reason no source change can fix.
 	found := map[string]bool{}
-	for _, path := range strings.Fields(string(listed)) {
+	for _, line := range strings.Split(string(listed), "\n") {
+		path := strings.TrimSpace(line)
+		if path == "" {
+			continue
+		}
 		content, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
 		}
+		text := string(content)
 		for _, marker := range hostSwitchMarkers {
-			if strings.Contains(string(content), marker) {
+			if strings.Contains(text, marker) {
 				rel, err := filepath.Rel(root, path)
 				if err != nil {
 					t.Fatalf("relativize %s: %v", path, err)
