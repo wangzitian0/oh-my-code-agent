@@ -3,9 +3,9 @@
 `omca` is a local-first control plane for coding-agent runtimes.
 
 It observes native host configuration without trusting it, models the parts
-that can be proven through a vendor-neutral ontology, and reconciles an
-explicit desired state into a per-worktree runtime for each directory or Git
-worktree.
+that can be proven through a vendor-neutral configuration schema (skills, MCP servers,
+instructions, execution policies), and reconciles an explicit desired state into a
+per-worktree runtime for each directory or Git worktree.
 
 How much of the native user-global scope that runtime actually excludes
 depends on the host's tier ([ADR 0006](docs/adr/0006-host-tiers.md)). Codex is
@@ -32,6 +32,12 @@ for the inventory a migration has to move.
 One desired state can give parallel hosts in the same worktree deliberately
 different loadouts.
 
+> **Engineering Terminology Note**: In OMCA, "Ontology" refers strictly to the
+> vendor-neutral configuration schema and taxonomic entity specification (`internal/schema`).
+> "Planes" refers to concrete reconciliation state views (`native`, `observed`, `desired`,
+> `effective`, `current`, `pending`) comparing runtime state against desired configuration,
+> directly analogous to Kubernetes / IaC control plane architecture.
+
 ## Documentation
 
 - [Project charter](init.md): goals, approved decisions, invariants, and MVP.
@@ -40,10 +46,10 @@ different loadouts.
 - [Architecture](docs/architecture/README.md): components, data model, interfaces, and storage.
 - [Runtime architecture](docs/architecture/runtime.md): bootstrap isolation, direnv, and immutable generations.
 - [Trusted reporting](docs/architecture/reporting.md): evidence, drift, MCP tools, and debugging.
-- [Ontology](docs/ontology/README.md): canonical concepts and host mappings.
+- [Configuration Schemas (Ontology)](docs/ontology/README.md): canonical concepts and host mappings.
 - [Knowledge lifecycle](docs/knowledge/README.md): versioned third-party facts and upgrades.
 - [Architecture decision records](docs/adr/): frozen isolation, ownership, credential, knowledge update, and plugin distribution decisions.
-- [Roadmap](docs/project/roadmap.md): gated implementation plan.
+- [Roadmap](docs/project/roadmap.md): gated implementation plan (includes [OMCA-030] schema consolidation).
 
 ## Install from a reviewed checkout
 
