@@ -1,6 +1,5 @@
-// Package schema defines canonical entity schemas and configuration models for coding agents.
-// It provides the standard software engineering vocabulary (Skill, Tool, Instruction, Policy)
-// and bridges internal/ontology to standard schema terminology.
+// Package schema exposes canonical entity schema definitions, merge operators,
+// and registry lookups, bridging internal/ontology to standard schema terminology.
 package schema
 
 import "github.com/wangzitian0/oh-my-code-agent/internal/ontology"
@@ -30,13 +29,17 @@ const (
 	OpUnspecified      = ontology.OpUnspecified
 )
 
-var (
-	// Concept looks up a canonical entity schema by ID (e.g. "skill", "mcp_server").
-	Concept = ontology.Concept
+// Concept looks up a canonical entity schema by ID (e.g. "skill", "mcp_server").
+func Concept(id string) (ConceptSchema, bool) {
+	return ontology.Concept(id)
+}
 
-	// LoadRegistry loads concept schemas from an explicit directory.
-	LoadRegistry = ontology.LoadRegistry
+// LoadRegistry loads concept schemas from an explicit directory.
+func LoadRegistry(dir string) (*Registry, error) {
+	return ontology.LoadRegistry(dir)
+}
 
-	// ValidateMergeOperator checks if a merge operator is valid.
-	ValidateMergeOperator = ontology.ValidateMergeOperator
-)
+// ValidateMergeOperator checks if a merge operator is valid.
+func ValidateMergeOperator(o MergeOperator) error {
+	return ontology.ValidateMergeOperator(o)
+}
