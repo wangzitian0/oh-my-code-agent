@@ -120,11 +120,17 @@ func TestRunDoctor_PathBypass_ShimFirstOnPath_ReportsManaged(t *testing.T) {
 	// prepended to PATH.
 	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+env.BinDir)
 
+	// This test's subject is PATH resolution, so it asserts that finding
+	// rather than the command's overall exit code.
+	//
+	// checkShimLaunches independently, and correctly, FAILs in this fixture:
+	// installShims copies os.Executable(), which under `go test` is the test
+	// binary, and a test binary invoked as "codex" does not dispatch through
+	// shim.IsShimInvocation. So the shim here genuinely cannot launch a
+	// host, and a check that runs the shim is supposed to say so. Asserting
+	// exit 0 would mean asserting that doctor overlooks it.
 	var stdout, stderr bytes.Buffer
-	code := runDoctor(&stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("runDoctor = %d, want 0; stdout:\n%s", code, stdout.String())
-	}
+	_ = runDoctor(&stdout, &stderr)
 	if !strings.Contains(stdout.String(), "path-bypass:codex: codex resolves to the OMCA shim") {
 		t.Errorf("stdout does not report codex as resolving to the shim:\n%s", stdout.String())
 	}
@@ -328,10 +334,11 @@ func TestRunDoctor_PathBypass_ShimDirBehindSymlink_StillReportsManaged(t *testin
 	t.Setenv("OMCA_SHIM_DIR", realShimDir)
 
 	var stdout, stderr bytes.Buffer
-	code := runDoctor(&stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("runDoctor = %d, want 0 (shim reached via a different symlink spelling must still count as managed); stdout:\n%s", code, stdout.String())
-	}
+	// As in TestRunDoctor_PathBypass_ShimFirstOnPath_ReportsManaged: the
+	// subject here is the symlink-spelling comparison, so assert that
+	// finding, not the overall exit code. checkShimLaunches correctly FAILs
+	// in this fixture because the installed "shim" is the test binary.
+	_ = runDoctor(&stdout, &stderr)
 	if !strings.Contains(stdout.String(), "path-bypass:codex: codex resolves to the OMCA shim") {
 		t.Errorf("stdout does not report codex as resolving to the shim despite the symlink hop:\n%s", stdout.String())
 	}
