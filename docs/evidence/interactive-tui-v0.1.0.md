@@ -126,6 +126,19 @@ Candidate review:
 - Unknowns: both hosts' initial/restart TUI and model canaries remain unrun;
   Claude 2.1.272 has no safe Skill inventory. Overall completion remains false.
 
+## pi 0.86.1 candidate — 2026-09-21
+
+pi 0.86.1 (darwin-arm64) is covered by the `pi:cli:0.86.1` observation pack.
+The 0.85.1 → 0.86.1 diff touches no concept on omca's observation surface
+(`docs/skills.md` is byte-identical; 0.86.x changes are extension-SDK shapes,
+provider cache warming, `/bug`, `PI_RADIUS_GATEWAY`), so capability facts and
+knownUnknowns carry over verbatim from `pi:cli:0.85`. Read-only probes
+(`pi --version`, `pi --help`) left every native `*.json`/`*.jsonl` byte
+unchanged ([artifact](pi-0.86.1-candidate-qualification.json), digest pinned
+in the pack). The interactive TUI stays unattempted (observation tier; human
+gates open), and `PI_CODING_AGENT_DIR` relocation remains a declared
+knownUnknown until a behavioral proof lands.
+
 ## Human completion procedure
 
 The remaining E4 proof is:

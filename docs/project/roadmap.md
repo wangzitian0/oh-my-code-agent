@@ -261,6 +261,11 @@ pass the same safe inventory checks with unchanged native snapshots. The new
 exact 0.154.0 pack stays `OBSERVED`; adjacent untested releases stay unqualified.
 The human gates remain open. See the [candidate evidence](../evidence/interactive-tui-v0.1.0.md#codex-01540-candidate--2026-09-15).
 
+pi 0.86.1 (2026-09-21): the installed pi release keeps its observation-tier
+pack (`pi:cli:0.86.1`, facts carried verbatim from `pi:cli:0.85` — discovery
+docs unchanged 0.85.1→0.86.1); adjacent untested releases stay unqualified and
+the runtime tier stays M6.
+
 Launch persistence correction (2026-09-15): both `omca env` and `omca run`
 previously overwrote an explicitly activated runtime with bootstrap. Entry-point
 regressions reproduce both failures using fake hosts, then prove selection and

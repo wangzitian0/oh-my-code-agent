@@ -271,3 +271,15 @@ by [safe host qualification](../evidence/interactive-tui-v0.1.0.md#codex-01540-c
 Its manifest records official-source and observation-artifact digests. All
 reconciliation modes remain `OBSERVED`; neither adjacent releases nor human
 TUI/model behavior are qualified by the inventory check.
+
+pi CLI 0.86.1 on darwin-arm64 has an exact-version observation pack
+(`pi:cli:0.86.1`) whose capability facts carry over verbatim from
+`pi:cli:0.85` because the skill-discovery documentation is byte-identical
+between the 0.85.1 and 0.86.1 releases (2026-09-21). The qualification probe
+(`pi --version`, `pi --help`) left every native `*.json`/`*.jsonl` byte
+unchanged; the artifact digest is pinned in the pack's
+maintainer-observation evidence. All reconciliation modes remain `OBSERVED`;
+adjacent untested releases stay unqualified; the interactive TUI and
+PI_CODING_AGENT_DIR relocation remain behaviorally unconfirmed
+(knownUnknowns). See
+[evidence](../evidence/pi-0.86.1-candidate-qualification.json).
