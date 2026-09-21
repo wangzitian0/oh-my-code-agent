@@ -75,7 +75,7 @@ func ValidateAllowlist(entries []AllowlistedShare) error {
 			return fmt.Errorf("auth: ValidateAllowlist[%d] (host=%s category=%s): %w", i, e.Host, e.Category, err)
 		}
 		if !e.Class.SharesAcrossGenerations() {
-			return fmt.Errorf("auth: ValidateAllowlist[%d] (host=%s category=%s): class %q is not a sharing class (must be worktree-shared or identity-shared)", i, e.Host, e.Category, e.Class)
+			return fmt.Errorf("auth: ValidateAllowlist[%d] (host=%s category=%s): class %q is not a sharing class (must be worktree-shared, workspace-shared or identity-shared)", i, e.Host, e.Category, e.Class)
 		}
 	}
 	return nil

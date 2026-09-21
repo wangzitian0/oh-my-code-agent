@@ -114,3 +114,110 @@ func TestClassificationTable_KnownButUnimplementedHost(t *testing.T) {
 		t.Errorf("ClassificationTable(cursor) = %d items, want 0", len(items))
 	}
 }
+
+// TestStateItem_Matches_VersionedFamilies is the regression test for the way
+// this table rotted by construction.
+//
+// The sqlite row listed "state_5.sqlite" by exact name. The same host home
+// also held goals_1.sqlite, logs_2.sqlite and memories_1.sqlite plus their
+// -wal/-shm sidecars, and every one of them fell out of classification
+// silently -- 6.4MB of it on the machine this was measured against. A table
+// keyed on a version number expires on the host's next release.
+func TestStateItem_Matches_VersionedFamilies(t *testing.T) {
+	sqlite := StateItem{NativePath: "*.sqlite"}
+	for _, name := range []string{"state_5.sqlite", "logs_2.sqlite", "goals_1.sqlite", "memories_1.sqlite"} {
+		if !sqlite.Matches(name) {
+			t.Errorf("*.sqlite does not match %q; a versioned family must match by shape, not by the one version that existed when the row was written", name)
+		}
+	}
+	// A pattern must not widen into neighbours that merely share a suffix
+	// or prefix.
+	for _, name := range []string{".sqlite", "state_5.sqlite-wal", "notes.sqlite.bak"} {
+		if sqlite.Matches(name) {
+			t.Errorf("*.sqlite matched %q; the wildcard stands for the version segment only, not an open substring test", name)
+		}
+	}
+
+	wal := StateItem{NativePath: "*.sqlite-wal"}
+	if !wal.Matches("logs_2.sqlite-wal") || wal.Matches("logs_2.sqlite") {
+		t.Error("the -wal sidecar pattern must match sidecars and only sidecars")
+	}
+}
+
+// TestStateItem_Matches_DirectoriesAndExactNames keeps the two existing
+// shapes working, so adding patterns did not change what was already right.
+func TestStateItem_Matches_DirectoriesAndExactNames(t *testing.T) {
+	dir := StateItem{NativePath: "cache/"}
+	if !dir.Matches("cache") {
+		t.Error(`a trailing "/" means "this directory" and must still match the bare name`)
+	}
+	if dir.Matches("cache2") || dir.Matches("my-cache") {
+		t.Error("a directory row must stay an exact match, not a prefix or substring one")
+	}
+
+	exact := StateItem{NativePath: "auth.json"}
+	if !exact.Matches("auth.json") || exact.Matches("auth.json.bak") {
+		t.Error("an exact row must match exactly; auth.json.bak is not auth.json")
+	}
+}
+
+// TestClassificationTable_ClassifiesTheLargestObservedEntries pins the rows
+// added after measuring a real installation.
+//
+// Before them, 103.7MB of 117.6MB held state had no row at all -- 88%. The
+// point is not the specific classes so much as that the table stops being
+// silent about the things that actually take space.
+func TestClassificationTable_ClassifiesTheLargestObservedEntries(t *testing.T) {
+	for _, tc := range []struct{ host, entry string }{
+		{"codex", "tmp"}, {"codex", ".tmp"}, {"codex", "plugins"},
+		{"codex", "models_cache.json"}, {"codex", "shell_snapshots"},
+		{"codex", "skills"}, {"codex", "history.jsonl"}, {"codex", "version.json"},
+		{"codex", "logs_2.sqlite"}, {"codex", "logs_2.sqlite-wal"},
+		{"claude-code", "plugins"}, {"claude-code", "backups"},
+	} {
+		items, err := ClassificationTable(tc.host)
+		if err != nil {
+			t.Fatalf("ClassificationTable(%s): %v", tc.host, err)
+		}
+		var matched bool
+		for _, it := range items {
+			if it.Matches(tc.entry) {
+				matched = true
+				if err := domain.ValidateMutableStateClass(it.Class); err != nil {
+					t.Errorf("%s/%s carries an invalid class: %v", tc.host, tc.entry, err)
+				}
+				if it.Reason == "" {
+					t.Errorf("%s/%s has no Reason; a classification without a stated basis is an assertion", tc.host, tc.entry)
+				}
+				break
+			}
+		}
+		if !matched {
+			t.Errorf("%s/%s has no row in the classification table; it was observed on a real installation and would be reported unclassified", tc.host, tc.entry)
+		}
+	}
+}
+
+// TestClassificationTable_ShellSnapshotsAreProhibited is a security
+// assertion, not a tidiness one.
+//
+// A shell snapshot is a verbatim dump of an environment, so it holds
+// whatever secrets that shell carried. One on the maintainer's machine was
+// found containing a 1Password service-account token in plaintext, and it
+// was world-readable. That is the same hazard auth.json carries, so it takes
+// the same class.
+func TestClassificationTable_ShellSnapshotsAreProhibited(t *testing.T) {
+	items, err := ClassificationTable("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range items {
+		if it.Matches("shell_snapshots") {
+			if it.Class != domain.MutableStateProhibitedImport {
+				t.Errorf("shell_snapshots class = %q, want %q: these files carry whatever secrets the captured shell held", it.Class, domain.MutableStateProhibitedImport)
+			}
+			return
+		}
+	}
+	t.Fatal("shell_snapshots has no row; environment dumps must be classified, not left to default")
+}

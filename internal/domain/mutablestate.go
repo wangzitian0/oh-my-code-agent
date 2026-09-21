@@ -2,16 +2,19 @@ package domain
 
 import "fmt"
 
-// MutableStateClass is one of the five sharing classes
+// MutableStateClass is one of the six visibility classes
 // docs/architecture/runtime.md §9 ("Mutable State") defines for host-written
 // state that is not itself a compiled config artifact: sessions and archived
 // sessions, logs and crash reports, SQLite databases, model/provider caches,
 // trust decisions, memory, and installation metadata. Unlike Ownership
 // (ADR 0002, adjacent but distinct: ownership answers "who is allowed to
 // write this artifact", MutableStateClass answers "which isolated homes may
-// this piece of host-written runtime state be visible from"), this is a new,
-// small enum rather than a reuse of Ownership: runtime.md §9 spells out five
-// values with no 1:1 correspondence to Ownership's five ("host-global
+// this piece of host-written runtime state be visible from"). Three of the
+// six permit sharing (SharesAcrossGenerations); the other three each keep
+// state out of every other generation's home for a different reason. This is
+// a new,
+// small enum rather than a reuse of Ownership: runtime.md §9 spells these
+// out with no 1:1 correspondence to Ownership's own five ("host-global
 // external" is not the same concept as OwnershipExternal -- the former
 // describes state that stays in the real native home and is never migrated
 // into any isolated home at all, the latter describes an artifact/field
@@ -34,6 +37,32 @@ const (
 	// worktrees -- e.g. a recreatable, non-sensitive cache narrow enough to
 	// be worth avoiding a re-fetch for.
 	MutableStateWorktreeShared MutableStateClass = "worktree-shared"
+	// MutableStateWorkspaceShared: state shared across every worktree under
+	// one declared set of workspace roots, but not across different sets and
+	// not across identities.
+	//
+	// This is the class the model was missing, and its absence has a
+	// measurable cost. A host's own model/provider cache is not per-checkout
+	// by nature -- the same download serves every worktree the same person
+	// opens -- but with only `worktree-shared` available it can be classified
+	// no wider than one checkout. On a machine with several worktrees of the
+	// same repository that means several full copies of the same recreatable
+	// bytes, which is how one codex native home reached 126 MB of cache and
+	// scratch state that nothing else on the machine could reuse.
+	//
+	// It is deliberately narrower than MutableStateIdentityShared: identity
+	// scope answers "the same account, everywhere", which is the right home
+	// for login state and the wrong one for a cache that should not follow a
+	// person into an unrelated employer's checkouts. The concrete grouping
+	// this class shares across is a declared root set -- the shape
+	// internal/hub's `profiles.<name>.workspace_roots` already uses to
+	// separate a personal domain from a corporate one.
+	//
+	// In docs/ontology/README.md §2's vocabulary this sits between the
+	// `worktree` and `user` scopes, spanning the `workspace` scope's roots as
+	// grouped by a profile. The Scope Model is a graph, not a ladder, so that
+	// is a position in it rather than a rung.
+	MutableStateWorkspaceShared MutableStateClass = "workspace-shared"
 	// MutableStateIdentityShared: state shared across every generation for
 	// the same identity/account regardless of worktree. ADR 0003 decision
 	// item 4 fixes this for Claude Code's account/OAuth state as a
@@ -69,12 +98,13 @@ const (
 var mutableStateClasses = map[MutableStateClass]bool{
 	MutableStateGenerationLocal:    true,
 	MutableStateWorktreeShared:     true,
+	MutableStateWorkspaceShared:    true,
 	MutableStateIdentityShared:     true,
 	MutableStateHostGlobalExternal: true,
 	MutableStateProhibitedImport:   true,
 }
 
-// Valid reports whether m is one of the five defined mutable-state classes.
+// Valid reports whether m is one of the defined mutable-state classes.
 func (m MutableStateClass) Valid() bool {
 	return mutableStateClasses[m]
 }
@@ -89,8 +119,8 @@ func ValidateMutableStateClass(m MutableStateClass) error {
 }
 
 // SharesAcrossGenerations reports whether m permits a piece of state to be
-// visible from more than one generation's own isolated home (worktree-shared
-// or identity-shared). generation-local, host-global external, and
+// visible from more than one generation's own isolated home (worktree-,
+// workspace- or identity-shared). generation-local, host-global external, and
 // prohibited import all keep state out of every OTHER generation's isolated
 // home by definition -- host-global external because it never enters
 // isolation at all, prohibited import because entering isolation is
@@ -98,5 +128,7 @@ func ValidateMutableStateClass(m MutableStateClass) error {
 // Callers (e.g. internal/auth's symlink-allowlist planner) use this to
 // decide whether a class is even eligible to appear in a sharing allowlist.
 func (m MutableStateClass) SharesAcrossGenerations() bool {
-	return m == MutableStateWorktreeShared || m == MutableStateIdentityShared
+	return m == MutableStateWorktreeShared ||
+		m == MutableStateWorkspaceShared ||
+		m == MutableStateIdentityShared
 }

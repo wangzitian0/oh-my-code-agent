@@ -477,10 +477,28 @@ Each state class must be classified as:
 ```text
 generation-local
 worktree-shared
+workspace-shared
 identity-shared
 host-global external
 prohibited import
 ```
+
+`workspace-shared` is shared across every worktree under one declared set of
+workspace roots. It exists because the gap between "one checkout" and "the
+same account everywhere" was where a host's own provider cache belonged and
+had nowhere to go: classified no wider than one worktree, the same
+recreatable download is stored once per checkout, which is how one codex
+native home reached 126 MB that no other checkout could reuse. Identity scope
+would be the wrong widening — a cache should not follow a person into an
+unrelated employer's checkouts, whereas login state legitimately does.
+
+A class only shares as far as some runtime is there to serve it. Each sharing
+class pairs with exactly one `internal/domain.RuntimeScope`
+(`worktree-shared` ↔ `worktree`, `workspace-shared` ↔ `workspace`,
+`identity-shared` ↔ `user`), asserted by
+`TestRuntimeScope_PairsWithASharingClass`. Classifying state more widely than
+any existing runtime does not make it shared; it makes the classification a
+claim nothing backs.
 
 Codex's own `CODEX_HOME`-resident state (sessions, SQLite databases,
 `auth.json`) is classified `worktree-shared` (§7.1): scoped under
@@ -490,6 +508,31 @@ copied into — or shared across — a different worktree's own state.
 
 Sharing state through symlinks is allowed only for an explicit allowlist backed
 by fixtures. A broad symlink to the native host home defeats isolation.
+
+### 9.1 Measuring what is actually held
+
+`omca state [--json]` reports held state by worktree and by class. It exists
+because a classification nothing measures is a claim nothing checks: the
+table below can say a class shares while the bytes sit in per-worktree
+copies, and nothing else in the system notices.
+
+It is read-only by construction — it stats and walks directories and never
+opens a file, so no session content, credential or log line can reach its
+output. It is its own entry rather than part of `omca report` because it is
+the one question that is not per-worktree.
+
+Two things it reports that nothing else does:
+
+- **Unclassified state**, never defaulted into a class. On the installation
+  this was first run against, 88% of held state had no row in the table at
+  all; defaulting those entries would have made the table look complete and
+  hidden the gap.
+- **Sharing in name only** — a class that promises sharing while N worktrees
+  each keep their own copy. A symlinked share counts as zero bytes, so
+  applying the allowlist is visible here rather than claimed.
+
+`internal/auth`'s table is the single source it classifies against, so a gap
+in the table shows up as a number rather than as silence.
 
 ## 10. Repository Sources
 
