@@ -3,6 +3,7 @@ package shim
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -210,5 +211,147 @@ func TestResolveASDFShimTarget_ResolvedTargetMissing_Errors(t *testing.T) {
 func TestResolveASDFShimTarget_UnreadableShim_Errors(t *testing.T) {
 	if _, err := ResolveASDFShimTarget(filepath.Join(t.TempDir(), ".asdf", "shims", "does-not-exist")); err == nil {
 		t.Fatal("ResolveASDFShimTarget on a nonexistent shim path: want error, got nil")
+	}
+}
+
+// writeShebangScript writes an executable "#!/usr/bin/env <interp>" script,
+// the shape an npm-installed Node CLI has.
+func writeShebangScript(t *testing.T, dir, name, interp string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("writeShebangScript: MkdirAll: %v", err)
+	}
+	p := filepath.Join(dir, name)
+	if err := os.WriteFile(p, []byte("#!/usr/bin/env "+interp+"\n"), 0o755); err != nil {
+		t.Fatalf("writeShebangScript: %v", err)
+	}
+	return p
+}
+
+// TestResolveShebangInterpreter_AmbiguousASDFInterpreter_UsesSiblingInstall
+// is the machine state that silently broke `codex` in every managed shell.
+//
+// Two installed node versions means their shared asdf `node` shim names both
+// plugin versions, and ResolveASDFShimTarget correctly refuses to choose --
+// picking one would mean replicating asdf's .tool-versions precedence. The
+// old code then kept the unresolved shim and exec'd it anyway, which under
+// the virtualized HOME isolated mode always uses dies as a bare exit 126
+// with no output at all.
+//
+// The ambiguity is avoidable rather than merely reportable: the host binary
+// was resolved to <dataDir>/installs/nodejs/20.19.0/bin/codex, so the node
+// that belongs to it is the one beside it. No guess, no .tool-versions.
+func TestResolveShebangInterpreter_AmbiguousASDFInterpreter_UsesSiblingInstall(t *testing.T) {
+	asdfDataDir := filepath.Join(t.TempDir(), ".asdf")
+	// Both versions installed; the shared node shim therefore names both.
+	writeASDFShim(t, asdfDataDir, "node", [][2]string{{"nodejs", "22.19.0"}, {"nodejs", "20.19.0"}})
+	writeASDFInstalledBinary(t, asdfDataDir, "nodejs", "22.19.0", "node")
+	wantNode := writeASDFInstalledBinary(t, asdfDataDir, "nodejs", "20.19.0", "node")
+
+	// The host binary as asdf installed it: a Node entry point under 20.19.0.
+	hostBin := writeShebangScript(t, filepath.Join(asdfDataDir, "installs", "nodejs", "20.19.0", "bin"), "codex", "node")
+
+	got, err := ResolveShebangInterpreter(hostBin, filepath.Join(asdfDataDir, "shims"), "", true)
+	if err != nil {
+		t.Fatalf("ResolveShebangInterpreter: %v", err)
+	}
+	if got != wantNode {
+		t.Errorf("ResolveShebangInterpreter = %q, want the node beside the host binary (%q); anything else either guesses a version or falls back to the asdf shim that dies as a silent exit 126", got, wantNode)
+	}
+}
+
+// TestResolveShebangInterpreter_UnresolvableASDFInterpreter_FailsClosed
+// covers the case with no sibling to fall back on: the error must surface
+// here, where it can still be explained, rather than being exec'd into a
+// bare 126 that nothing downstream can attribute.
+func TestResolveShebangInterpreter_UnresolvableASDFInterpreter_FailsClosed(t *testing.T) {
+	asdfDataDir := filepath.Join(t.TempDir(), ".asdf")
+	writeASDFShim(t, asdfDataDir, "node", [][2]string{{"nodejs", "22.19.0"}, {"nodejs", "20.19.0"}})
+	writeASDFInstalledBinary(t, asdfDataDir, "nodejs", "22.19.0", "node")
+	writeASDFInstalledBinary(t, asdfDataDir, "nodejs", "20.19.0", "node")
+
+	// Host binary lives outside any asdf install, so there is no sibling node.
+	hostBin := writeShebangScript(t, t.TempDir(), "codex", "node")
+
+	_, err := ResolveShebangInterpreter(hostBin, filepath.Join(asdfDataDir, "shims"), "", true)
+	if err == nil {
+		t.Fatal("want an error for an interpreter that resolves to an unresolvable asdf shim; returning it silently makes the caller exec a path known to die as exit 126 with no output")
+	}
+	if !strings.Contains(err.Error(), "126") {
+		t.Errorf("the error should name the failure mode the caller would otherwise hit: %v", err)
+	}
+}
+
+// TestResolveShebangInterpreter_SoftCases must stay soft: neither is a
+// reason to fail a launch that would otherwise work.
+func TestResolveShebangInterpreter_SoftCases(t *testing.T) {
+	plain := writeFakeExecutable(t, t.TempDir(), "codex") // not a shebang script
+	got, err := ResolveShebangInterpreter(plain, t.TempDir(), "", true)
+	if err != nil || got != "" {
+		t.Errorf("a non-shebang binary = (%q, %v), want (\"\", nil)", got, err)
+	}
+
+	orphan := writeShebangScript(t, t.TempDir(), "codex", "no-such-interpreter-anywhere")
+	got, err = ResolveShebangInterpreter(orphan, t.TempDir(), "", true)
+	if err != nil || got != "" {
+		t.Errorf("an interpreter absent from PATH = (%q, %v), want (\"\", nil) so the caller falls back to exec'ing the script directly", got, err)
+	}
+}
+
+// TestResolveShebangInterpreter_NotVirtualizingHome_NeverFails is ADR 0006's
+// consequence for this resolver.
+//
+// The asdf problem exists only because HOME stops resolving. A tier-2 host
+// (CanVirtualizeHome false) and `--mode native` both leave HOME real, so the
+// OS reaches the same interpreter it would unmanaged. Failing closed there
+// would break a launch that works -- a Copilot review finding on the PR that
+// introduced the fail-closed path.
+func TestResolveShebangInterpreter_NotVirtualizingHome_NeverFails(t *testing.T) {
+	asdfDataDir := filepath.Join(t.TempDir(), ".asdf")
+	writeASDFShim(t, asdfDataDir, "node", [][2]string{{"nodejs", "22.19.0"}, {"nodejs", "20.19.0"}})
+	writeASDFInstalledBinary(t, asdfDataDir, "nodejs", "22.19.0", "node")
+	writeASDFInstalledBinary(t, asdfDataDir, "nodejs", "20.19.0", "node")
+	hostBin := writeShebangScript(t, t.TempDir(), "codex", "node")
+
+	// Same input that fails closed when virtualizing.
+	if _, err := ResolveShebangInterpreter(hostBin, filepath.Join(asdfDataDir, "shims"), "", true); err == nil {
+		t.Fatal("precondition: this input must fail when HOME is virtualized, or the contrast below proves nothing")
+	}
+	got, err := ResolveShebangInterpreter(hostBin, filepath.Join(asdfDataDir, "shims"), "", false)
+	if err != nil {
+		t.Errorf("virtualizingHome=false returned an error (%v); with HOME left real the OS resolves the interpreter itself, so there is nothing to fail on", err)
+	}
+	if got != "" {
+		t.Errorf("virtualizingHome=false = %q, want \"\" so the caller lets the OS do its normal shebang lookup", got)
+	}
+}
+
+// TestResolveShebangInterpreter_SiblingOnlyInsideASDFInstall keeps the
+// sibling preference scoped to the layout where it means something.
+//
+// Inside <dataDir>/installs/<plugin>/<version>/bin, a file named like the
+// interpreter IS the interpreter that package was installed against. Outside
+// it, a same-named neighbour carries no such meaning, and preferring it
+// would silently shadow whatever PATH would have chosen (Copilot review
+// finding).
+func TestResolveShebangInterpreter_SiblingOnlyInsideASDFInstall(t *testing.T) {
+	asdfDataDir := filepath.Join(t.TempDir(), ".asdf")
+	writeASDFShim(t, asdfDataDir, "node", [][2]string{{"nodejs", "20.19.0"}})
+	pathNode := writeASDFInstalledBinary(t, asdfDataDir, "nodejs", "20.19.0", "node")
+
+	// An ordinary directory that merely happens to hold a file named "node".
+	ordinary := t.TempDir()
+	decoy := writeFakeExecutable(t, ordinary, "node")
+	hostBin := writeShebangScript(t, ordinary, "codex", "node")
+
+	got, err := ResolveShebangInterpreter(hostBin, filepath.Join(asdfDataDir, "shims"), "", true)
+	if err != nil {
+		t.Fatalf("ResolveShebangInterpreter: %v", err)
+	}
+	if got == decoy {
+		t.Errorf("preferred the same-named neighbour %q outside an asdf install; only the installs/<plugin>/<version>/bin layout makes a sibling meaningful", decoy)
+	}
+	if got != pathNode {
+		t.Errorf("ResolveShebangInterpreter = %q, want the PATH-resolved interpreter %q", got, pathNode)
 	}
 }

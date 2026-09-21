@@ -337,16 +337,10 @@ func runIsolated(stderr io.Writer, host string, realEnv hostcontext.Environment,
 	// real PATH, exactly like shim.Build (internal/shim/plan.go) does for
 	// the PATH-shim launch path, so the exec below can invoke the real
 	// interpreter directly and never depend on the virtualized HOME either.
-	interpreterPath := ""
-	if name, isEnvIndirect := shim.ShebangEnvIndirectInterpreter(execBinaryPath); isEnvIndirect {
-		if interpCandidate, resolveErr := shim.ResolveReal(name, realEnv.Get("PATH"), ""); resolveErr == nil {
-			if shim.IsASDFShim(interpCandidate) {
-				if resolved, asdfErr := shim.ResolveASDFShimTarget(interpCandidate); asdfErr == nil {
-					interpCandidate = resolved
-				}
-			}
-			interpreterPath = interpCandidate
-		}
+	interpreterPath, interpErr := shim.ResolveShebangInterpreter(execBinaryPath, realEnv.Get("PATH"), "", domain.DefaultHostCapability(host).CanVirtualizeHome)
+	if interpErr != nil {
+		fmt.Fprintf(stderr, "omca: run: %s: %v\n", host, interpErr)
+		return 1
 	}
 
 	// mutableHomeDir is what overrides[envVar] actually points at below --

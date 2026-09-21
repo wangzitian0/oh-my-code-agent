@@ -160,3 +160,92 @@ func ResolveASDFShimTarget(shimPath string) (string, error) {
 	}
 	return candidate, nil
 }
+
+// ResolveShebangInterpreter resolves the interpreter that a
+// "#!/usr/bin/env <name>" script defers to, so a caller can exec that
+// interpreter directly instead of letting the OS resolve <name> through PATH
+// at exec time -- which, under the virtualized HOME isolated mode always
+// runs with, is exactly where an asdf-managed interpreter dies.
+//
+// Returns ("", nil) for the two soft cases: realPath is not an env-indirect
+// script at all, or <name> is not on PATH outside shimDir. Both leave the
+// caller doing what it did before -- exec realPath directly -- rather than
+// turning "we could not pre-resolve this" into a hard failure.
+//
+// Returns an error only for the case that is NOT safe to fall through: the
+// interpreter resolves to an asdf shim that cannot be resolved to a concrete
+// binary. Exec'ing that shim under a virtualized HOME produces a bare exit
+// 126 with no output whatsoever, strictly inside the shim script and
+// strictly after the caller's own process image is gone, so nothing the
+// caller does afterwards can explain it. Failing closed here is the only
+// way that stays diagnosable.
+//
+// One extracted copy, not two: cmd/omca/run.go and plan.go's Build both need
+// this, and when it lived twice the second copy still had the silent
+// fallback after the first was fixed.
+// virtualizingHome says whether the caller is about to override HOME for
+// this exec. It is the entire reason any of this is needed: asdf's dispatch
+// only breaks because HOME stops resolving. A caller that leaves HOME real
+// -- a tier-2 host under ADR 0006, or `--mode native` -- must pass false,
+// and then an unresolvable asdf interpreter is not an error at all: the OS
+// resolves it at exec time exactly as it does outside OMCA, and failing
+// closed would break a host that works (Copilot review finding).
+func ResolveShebangInterpreter(realPath, pathEnv, shimDir string, virtualizingHome bool) (string, error) {
+	name, isEnvIndirect := ShebangEnvIndirectInterpreter(realPath)
+	if !isEnvIndirect {
+		return "", nil
+	}
+	if !virtualizingHome {
+		// Nothing to pre-resolve: HOME stays real, so the OS's own shebang
+		// handling reaches the same interpreter it would unmanaged.
+		return "", nil
+	}
+
+	// Prefer the interpreter inside the SAME asdf install as realPath.
+	//
+	// When realPath is <dataDir>/installs/<plugin>/<version>/bin/<x>, the
+	// interpreter belonging to it is <same dir>/<name>: a Node CLI installed
+	// under nodejs 20.19.0 runs on that install's node. This reads the
+	// answer off the path asdf already resolved rather than guessing, and it
+	// is the only branch that works when the machine has two node versions
+	// installed -- their shared asdf `node` shim names both plugin versions,
+	// which ResolveASDFShimTarget correctly refuses to choose between.
+	//
+	// Scoped to an asdf install directory, not applied to every shebang
+	// script: outside that layout "a file with the interpreter's name next
+	// to the script" carries none of the same meaning, and preferring it
+	// would silently shadow the interpreter PATH would have chosen
+	// (Copilot review finding).
+	if isASDFInstallBinDir(filepath.Dir(realPath)) {
+		if sibling := filepath.Join(filepath.Dir(realPath), name); isExecutableFile(sibling) {
+			return sibling, nil
+		}
+	}
+
+	candidate, err := ResolveReal(name, pathEnv, shimDir)
+	if err != nil {
+		return "", nil // soft case: not on PATH outside the shim dir
+	}
+	if !IsASDFShim(candidate) {
+		return candidate, nil
+	}
+	resolved, asdfErr := ResolveASDFShimTarget(candidate)
+	if asdfErr != nil {
+		return "", fmt.Errorf("interpreter %q resolves to the asdf shim %s, which names more than one installed version (or no resolvable one): %w -- this launch virtualizes HOME, under which that shim's own dispatch fails as a bare exit 126 with no output. Fix it by removing the %s versions you do not use (`asdf uninstall`) so the shim names exactly one, by installing %s outside asdf, or by using `omca run --mode native`", name, candidate, asdfErr, name, name)
+	}
+	return resolved, nil
+}
+
+// isASDFInstallBinDir reports whether dir has asdf's own
+// "<dataDir>/installs/<plugin>/<version>/bin" shape. Only inside that layout
+// does a file sitting beside a script carry the meaning "the interpreter
+// this package was installed against."
+func isASDFInstallBinDir(dir string) bool {
+	if filepath.Base(dir) != "bin" {
+		return false
+	}
+	version := filepath.Dir(dir)      // <dataDir>/installs/<plugin>/<version>
+	plugin := filepath.Dir(version)   // <dataDir>/installs/<plugin>
+	installs := filepath.Dir(plugin)  // <dataDir>/installs
+	return filepath.Base(installs) == "installs" && filepath.Base(plugin) != "" && filepath.Base(version) != ""
+}
