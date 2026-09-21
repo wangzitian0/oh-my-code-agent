@@ -2,14 +2,17 @@ package domain
 
 import "fmt"
 
-// MutableStateClass is one of the six sharing classes
+// MutableStateClass is one of the six visibility classes
 // docs/architecture/runtime.md §9 ("Mutable State") defines for host-written
 // state that is not itself a compiled config artifact: sessions and archived
 // sessions, logs and crash reports, SQLite databases, model/provider caches,
 // trust decisions, memory, and installation metadata. Unlike Ownership
 // (ADR 0002, adjacent but distinct: ownership answers "who is allowed to
 // write this artifact", MutableStateClass answers "which isolated homes may
-// this piece of host-written runtime state be visible from"), this is a new,
+// this piece of host-written runtime state be visible from"). Three of the
+// six permit sharing (SharesAcrossGenerations); the other three each keep
+// state out of every other generation's home for a different reason. This is
+// a new,
 // small enum rather than a reuse of Ownership: runtime.md §9 spells these
 // out with no 1:1 correspondence to Ownership's own five ("host-global
 // external" is not the same concept as OwnershipExternal -- the former

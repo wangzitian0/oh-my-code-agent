@@ -1,6 +1,8 @@
 package hub
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -20,14 +22,43 @@ func TestScope_MatchesHowThePathsAreDerived(t *testing.T) {
 		t.Fatalf("Scope() is not a valid runtime scope: %v", err)
 	}
 
+	// Assert what the paths ARE derived from, not what they merely lack.
+	// An earlier version of this test grepped the strings for "worktree",
+	// which a home directory containing that word would have failed for no
+	// real reason, and which a worktree-derived path spelled differently
+	// would have passed (Copilot review finding).
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no home directory available: %v", err)
+	}
 	sock, cfg := DefaultSocketPath(), DefaultConfigPath()
 	for name, p := range map[string]string{"socket": sock, "config": cfg} {
 		if p == "" {
 			t.Fatalf("default %s path is empty", name)
 		}
-		if strings.Contains(p, "worktree") || strings.Contains(p, "generations") {
-			t.Errorf("%s path %q is derived from a worktree, contradicting the declared user scope", name, p)
+		rel, relErr := filepath.Rel(home, p)
+		if relErr != nil || strings.HasPrefix(rel, "..") {
+			t.Errorf("%s path %q is not under the home directory, so it cannot be one-per-OS-user as the declared scope claims", name, p)
 		}
+	}
+
+	// The decisive property: these are pure functions of the home directory,
+	// so two different working directories produce the same paths. A
+	// worktree-derived path could not do that.
+	inRepo := t.TempDir()
+	prevWD, wdErr := os.Getwd()
+	if wdErr != nil {
+		t.Fatalf("Getwd: %v", wdErr)
+	}
+	if chErr := os.Chdir(inRepo); chErr != nil {
+		t.Fatalf("Chdir: %v", chErr)
+	}
+	t.Cleanup(func() { _ = os.Chdir(prevWD) })
+	if got := DefaultSocketPath(); got != sock {
+		t.Errorf("socket path changed with the working directory (%q -> %q); a user-scope runtime must resolve to one socket regardless of where it is invoked from", sock, got)
+	}
+	if got := DefaultConfigPath(); got != cfg {
+		t.Errorf("config path changed with the working directory (%q -> %q)", cfg, got)
 	}
 
 	// A user-scope runtime is the one that can own identity-shared state;
