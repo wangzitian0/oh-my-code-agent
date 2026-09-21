@@ -16,7 +16,10 @@ func runAudit(stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("audit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
-	defaultMode := "doomsday"
+	// Lean (3 scouts) is the default: coordination cost is multiplicative, not
+	// additive, and a wider fan-out only scales the lead's burden of disproving
+	// findings. Doomsday (9) stays available behind --mode for release sign-off.
+	defaultMode := "lean"
 	if env := os.Getenv("OMCA_AUDIT_MODE"); env != "" {
 		defaultMode = env
 	}
