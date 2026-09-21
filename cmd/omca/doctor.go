@@ -82,6 +82,20 @@ func runDoctor(stdout, stderr io.Writer) int {
 	findings = append(findings, checkPassthrough(wt.Root, realEnv))
 	for _, host := range hostcontext.DetectedHostIDs {
 		binName, _ := hostcontext.BinaryName(host) // hostcontext.DetectedHostIDs are always known to BinaryName
+		// A tier-3 (OBSERVED) host is never launched managed -- ADR 0006
+		// decision 1 -- so both checks below would assert a contract this
+		// host does not have. Resolving to its own native binary is the
+		// correct, intended outcome for it, not a "PATH bypass" FAIL, and
+		// it has no generation to be fresh or stale because `omca env`
+		// deliberately compiles none. Running both anyway made `omca
+		// doctor` exit 1 on a machine where everything was working as
+		// designed, which is the third launch path the tier model was
+		// added to (#108) without being taught about tier 3 -- the same
+		// gap that crashed `omca env` and the real-environment perf test.
+		if domain.DefaultHostCapability(host).Tier == domain.TierObserved {
+			findings = append(findings, checkObservationTierHost(host, binName, shimDir))
+			continue
+		}
 		findings = append(findings, checkPathBypass(host, binName, shimDir))
 		findings = append(findings, checkGenerationFreshness(host, wt, worktreeStateDir, realEnv, shimDir)...)
 	}
@@ -147,6 +161,34 @@ func checkPathBypass(host, binName, shimDir string) doctorFinding {
 		return doctorFinding{Check: check, Status: statusOK, Detail: fmt.Sprintf("%s resolves to the OMCA shim (%s): managed", binName, resolved)}
 	}
 	return doctorFinding{Check: check, Status: statusFail, Detail: fmt.Sprintf("PATH bypass: %s resolves to %s, which is not the OMCA shim (%s) — direnv is not active, or the shim directory is not first on PATH; direct invocations of %s are UNMANAGED", binName, resolved, shimDir, binName)}
+}
+
+// checkObservationTierHost is checkPathBypass's inverse, for a tier-3
+// (OBSERVED) host. For a managed host, resolving to anything but the OMCA
+// shim is the failure. For an observation-tier host it is the *correct*
+// outcome: ADR 0006 decision 1 says such a host is never launched managed,
+// `omca env` compiles no generation for it, and it is expected to run
+// natively.
+//
+// The failure this check does have is the mirror image: the binary
+// resolving out of the shim directory. OMCA installs exactly three shim
+// entries (shimEntryNames: codex, claude, omca), so a tier-3 host's name
+// appearing there is not a shim OMCA manages -- it is a stale or
+// hand-placed file shadowing the real binary, left over from an earlier
+// layout or dropped in by mistake. Whatever it is, it is first on PATH and
+// the user's invocations reach it instead of the host, which nothing else
+// reports. Naming that as the root cause is the actionable form; calling
+// it "a shim with no generation" would imply OMCA put it there.
+func checkObservationTierHost(host, binName, shimDir string) doctorFinding {
+	check := "observation-tier:" + host
+	resolved, err := exec.LookPath(binName)
+	if err != nil {
+		return doctorFinding{Check: check, Status: statusWarn, Detail: fmt.Sprintf("%s (%s) is at the observation tier and is not on PATH", host, binName)}
+	}
+	if shim.CleanAbs(filepath.Dir(resolved)) == shim.CleanAbs(shimDir) {
+		return doctorFinding{Check: check, Status: statusFail, Detail: fmt.Sprintf("%s (%s) resolves to %s, inside the OMCA shim directory — but OMCA installs shims only for %s, so this is a stale or hand-placed file shadowing the real %s binary; remove it and re-run `omca env`", host, binName, resolved, strings.Join(shimEntryNames, ", "), binName)}
+	}
+	return doctorFinding{Check: check, Status: statusOK, Detail: fmt.Sprintf("%s (%s) is at the observation tier and resolves natively to %s, which is the intended outcome — no generation is compiled and no shim shadows it (ADR 0006)", host, binName, resolved)}
 }
 
 // checkGenerationFreshness covers issue #14's remaining two AC checks for
@@ -345,14 +387,48 @@ func checkDirenvApproval(wt hostcontext.Worktree) doctorFinding {
 		}
 	}
 
-	switch {
-	case strings.Contains(text, "Found RC allowed true"):
+	// direnv >= 2.36 reports this as a numeric state, not a boolean. The
+	// mapping below was measured against direnv 2.37.1 rather than read off
+	// a changelog: in a scratch directory, `direnv status` printed
+	// "allowed 1" before `direnv allow`, "allowed 0" after it, and
+	// "allowed 2" after `direnv deny`.
+	//
+	// The boolean values stay for older direnv. Until this was handled, a
+	// current direnv fell through to the unknown branch, so a correctly
+	// approved .envrc was reported as "could not determine approval state"
+	// followed by 25 lines of raw output -- turning the one check that
+	// tells a user why their shims are inactive into noise.
+	switch direnvAllowedValue(text) {
+	case "0", "true":
 		return doctorFinding{Check: check, Status: statusOK, Detail: ".envrc is approved by direnv"}
-	case strings.Contains(text, "Found RC allowed false"):
+	case "1", "false":
 		return doctorFinding{Check: check, Status: statusFail, Detail: fmt.Sprintf(".envrc at %s exists but is NOT approved — run `direnv allow`", envrcPath)}
-	case strings.Contains(text, "No .envrc or .env found"):
-		return doctorFinding{Check: check, Status: statusWarn, Detail: "direnv reports no .envrc loaded for this directory"}
-	default:
-		return doctorFinding{Check: check, Status: statusWarn, Detail: fmt.Sprintf("could not determine direnv approval state from `direnv status` output:\n%s", strings.TrimSpace(text))}
+	case "2":
+		return doctorFinding{Check: check, Status: statusFail, Detail: fmt.Sprintf(".envrc at %s is explicitly DENIED in direnv — run `direnv allow` to re-approve it", envrcPath)}
 	}
+	if strings.Contains(text, "No .envrc or .env found") {
+		return doctorFinding{Check: check, Status: statusWarn, Detail: "direnv reports no .envrc loaded for this directory"}
+	}
+	return doctorFinding{Check: check, Status: statusWarn, Detail: fmt.Sprintf("could not determine direnv approval state from `direnv status` output:\n%s", strings.TrimSpace(text))}
+}
+
+// direnvAllowedValue returns the whole token after "Found RC allowed" in
+// `direnv status` output, or "" when that line is absent.
+//
+// It reads the entire token rather than substring-matching each known
+// value: strings.Contains(text, "Found RC allowed 1") also matches a future
+// "allowed 12", which would silently classify an unknown state as
+// not-approved (Copilot review finding on this PR). An unrecognized value
+// has to reach the unknown branch and show the user the raw output, which
+// is the only honest answer for a state this code has never seen.
+func direnvAllowedValue(text string) string {
+	const marker = "Found RC allowed"
+	for _, line := range strings.Split(text, "\n") {
+		rest, found := strings.CutPrefix(strings.TrimSpace(line), marker)
+		if !found {
+			continue
+		}
+		return strings.TrimSpace(rest)
+	}
+	return ""
 }

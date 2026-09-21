@@ -151,3 +151,36 @@ func TestRunRun_IsolatedMode_HostNotInstalled(t *testing.T) {
 		t.Errorf("stderr does not mention 'not installed': %q", stderr.String())
 	}
 }
+
+// TestNormalizeHostArg_ObservationTierIsNotUnrecognized separates two
+// different answers that used to share one message.
+//
+// pi is detected, version-probed and reported by `omca context`, so calling
+// it "unrecognized" sends the reader hunting for a typo instead of telling
+// them the real reason it cannot be launched: ADR 0006 decision 1, an
+// observation-tier host is never launched managed. `omca doctor` used to
+// point at this very command for pi, which made the wrong message the one a
+// user was most likely to hit.
+//
+// A genuinely unknown host must still say "unrecognized", or this fix trades
+// one misleading message for another.
+func TestNormalizeHostArg_ObservationTierIsNotUnrecognized(t *testing.T) {
+	_, err := normalizeHostArg("pi")
+	if err == nil {
+		t.Fatal("normalizeHostArg(pi) returned no error; an observation-tier host has no managed launch path to select")
+	}
+	if !strings.Contains(err.Error(), "observation tier") {
+		t.Errorf("pi error does not explain the tier: %v", err)
+	}
+	if strings.Contains(err.Error(), "unrecognized") {
+		t.Errorf("pi is detected and reported by omca, so calling it unrecognized sends the reader looking for a typo: %v", err)
+	}
+
+	_, err = normalizeHostArg("definitely-not-a-host")
+	if err == nil {
+		t.Fatal("normalizeHostArg on an unknown host returned no error")
+	}
+	if !strings.Contains(err.Error(), "unrecognized") {
+		t.Errorf("a genuinely unknown host must still be called unrecognized: %v", err)
+	}
+}
