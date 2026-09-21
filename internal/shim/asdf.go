@@ -160,3 +160,58 @@ func ResolveASDFShimTarget(shimPath string) (string, error) {
 	}
 	return candidate, nil
 }
+
+// ResolveShebangInterpreter resolves the interpreter that a
+// "#!/usr/bin/env <name>" script defers to, so a caller can exec that
+// interpreter directly instead of letting the OS resolve <name> through PATH
+// at exec time -- which, under the virtualized HOME isolated mode always
+// runs with, is exactly where an asdf-managed interpreter dies.
+//
+// Returns ("", nil) for the two soft cases: realPath is not an env-indirect
+// script at all, or <name> is not on PATH outside shimDir. Both leave the
+// caller doing what it did before -- exec realPath directly -- rather than
+// turning "we could not pre-resolve this" into a hard failure.
+//
+// Returns an error only for the case that is NOT safe to fall through: the
+// interpreter resolves to an asdf shim that cannot be resolved to a concrete
+// binary. Exec'ing that shim under a virtualized HOME produces a bare exit
+// 126 with no output whatsoever, strictly inside the shim script and
+// strictly after the caller's own process image is gone, so nothing the
+// caller does afterwards can explain it. Failing closed here is the only
+// way that stays diagnosable.
+//
+// One extracted copy, not two: cmd/omca/run.go and plan.go's Build both need
+// this, and when it lived twice the second copy still had the silent
+// fallback after the first was fixed.
+func ResolveShebangInterpreter(realPath, pathEnv, shimDir string) (string, error) {
+	name, isEnvIndirect := ShebangEnvIndirectInterpreter(realPath)
+	if !isEnvIndirect {
+		return "", nil
+	}
+
+	// Prefer the interpreter inside the SAME asdf install as realPath.
+	//
+	// When realPath is <dataDir>/installs/<plugin>/<version>/bin/<x>, the
+	// interpreter belonging to it is <same dir>/<name>: a Node CLI installed
+	// under nodejs 20.19.0 runs on that install's node. This reads the
+	// answer off the path asdf already resolved rather than guessing, and it
+	// is the only branch that works when the machine has two node versions
+	// installed -- their shared asdf `node` shim names both plugin versions,
+	// which ResolveASDFShimTarget correctly refuses to choose between.
+	if sibling := filepath.Join(filepath.Dir(realPath), name); isExecutableFile(sibling) {
+		return sibling, nil
+	}
+
+	candidate, err := ResolveReal(name, pathEnv, shimDir)
+	if err != nil {
+		return "", nil // soft case: not on PATH outside the shim dir
+	}
+	if !IsASDFShim(candidate) {
+		return candidate, nil
+	}
+	resolved, asdfErr := ResolveASDFShimTarget(candidate)
+	if asdfErr != nil {
+		return "", fmt.Errorf("interpreter %q resolves to the asdf shim %s, which could not be resolved to a concrete binary: %w -- isolated mode virtualizes HOME, under which that shim's own dispatch fails as a bare exit 126 with no output; install %s outside asdf, or use `omca run --mode native`", name, candidate, asdfErr, name)
+	}
+	return resolved, nil
+}

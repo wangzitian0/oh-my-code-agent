@@ -201,26 +201,9 @@ func Build(invokedName string, environ []string) (Plan, error) {
 	// Resolve <name> ourselves, now, using this process's own real PATH
 	// (before virtualization), so Exec can invoke the real interpreter
 	// directly and this second layer never depends on HOME either.
-	interpreterPath := ""
-	if name, isEnvIndirect := ShebangEnvIndirectInterpreter(realPath); isEnvIndirect {
-		if interpCandidate, resolveErr := ResolveReal(name, getEnv(environ, "PATH"), shimDir); resolveErr == nil {
-			if IsASDFShim(interpCandidate) {
-				if resolved, asdfErr := ResolveASDFShimTarget(interpCandidate); asdfErr == nil {
-					interpCandidate = resolved
-				}
-				// asdfErr != nil: leave interpCandidate as the unresolved
-				// asdf shim path rather than failing Build outright -- Exec
-				// will still try it, and a genuine failure there surfaces
-				// the real OS exec error instead of this function silently
-				// declining to even attempt the common case.
-			}
-			interpreterPath = interpCandidate
-		}
-		// resolveErr != nil: <name> is not found in PATH outside the OMCA
-		// shim dir at all -- leave interpreterPath empty and fall through to
-		// today's existing behavior (exec realPath directly). This keeps an
-		// interpreter Build cannot resolve a soft, "maybe not immune to this
-		// class of bug" case rather than a hard failure.
+	interpreterPath, interpErr := ResolveShebangInterpreter(realPath, getEnv(environ, "PATH"), shimDir)
+	if interpErr != nil {
+		return Plan{}, fmt.Errorf("shim: Build: %s: %w", invokedName, interpErr)
 	}
 
 	// HOME is required, the same fail-closed way OMCA_STATE_DIR is below:
