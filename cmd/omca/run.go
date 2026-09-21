@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -70,6 +71,13 @@ func normalizeHostArg(arg string) (string, error) {
 	case "claude":
 		return "claude-code", nil
 	default:
+		// A host OMCA detects, versions and reports is not "unrecognized"
+		// just because it cannot be launched managed. Saying so sends the
+		// reader looking for a typo instead of telling them the real reason
+		// -- and `omca doctor` used to point at this very command for pi.
+		if slices.Contains(hostcontext.DetectedHostIDs, arg) && domain.DefaultHostCapability(arg).Tier == domain.TierObserved {
+			return "", fmt.Errorf("%q is at the observation tier: OMCA observes and reports it but does not launch it managed, so there is nothing for `omca run` to select (ADR 0006); run it directly instead", arg)
+		}
 		return "", fmt.Errorf("unrecognized host %q (want codex or claude)", arg)
 	}
 }
