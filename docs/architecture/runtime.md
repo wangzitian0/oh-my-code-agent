@@ -509,6 +509,31 @@ copied into — or shared across — a different worktree's own state.
 Sharing state through symlinks is allowed only for an explicit allowlist backed
 by fixtures. A broad symlink to the native host home defeats isolation.
 
+### 9.1 Measuring what is actually held
+
+`omca state [--json]` reports held state by worktree and by class. It exists
+because a classification nothing measures is a claim nothing checks: the
+table below can say a class shares while the bytes sit in per-worktree
+copies, and nothing else in the system notices.
+
+It is read-only by construction — it stats and walks directories and never
+opens a file, so no session content, credential or log line can reach its
+output. It is its own entry rather than part of `omca report` because it is
+the one question that is not per-worktree.
+
+Two things it reports that nothing else does:
+
+- **Unclassified state**, never defaulted into a class. On the installation
+  this was first run against, 88% of held state had no row in the table at
+  all; defaulting those entries would have made the table look complete and
+  hidden the gap.
+- **Sharing in name only** — a class that promises sharing while N worktrees
+  each keep their own copy. A symlinked share counts as zero bytes, so
+  applying the allowlist is visible here rather than claimed.
+
+`internal/auth`'s table is the single source it classifies against, so a gap
+in the table shows up as a number rather than as silence.
+
 ## 10. Repository Sources
 
 Repository files are loadable project inputs, but they remain visible in the
