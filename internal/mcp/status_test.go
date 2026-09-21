@@ -3,6 +3,7 @@ package mcp
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -188,6 +189,143 @@ func TestComputeStatus_ReportsExclusionCountsAndContextCost(t *testing.T) {
 	}
 	if claude.ContextCost != nil {
 		t.Error("claude-code ContextCost is non-nil, want nil when Managed is false")
+	}
+}
+
+// buildManagedClaudeWorktree is buildManagedCodexWorktree's Tier 2
+// counterpart: a real compiled, recorded-as-current generation for
+// claude-code, which domain.DefaultHostCapability classifies as TierBridge.
+// The native CLAUDE_CONFIG_DIR carries one Skill so the fixture would report
+// a nonzero exclusion count if this host were Tier 1 -- that is the point,
+// since the assertion below is that Tier 2 reports zero exclusions AND says
+// why, rather than quietly looking like a clean runtime.
+func buildManagedClaudeWorktree(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	claudeConfigDir := filepath.Join(root, "claude-config")
+	worktreeRoot := filepath.Join(root, "project")
+
+	mustWriteFile(t, filepath.Join(claudeConfigDir, "skills", "native", "SKILL.md"), "---\nname: native\n---\nbody\n")
+	mustWriteFile(t, filepath.Join(worktreeRoot, "CLAUDE.md"), "# instructions\n")
+
+	det := hostcontext.HostDetection{
+		Host:    "claude-code",
+		Surface: "cli",
+		Version: "2.1.228",
+		NativeHomes: []hostcontext.NativeHome{
+			{Name: "CLAUDE_CONFIG_DIR", Path: claudeConfigDir, FromEnvVar: "CLAUDE_CONFIG_DIR"},
+		},
+	}
+	obs, err := observe.Observe(observe.Request{Detection: det, WorktreeRoot: worktreeRoot})
+	if err != nil {
+		t.Fatalf("observe.Observe: %v", err)
+	}
+	digest, err := domain.CanonicalDigest(worktreeRoot)
+	if err != nil {
+		t.Fatalf("CanonicalDigest: %v", err)
+	}
+	wt := hostcontext.Worktree{ID: "worktree:" + digest, Root: worktreeRoot}
+
+	req := runtime.BootstrapRequest{
+		Detection:    det,
+		Worktree:     wt,
+		Observations: obs,
+		Now:          time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC),
+	}
+	worktreeStateDir := t.TempDir()
+	gen, outputDir, err := runtime.EnsureGeneration(req, filepath.Join(worktreeStateDir, "generations"))
+	if err != nil {
+		t.Fatalf("EnsureGeneration: %v", err)
+	}
+	t.Cleanup(func() { restoreWritableTree(outputDir) })
+	if err := runtime.SetCurrentGeneration(worktreeStateDir, "claude-code", outputDir, gen, det, time.Now()); err != nil {
+		t.Fatalf("SetCurrentGeneration: %v", err)
+	}
+	return worktreeStateDir
+}
+
+// TestComputeStatus_Tier2_StatesResidualLoad_NeverClaimsIsolation is
+// ADR 0006 decision 3 and 4 as an executable assertion.
+//
+// PR #109 made HOME virtualization conditional (internal/shim.Plan.
+// CanVirtualizeHome) and set it false for claude-code, so a Tier 2 host
+// launches on the real user home and still loads the entire native
+// user-global scope. The status response for such a host therefore has a
+// true statement (0 excluded) that is dangerously misleading on its own:
+// docs/architecture/runtime.md §7.2 requires a report to state the residual
+// load rather than claim a clean runtime. This test fails if a future change
+// restores a bare "managed" string or lets UserGlobalIsolated drift true for
+// a bridge host -- the specific regression that would make the report
+// untrustworthy again without failing anything else.
+func TestComputeStatus_Tier2_StatesResidualLoad_NeverClaimsIsolation(t *testing.T) {
+	worktreeStateDir := buildManagedClaudeWorktree(t)
+
+	result, err := ComputeStatus(ComputeStatusRequest{
+		WorktreeID:       "worktree:sha256:deadbeef",
+		ContextID:        "context:sha256:cafef00d",
+		WorktreeStateDir: worktreeStateDir,
+		Hosts:            []string{"claude-code"},
+	})
+	if err != nil {
+		t.Fatalf("ComputeStatus: %v", err)
+	}
+	claude := result.Hosts[0]
+
+	if !claude.Managed {
+		t.Fatalf("claude-code Managed = false, want true (a generation was compiled and recorded); detail: %s", claude.Detail)
+	}
+	if claude.Tier != string(domain.TierBridge) {
+		t.Errorf("claude-code Tier = %q, want %q", claude.Tier, domain.TierBridge)
+	}
+	if claude.UserGlobalIsolated {
+		t.Error("claude-code UserGlobalIsolated = true, want false: the shim leaves HOME pointing at the real user home for a bridge host, so nothing in the user-global scope is excluded (ADR 0006)")
+	}
+	// Managed must not be readable as an isolation claim on its own.
+	if claude.Managed && claude.UserGlobalIsolated {
+		t.Error("Managed and UserGlobalIsolated are both true for a bridge host; Managed is not an isolation claim (ADR 0006 decision 4)")
+	}
+	// The residual has to be stated, not merely implied by a zero count.
+	if !strings.Contains(claude.Detail, "HOME is NOT virtualized") {
+		t.Errorf("claude-code Detail does not state that HOME is not virtualized, so a reader sees only %q plus a zero exclusion count and concludes the runtime is clean; Detail = %q", "managed", claude.Detail)
+	}
+	if claude.ContextCost == nil {
+		t.Fatal("claude-code ContextCost is nil, want a populated estimate labeled as not-applicable for tier 2")
+	}
+	if claude.ContextCost.EstimatedTokensExcluded != 0 {
+		t.Errorf("claude-code EstimatedTokensExcluded = %d, want 0: a bridge host excludes nothing", claude.ContextCost.EstimatedTokensExcluded)
+	}
+	if !strings.Contains(claude.ContextCost.Confidence, "tier 2") {
+		t.Errorf("claude-code ContextCost.Confidence = %q, want it to name the tier so a consumer cannot read the zero as a measured saving", claude.ContextCost.Confidence)
+	}
+	// Method is not `omitempty` and its doc comment promises a reader never
+	// has to take the number on faith, so a blank one ships a JSON field
+	// that says nothing about where the zero came from.
+	if claude.ContextCost.Method == "" {
+		t.Error("claude-code ContextCost.Method is empty; every estimate must explain how it was computed, including a zero one")
+	}
+}
+
+// TestComputeStatus_Tier1_ReportsIsolated is the positive control for
+// ADR 0006: codex is TierManaged, so the same two fields that mark Tier 2 as
+// un-isolated must mark Tier 1 as isolated. Without this, a change that
+// hardcoded UserGlobalIsolated to false everywhere would still pass the
+// Tier 2 test above.
+func TestComputeStatus_Tier1_ReportsIsolated(t *testing.T) {
+	worktreeStateDir := buildManagedCodexWorktree(t, true, 2)
+
+	result, err := ComputeStatus(ComputeStatusRequest{
+		WorktreeStateDir: worktreeStateDir,
+		Hosts:            []string{"codex"},
+	})
+	if err != nil {
+		t.Fatalf("ComputeStatus: %v", err)
+	}
+	codex := result.Hosts[0]
+	if codex.Tier != string(domain.TierManaged) {
+		t.Errorf("codex Tier = %q, want %q", codex.Tier, domain.TierManaged)
+	}
+	if !codex.UserGlobalIsolated {
+		t.Error("codex UserGlobalIsolated = false, want true: codex is tier 1, the shim virtualizes HOME and the generation excludes the user-global scope")
 	}
 }
 

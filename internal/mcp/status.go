@@ -38,7 +38,25 @@ type HostStatus struct {
 	// pointer vs. an unreadable manifest) — the same "distinguish expected
 	// not-yet-managed from real corruption" stance cmd/omca/doctor.go's
 	// checkGenerationFreshness already takes.
+	//
+	// Managed is deliberately NOT a claim about user-global isolation: a
+	// Tier-2 host has a compiled current generation (Managed true) while
+	// still inheriting the real user-global configuration. Read Tier and
+	// UserGlobalIsolated for that, never Managed alone (ADR-0006).
 	Managed bool `json:"managed"`
+	// Tier is the host's managed tier for this generation
+	// (domain.DefaultHostCapability): MANAGED, BRIDGE, or OBSERVED. Empty
+	// when Managed is false. See ADR-0006.
+	Tier string `json:"tier,omitempty"`
+	// UserGlobalIsolated reports whether this generation actually excludes
+	// the real user-global native configuration from the launched host.
+	// True only for Tier 1 (MANAGED), where the shim virtualizes HOME and
+	// the native home environment variable. False for Tier 2 (BRIDGE),
+	// where the host launches on the real $HOME and therefore still loads
+	// every native user-global Skill and MCP registration — the residual
+	// load docs/architecture/runtime.md §7.2 requires a report to state
+	// rather than claim a clean runtime.
+	UserGlobalIsolated bool `json:"userGlobalIsolated"`
 	// GenerationID is the current generation's metadata.id, when Managed.
 	GenerationID string `json:"generationId,omitempty"`
 	// ExcludedMCPServers / ExcludedSkills are the literal "N MCP servers and
@@ -209,18 +227,40 @@ func hostStatus(worktreeStateDir, host string) HostStatus {
 
 	cap := domain.DefaultHostCapability(host)
 	if cap.Tier == domain.TierBridge {
+		// Tier 2 excludes nothing from the user-global scope: the shim
+		// leaves HOME and the native home variable pointing at the real
+		// user home (internal/shim.Plan.CanVirtualizeHome, ADR-0006), so
+		// every native user-global Skill and MCP registration this host
+		// would load unmanaged still loads here. Saying "0 excluded"
+		// without saying that is exactly the "claiming a clean runtime"
+		// docs/architecture/runtime.md §7.2 forbids, so the residual is
+		// stated in Detail and UserGlobalIsolated is false.
+		// Method is populated for the same reason the zero is explained at
+		// all: its doc comment promises a reader "never has to take the
+		// number on faith," and it is not `omitempty`, so leaving it blank
+		// ships a JSON field that silently says nothing. A zero whose
+		// method is absent is exactly the un-auditable report this change
+		// exists to stop producing.
 		cost := ContextCostEstimate{
 			EstimatedTokensExcluded: 0,
-			Confidence:              "n/a (native credentials and skills retained for Keychain/OAuth integrity)",
+			Method:                  "not computed: a tier-2 host excludes no native user-global source, so there is no excluded-item count to multiply by a per-item average (the tier-1 method). The zero is the true exclusion count, not an unmeasured estimate.",
+			Confidence:              "n/a (tier 2: no user-global exclusion; native credentials, Skills and MCP registrations are retained for Keychain/OAuth integrity)",
 		}
 		return HostStatus{
 			Host:               host,
 			Managed:            true,
+			Tier:               string(cap.Tier),
+			UserGlobalIsolated: false,
 			GenerationID:       gen.Metadata.ID,
 			ExcludedMCPServers: 0,
 			ExcludedSkills:     0,
 			ContextCost:        &cost,
-			Detail:             fmt.Sprintf("managed (bridge): current generation %s; governed via MCP Hub Bridge", gen.Metadata.ID),
+			Detail: fmt.Sprintf(
+				"managed (tier 2, bridge): current generation %s; governed via MCP Hub Bridge. "+
+					"HOME is NOT virtualized for this host, so the real user-global configuration "+
+					"(Skills, MCP registrations, settings) still loads in full — run `omca report` "+
+					"for the observed native sources that remain in effect",
+				gen.Metadata.ID),
 		}
 	}
 
@@ -229,6 +269,8 @@ func hostStatus(worktreeStateDir, host string) HostStatus {
 	return HostStatus{
 		Host:               host,
 		Managed:            true,
+		Tier:               string(cap.Tier),
+		UserGlobalIsolated: cap.CanVirtualizeHome,
 		GenerationID:       gen.Metadata.ID,
 		ExcludedMCPServers: excludedMCP,
 		ExcludedSkills:     excludedSkills,

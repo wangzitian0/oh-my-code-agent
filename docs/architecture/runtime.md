@@ -345,10 +345,22 @@ a strict MCP mode that ignores non-specified registrations
 a virtual process home, as for Codex, if the above are incomplete
 ```
 
-Which combination yields complete user-global exclusion is an open
-qualification question (see the product requirements); the adapter must prove
-its mechanism with versioned fixtures before Claude Code launches become
-managed rather than observed.
+**Resolved: Claude Code is Tier 2 and does not achieve user-global exclusion**
+([ADR 0006](../adr/0006-host-tiers.md)). The last candidate above — a virtual
+process home — is rejected for this host, because account and OAuth state is
+Keychain-bound and virtualizing `HOME` would force a fresh login on every
+generation, which the first fixed constraint below forbids. The remaining three
+mechanisms narrow what loads but do not exclude the user-global scope.
+
+Concretely, `internal/shim.Plan.CanVirtualizeHome` is false for `claude-code`,
+so `Plan.Exec` sets only `OMCA_REAL_HOME` and leaves both `HOME` and
+`CLAUDE_CONFIG_DIR` resolving to the user's real locations. Every native
+user-global Skill and MCP registration the host would load unmanaged still
+loads. Per §7.1.1, that includes `$HOME/.agents/skills`.
+
+This is a recorded capability gap against FR-7, not a second way of satisfying
+it. It carries one obligation, stated in the second fixed constraint below and
+generalized by ADR 0006 decision 3: the report states the residual load.
 
 Two constraints are fixed regardless of mechanism:
 
@@ -358,8 +370,13 @@ Two constraints are fixed regardless of mechanism:
   identity gets an explicit login flow.
 - Claude Code reads repository assets (project instructions, project skills,
   project MCP registrations) directly from the worktree. If an unselected
-  repository asset cannot be excluded through a proven native mechanism, the
-  report states the residual load instead of claiming a clean runtime.
+  asset cannot be excluded through a proven native mechanism, the report
+  states the residual load instead of claiming a clean runtime. ADR 0006
+  decision 3 extends this rule from repository assets to the user-global
+  scope: reporting "0 excluded" for a Tier 2 host without also stating that
+  the whole native user-global scope is loaded violates this constraint.
+  `mcp.HostStatus` carries `Tier` and `UserGlobalIsolated` so a consumer can
+  tell the two cases apart without parsing prose.
 
 The adapter must inventory at least:
 

@@ -222,7 +222,8 @@ The system must:
 
 ```text
 observe never writes or executes discovered assets
-native global configuration is never an implicit runtime parent
+native global configuration is never an implicit runtime parent (tier 1 only)
+a host that cannot exclude the user-global scope reports the residual load
 same inputs plus the same Knowledge digest produce the same generation digest
 current generations are immutable
 pending is activated only at a restart boundary
@@ -232,6 +233,14 @@ denied intent cannot be weakened by a lower scope
 generated artifacts are not desired-state sources
 secrets do not enter reports, plans, manifests, or model context
 ```
+
+The first invariant is scoped to Tier 1 (`MANAGED`) hosts, where the shim
+virtualizes `HOME`. A Tier 2 (`BRIDGE`) host — Claude Code today — launches on
+the real user home and therefore does inherit the native user-global scope,
+because virtualizing `HOME` for it would force a fresh login on every
+generation. That is a recorded capability gap, not a silent exception: see
+[ADR 0006](docs/adr/0006-host-tiers.md), which is why the second invariant
+exists.
 
 ## Documentation
 
