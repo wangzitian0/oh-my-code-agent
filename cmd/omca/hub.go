@@ -154,7 +154,7 @@ func runHubStop(stdout, stderr io.Writer, args []string) int {
 		sock = hub.DefaultSocketPath()
 	}
 
-	pidFile := strings.TrimSuffix(sock, ".sock") + ".pid"
+	pidFile := hub.InstanceLockPath(sock)
 	stopped := false
 	if data, err := os.ReadFile(pidFile); err == nil {
 		var pid int
@@ -166,9 +166,22 @@ func runHubStop(stdout, stderr io.Writer, args []string) int {
 		}
 	}
 
-	// Remove socket and pidfile
-	_ = os.Remove(sock)
-	_ = os.Remove(pidFile)
+	// Neither the socket nor the lock file is removed here.
+	//
+	// That pid file is now the instance lock (internal/hub/instancelock.go).
+	// Unlinking it while the daemon still holds it — which is always, since
+	// SIGTERM above is asynchronous and shutdown is not instant — lets the
+	// next hub create and lock a fresh inode at the same path while the
+	// dying one still holds the old one. Two holders, one path: exactly the
+	// orphan wedge the lock was added to close, recreated by the tool meant
+	// to clean up.
+	//
+	// The socket is the daemon's to remove for the same reason, and because
+	// a stop that targeted an already-dead pid would otherwise unlink a
+	// *different*, live daemon's socket. hub.Close removes both. If the
+	// daemon died without cleaning up, the leftovers are inert: the next
+	// Start's ProbeSocket finds the socket unreachable and replaces it, and
+	// the lock file carries no lock.
 
 	if stopped {
 		fmt.Fprintf(stdout, "stopped omca hub daemon (socket %s)\n", sock)

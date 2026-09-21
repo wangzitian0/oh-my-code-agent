@@ -110,6 +110,14 @@ func TestInstanceLock_ReleasedLockIsReacquirable(t *testing.T) {
 		t.Fatalf("Release: %v", err)
 	}
 
+	// Release must not unlink the path. Unlinking reopens the fresh-inode
+	// race one level down: another process can lock the same path between
+	// Close and Remove, and the Remove then unlinks the inode that process
+	// holds, letting a third create and lock a new file at the same name.
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Fatalf("lock file is gone after Release (%v); releasing must close the descriptor, never unlink the path", statErr)
+	}
+
 	again, err := AcquireInstanceLock(path)
 	if err != nil {
 		t.Fatalf("AcquireInstanceLock after Release: %v; a released lock must be reacquirable", err)

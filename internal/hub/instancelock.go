@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -79,6 +80,16 @@ func AcquireInstanceLock(path string) (*InstanceLock, error) {
 		return nil, fmt.Errorf("hub: open instance lock %s: %w", path, err)
 	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = f.Close()
+		// Only EWOULDBLOCK/EAGAIN means "another process holds it". Every
+		// other errno -- EBADF, ENOLCK, EOPNOTSUPP on a filesystem without
+		// flock (some network mounts) -- is a real failure to evaluate the
+		// lock at all. Reporting those as "already running" would make a
+		// caller cheerfully exit 0 on a machine where single-instance
+		// safety is not available, which is the opposite of fail-closed.
+		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
+			return nil, fmt.Errorf("hub: lock instance file %s: %w", path, err)
+		}
 		// flock is advisory, so the holder's pid is still readable here.
 		// Best-effort: a holder that has not written one yet reports 0.
 		pid := 0
@@ -87,7 +98,6 @@ func AcquireInstanceLock(path string) (*InstanceLock, error) {
 				pid = n
 			}
 		}
-		_ = f.Close()
 		return nil, &InstanceHeldError{Path: path, Pid: pid}
 	}
 
@@ -118,9 +128,21 @@ func (l *InstanceLock) Release() error {
 	}
 	err := l.file.Close()
 	l.file = nil
-	// Remove after closing: the next acquirer creates the file again, and
-	// leaving a stale pid behind would make a crashed holder look live to a
-	// human reading the directory.
-	_ = os.Remove(l.path)
+	// The lock file is deliberately NOT unlinked.
+	//
+	// Unlinking it reintroduces the fresh-inode race this whole type exists
+	// to close: between Close (which releases the kernel lock) and a
+	// subsequent os.Remove, another process can open and lock the same path;
+	// the Remove would then unlink the inode that process holds, leaving a
+	// third free to create and lock a new file at the same name. Two holders,
+	// one path — the orphan wedge again, one level down.
+	//
+	// A persistent lock file is the correct shape for flock: the lock lives
+	// on the open file description, not on the name, so the file existing
+	// means nothing on its own. A stale pid inside it is harmless because
+	// AcquireInstanceLock truncates and rewrites it on every successful
+	// acquire, and InstanceHeldError only ever reports a pid when the lock
+	// is actually held — a pid read out of an unlocked file is never shown
+	// to anyone.
 	return err
 }
