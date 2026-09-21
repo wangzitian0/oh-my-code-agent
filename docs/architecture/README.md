@@ -239,6 +239,16 @@ re-creatable observations and compilation results live under XDG cache.
 
 ## 9. Core Interfaces
 
+> **Implementation status.** This section describes the designed contract, not
+> the current build. `internal/plugin` is imported by **no production file
+> outside itself**, `Registry.Register` is never called outside tests, and the
+> only two `HostAdapter` implementations are `transport.RemoteAdapter` (the
+> out-of-process client) and `conformance.FakeAdapter` (a test double).
+> `internal/adapters/claude` and `internal/adapters/codex` are empty packages.
+> Host semantics live instead in hardcoded switches across the core — see
+> [§9.1](#91-where-host-semantics-actually-live). Read what follows as the
+> target the contract was frozen for, and §9.1 as what a migration must move.
+
 Host adapters are plugins behind one frozen contract. They own physical host
 semantics; they do not compose Profiles or classify cross-host Drift.
 
@@ -255,8 +265,9 @@ type PluginManifest struct {
 }
 ```
 
-First-party adapters (`claude-code`, `codex`) compile into the `omca` binary
-but may use only the plugin contract — no private core APIs. The same contract
+First-party adapters (`claude-code`, `codex`) are *designed* to compile into
+the `omca` binary while using only the plugin contract — no private core APIs.
+Neither exists yet; see the status note above. The same contract
 is designed to run out of process (a separate executable speaking the versioned
 protocol over stdio), so an external plugin can qualify a new host without
 forking the core. `internal/plugin/transport` (M6, issue #29) is that
@@ -317,6 +328,38 @@ type AssuranceEngine interface {
 Every request that can affect output carries an explicit Invocation Context,
 Adapter version, Knowledge digest, source fingerprint, and current generation
 ID. No implementation reads a floating `latest` fact implicitly.
+
+### 9.1 Where host semantics actually live
+
+Until a first-party adapter exists, host-specific behavior is hardcoded as
+`switch host` branches spread across the core. This inventory exists so that
+the gap is a known, bounded list rather than something the next reader has to
+rediscover by grepping, and so that a migration to the adapter contract can be
+scoped against a real count. `internal/plugin/importboundary_test.go` keeps it
+honest: adding a host branch in a new file fails that test until this table is
+updated.
+
+| Package | File | What is host-specific |
+|---|---|---|
+| `internal/observe` | `request.go` | Which native sources exist per host, and their scopes |
+| `internal/observe` | `system.go` | System/admin source locations |
+| `internal/runtime` | `compile.go` | Native home dir name, generation layout, config rendering |
+| `internal/context` | `host.go` | Binary name and `--version` probe shape |
+| `internal/auth` | `invoke.go`, `mutablestate.go` | Credential invocation and mutable-state classification |
+| `internal/qualify` | `sandbox.go`, `realhome.go` | Qualification sandbox layout |
+| `internal/domain` | `host_tier.go` | Tier and capability defaults (see [ADR 0006](../adr/0006-host-tiers.md)) |
+| `cmd/omca` | `qualify_tui.go`, `run.go` | Host-specific CLI invocation |
+
+Two consequences worth stating plainly, because the contract's existence
+otherwise implies neither is true:
+
+- Adding a host means editing every file above, not writing one adapter. That
+  is why `pi` (#108) could be added to the host vocabulary while `omca env`
+  still crashed on it — the tier concept existed in one of these files and not
+  in the launch path.
+- `HostAdapter`, `PluginManifest`, `Registry` and the conformance suite are
+  real, tested code, but nothing in the production path drives them. They
+  constrain a future migration; they do not describe the current one.
 
 ## 10. Ownership
 

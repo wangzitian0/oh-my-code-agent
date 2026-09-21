@@ -318,6 +318,15 @@ contract, shipping with its own Knowledge Packs, fixtures, and qualification
 state. The core must load first-party plugins and, once the out-of-process
 transport is qualified, external plugins through the same contract.
 
+**Not satisfied.** The contract exists and is tested; nothing in the production
+path uses it. `internal/plugin` is imported by no production file outside
+itself, `Registry.Register` is never called outside tests, the only
+`HostAdapter` implementations are the transport client and a test double, and
+`internal/adapters/claude` / `internal/adapters/codex` are empty packages.
+Host semantics live in hardcoded switches across eleven core files, inventoried
+in [architecture §9.1](../architecture/README.md#91-where-host-semantics-actually-live)
+and pinned by `TestHostSwitchInventory` so the gap cannot grow unnoticed.
+
 ## 7. Risk-based Confirmation
 
 | Change | Default confirmation |

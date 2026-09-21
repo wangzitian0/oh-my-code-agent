@@ -19,10 +19,18 @@ The primary product outcome is a trusted, explainable report. Configuration
 management is deliberately limited to capabilities that have versioned
 evidence and executable qualification fixtures.
 
-Host support is plugin-based: adapters for Claude Code and OpenAI Codex ship
-first-party behind a frozen adapter contract, and other hosts join through the
-same contract or remain at the knowledge/observation tier. One desired state
-can give parallel hosts in the same worktree deliberately different loadouts.
+Host support is *designed* to be plugin-based: one frozen adapter contract,
+with first-party adapters for Claude Code and OpenAI Codex, and other hosts
+joining through the same contract or remaining at the knowledge/observation
+tier. The contract, its manifest, registry, conformance suite and
+out-of-process transport are implemented and tested — but **no first-party
+adapter exists yet**, and no production code path drives the contract. Host
+semantics are currently hardcoded across eleven files in the core; see
+[architecture §9.1](docs/architecture/README.md#91-where-host-semantics-actually-live)
+for the inventory a migration has to move.
+
+One desired state can give parallel hosts in the same worktree deliberately
+different loadouts.
 
 ## Documentation
 
