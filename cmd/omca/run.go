@@ -337,7 +337,7 @@ func runIsolated(stderr io.Writer, host string, realEnv hostcontext.Environment,
 	// real PATH, exactly like shim.Build (internal/shim/plan.go) does for
 	// the PATH-shim launch path, so the exec below can invoke the real
 	// interpreter directly and never depend on the virtualized HOME either.
-	interpreterPath, interpErr := shim.ResolveShebangInterpreter(execBinaryPath, realEnv.Get("PATH"), "")
+	interpreterPath, interpErr := shim.ResolveShebangInterpreter(execBinaryPath, realEnv.Get("PATH"), "", domain.DefaultHostCapability(host).CanVirtualizeHome)
 	if interpErr != nil {
 		fmt.Fprintf(stderr, "omca: run: %s: %v\n", host, interpErr)
 		return 1

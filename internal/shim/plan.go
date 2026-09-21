@@ -201,7 +201,12 @@ func Build(invokedName string, environ []string) (Plan, error) {
 	// Resolve <name> ourselves, now, using this process's own real PATH
 	// (before virtualization), so Exec can invoke the real interpreter
 	// directly and this second layer never depends on HOME either.
-	interpreterPath, interpErr := ResolveShebangInterpreter(realPath, getEnv(environ, "PATH"), shimDir)
+	// Resolved before the interpreter lookup because it decides whether
+	// that lookup is needed at all: the asdf problem exists only under a
+	// virtualized HOME (ADR 0006).
+	cap := domain.DefaultHostCapability(host)
+
+	interpreterPath, interpErr := ResolveShebangInterpreter(realPath, getEnv(environ, "PATH"), shimDir, cap.CanVirtualizeHome)
 	if interpErr != nil {
 		return Plan{}, fmt.Errorf("shim: Build: %s: %w", invokedName, interpErr)
 	}
@@ -262,8 +267,6 @@ func Build(invokedName string, environ []string) (Plan, error) {
 	if info, statErr := os.Stat(virtualHomeDir); statErr != nil || !info.IsDir() {
 		return Plan{}, fmt.Errorf("shim: Build: current generation %s for %s has no %s directory at %s; run `omca env` again", genDir, host, runtime.VirtualHomeDirName, virtualHomeDir)
 	}
-
-	cap := domain.DefaultHostCapability(host)
 
 	return Plan{
 		Host:              host,
