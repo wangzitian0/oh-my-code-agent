@@ -300,6 +300,15 @@ in this roadmap depends on tolerating the pain until then.
 | The plugin contract churns after external adapters adopt it | Version the contract; additive-only change within v1; a breaking change requires a major contract version and migration notes. |
 | Root/admin policy bypasses runtime isolation | Report boundary and require container/VM for stronger guarantees. |
 
+## Post-M5 Architecture Stream: [OMCA-030] Schema Consolidation
+
+This architectural maintenance task bridges the early "ontology" terminology to canonical
+software engineering contracts:
+- Introduce `internal/schema` as the stable, standard vocabulary for agent configuration (skills, MCP servers, instructions, execution policies).
+- Provide clean aliases for `ConceptSchema`, `LogicalIdentity`, `MergeOperator`, and `Registry`.
+- Clarify state planes (`native`, `observed`, `desired`, `effective`, `current`, `pending`) as standard control plane reconciliation states.
+- Eliminate pseudo-philosophical buzzwords across documentation and developer surfaces.
+
 ## Definition of MVP
 
 MVP ends when M0 through M5 pass for Codex and Claude Code on the first macOS
