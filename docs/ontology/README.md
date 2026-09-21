@@ -145,6 +145,28 @@ scope:
   trust_required: true
 ```
 
+### 2.1 Runtime scope
+
+The table above classifies where a configuration **source** comes from. A
+second question the model needs to answer is where one running instance of a
+**runtime** lives, and for a long time there was only one shape to answer it
+about: the per-worktree generation.
+
+`internal/domain.RuntimeScope` names it, reusing this vocabulary rather than
+inventing a parallel one (`TestRuntimeScope_ValuesAreScopeModelKinds` asserts
+the reuse):
+
+| Runtime scope | One instance per | Instance today |
+|---|---|---|
+| `worktree` | Git worktree | compiled generation + PATH shims |
+| `workspace` | declared set of workspace roots | none yet |
+| `user` | OS user | the resident hub (`internal/hub`) |
+
+This axis exists because per-worktree isolation has a direct consequence:
+anything shared is duplicated once per checkout unless some runtime owns the
+shared scope. Naming the scope is what separates a deliberate shared runtime
+from ambient state leaking across the isolation boundary.
+
 `profile` is orthogonal. Codex selects a profile and then layers project config;
 Hermes changes `HERMES_HOME`; Claude Code has no equivalent native profile
 layer. The resolver must not place all three on one guessed ladder.

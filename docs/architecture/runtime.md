@@ -477,10 +477,28 @@ Each state class must be classified as:
 ```text
 generation-local
 worktree-shared
+workspace-shared
 identity-shared
 host-global external
 prohibited import
 ```
+
+`workspace-shared` is shared across every worktree under one declared set of
+workspace roots. It exists because the gap between "one checkout" and "the
+same account everywhere" was where a host's own provider cache belonged and
+had nowhere to go: classified no wider than one worktree, the same
+recreatable download is stored once per checkout, which is how one codex
+native home reached 126 MB that no other checkout could reuse. Identity scope
+would be the wrong widening — a cache should not follow a person into an
+unrelated employer's checkouts, whereas login state legitimately does.
+
+A class only shares as far as some runtime is there to serve it. Each sharing
+class pairs with exactly one `internal/domain.RuntimeScope`
+(`worktree-shared` ↔ `worktree`, `workspace-shared` ↔ `workspace`,
+`identity-shared` ↔ `user`), asserted by
+`TestRuntimeScope_PairsWithASharingClass`. Classifying state more widely than
+any existing runtime does not make it shared; it makes the classification a
+claim nothing backs.
 
 Codex's own `CODEX_HOME`-resident state (sessions, SQLite databases,
 `auth.json`) is classified `worktree-shared` (§7.1): scoped under

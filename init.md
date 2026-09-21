@@ -138,13 +138,30 @@ state, even when they persist across restarts.
 - Treat prompt compliance as a security boundary.
 - Import every native global asset into an OMCA runtime.
 - Modify shared project or organization policy without a reviewable change.
-- Build a hosted SaaS, secret manager, marketplace, or background fleet manager
-  in v1.
+- Build a hosted SaaS, secret manager, or marketplace in v1.
 - Support every host concept for write operations.
-- Route tasks between hosts, schedule work, or orchestrate parallel host
-  sessions. OMCA makes per-host loadouts cheap, isolated, and comparable;
-  deciding which host works on what remains with the user or a separate
-  orchestration layer built on top of OMCA.
+- Route tasks between hosts, schedule work, or decide which host works on what.
+  OMCA makes per-host loadouts cheap, isolated, and comparable; choosing the
+  work remains with the user or a separate orchestration layer built on top
+  of OMCA.
+
+A local, user-scoped runtime is **not** on this list, and the distinction is
+load-bearing rather than a loophole.
+
+Per-worktree isolation is the product's point, and its direct consequence is
+that anything shared gets duplicated once per checkout unless some runtime
+owns the shared scope. That is not hypothetical: a provider cache classified
+no wider than one worktree reached 126 MB of recreatable bytes that no other
+checkout could reuse, and ADR 0003 forbids copying or symlinking credential
+material into a generation at all, so identity-bound login state has no
+legitimate home inside a generation either. "No shared scope" is therefore
+not an available option; the only choice is whether the shared scope is
+named and owned, or unnamed and paid for N times.
+
+`internal/domain.RuntimeScope` names it, and `internal/hub` is its first
+instance: one daemon per OS user, multiplexing profiles internally, serving
+every window that user has open. What stays out of scope is unchanged —
+it brokers shared tool processes, it does not decide which host does what.
 
 ## Trust Boundary
 
