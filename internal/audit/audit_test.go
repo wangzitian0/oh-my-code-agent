@@ -95,3 +95,54 @@ func TestSynthesizeDoomsdayAudit(t *testing.T) {
 		t.Errorf("markdown report missing finding")
 	}
 }
+
+func TestSynthesizeLeanAudit(t *testing.T) {
+	findings := []ScoutFinding{
+		{
+			Category: CatModuleContract,
+			Scout:    ScoutM_Lean,
+			Topic:    "Breaking API Change",
+			Severity: "HIGH",
+			Details:  "Renamed exported method Execute() to Run() without backward alias",
+			Evidence: "server.go:12",
+		},
+		{
+			Category: CatEngineeringBlind,
+			Scout:    ScoutG_Lean,
+			Topic:    "No Automated Tests Found",
+			Severity: "HIGH",
+			Details:  "Zero test files detected",
+			Evidence: "0 test files",
+		},
+		{
+			Category: CatGoalCompleteness,
+			Scout:    ScoutT_Lean,
+			Topic:    "Scope Complete",
+			Severity: "CLEAN",
+			Details:  "All requirements addressed",
+			Evidence: "all files present",
+		},
+	}
+
+	res := SynthesizeAudit("/sample/project", ModeLean, findings)
+
+	if res.TotalScoutsDeployed != 3 {
+		t.Errorf("expected 3 scouts deployed in lean mode, got %d", res.TotalScoutsDeployed)
+	}
+
+	if res.Mode != ModeLean {
+		t.Errorf("expected mode lean, got %s", res.Mode)
+	}
+
+	if res.Verdict != VerdictBlocked {
+		t.Errorf("expected VerdictBlocked due to HIGH findings, got %s", res.Verdict)
+	}
+
+	md := FormatMarkdown(res)
+	if !strings.Contains(md, "3 马仔精简代码审计报告") {
+		t.Errorf("markdown report missing lean header, got:\n%s", md)
+	}
+	if !strings.Contains(md, "1 + 1 + 1 = 3 位") {
+		t.Errorf("markdown report missing 3 scout scale, got:\n%s", md)
+	}
+}

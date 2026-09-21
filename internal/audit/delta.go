@@ -15,10 +15,21 @@ const (
 	CatGoalCompleteness AuditCategory = "GOAL_COMPLETENESS" // Cat 3: 2 Scouts (向上看: 目标与副作用)
 )
 
-// ScoutRole defines each of the 9 specialized scouts in the Doomsday configuration.
+const (
+	ModeDoomsday = "doomsday"
+	ModeLean     = "lean"
+)
+
+// ScoutRole defines each specialized scout in Doomsday (9) or Lean (3) configurations.
 type ScoutRole string
 
 const (
+	// Lean Configuration: 1 Scout per category (1 + 1 + 1 = 3 Scouts)
+	ScoutM_Lean ScoutRole = "M_CONTRACT_SYNTHESIS" // Cat 1: 综合契约与影响
+	ScoutG_Lean ScoutRole = "G_ENGINEERING_BLIND"  // Cat 2: 裸机工程通用盲审
+	ScoutT_Lean ScoutRole = "T_GOAL_SIDE_EFFECTS"  // Cat 3: 宏观目标与副作用
+
+	// Doomsday Configuration (4 + 3 + 2 = 9 Scouts)
 	// Category 1: 4 Scouts
 	ScoutM1 ScoutRole = "M1_API_BREAKING"
 	ScoutM2 ScoutRole = "M2_SPEC_DEVIATION"
@@ -35,7 +46,7 @@ const (
 	ScoutT2 ScoutRole = "T2_SIDE_EFFECTS"
 )
 
-// ScoutFinding represents a structured finding reported by one of the 9 scouts.
+// ScoutFinding represents a structured finding reported by one of the scouts.
 type ScoutFinding struct {
 	Category AuditCategory `json:"category"`
 	Scout    ScoutRole     `json:"scout"`
@@ -54,9 +65,10 @@ const (
 	VerdictBlocked AuditVerdict = "BLOCKED"
 )
 
-// DoomsdayAuditResult holds the aggregated 4+3+2=9 audit outcome.
+// DoomsdayAuditResult holds the aggregated audit outcome (3-scout Lean or 9-scout Doomsday).
 type DoomsdayAuditResult struct {
 	Target              string          `json:"target"`
+	Mode                string          `json:"mode"`
 	TotalScoutsDeployed int             `json:"total_scouts_deployed"`
 	ModuleScore         float64         `json:"module_score"`      // Cat 1 Score (0.0~1.0)
 	EngineeringScore    float64         `json:"engineering_score"` // Cat 2 Score (0.0~1.0)
@@ -69,11 +81,24 @@ type DoomsdayAuditResult struct {
 	Summary             string          `json:"summary"`
 }
 
-// SynthesizeDoomsdayAudit aggregates findings across all 9 scouts and computes the 3D score.
-func SynthesizeDoomsdayAudit(target string, findings []ScoutFinding) *DoomsdayAuditResult {
+// SynthesizeAudit aggregates findings and computes the 3D score for either Lean (3 scouts) or Doomsday (9 scouts) modes.
+func SynthesizeAudit(target string, mode string, findings []ScoutFinding) *DoomsdayAuditResult {
+	if mode == "" {
+		mode = ModeDoomsday
+	}
+	modeLower := strings.ToLower(mode)
+
+	totalScouts := 9
+	resolvedMode := ModeDoomsday
+	if modeLower == ModeLean {
+		totalScouts = 3
+		resolvedMode = ModeLean
+	}
+
 	res := &DoomsdayAuditResult{
 		Target:              target,
-		TotalScoutsDeployed: 9,
+		Mode:                resolvedMode,
+		TotalScoutsDeployed: totalScouts,
 		ModuleScore:         1.0,
 		EngineeringScore:    1.0,
 		GoalScore:           1.0,
@@ -136,9 +161,19 @@ func SynthesizeDoomsdayAudit(target string, findings []ScoutFinding) *DoomsdayAu
 			len(res.WarningIssues), res.OverallScore)
 	} else {
 		res.Verdict = VerdictPass
-		res.Summary = fmt.Sprintf("✅ 审计全绿通过 (PASS): 9 马仔末日审查无阻断，三维综合评分 %.2f",
-			res.OverallScore)
+		if resolvedMode == ModeLean {
+			res.Summary = fmt.Sprintf("✅ 审计全绿通过 (PASS): 3 马仔精简审查无阻断，三维综合评分 %.2f",
+				res.OverallScore)
+		} else {
+			res.Summary = fmt.Sprintf("✅ 审计全绿通过 (PASS): 9 马仔末日审查无阻断，三维综合评分 %.2f",
+				res.OverallScore)
+		}
 	}
 
 	return res
+}
+
+// SynthesizeDoomsdayAudit aggregates findings across all 9 scouts (backwards compatibility).
+func SynthesizeDoomsdayAudit(target string, findings []ScoutFinding) *DoomsdayAuditResult {
+	return SynthesizeAudit(target, ModeDoomsday, findings)
 }
