@@ -97,6 +97,7 @@ func runDoctor(stdout, stderr io.Writer) int {
 			continue
 		}
 		findings = append(findings, checkPathBypass(host, binName, shimDir))
+		findings = append(findings, checkShimLaunches(host, binName, shimDir))
 		findings = append(findings, checkGenerationFreshness(host, wt, worktreeStateDir, realEnv, shimDir)...)
 	}
 	if f, ok := checkRestartRequired(realEnv, worktreeStateDir); ok {
@@ -189,6 +190,50 @@ func checkObservationTierHost(host, binName, shimDir string) doctorFinding {
 		return doctorFinding{Check: check, Status: statusFail, Detail: fmt.Sprintf("%s (%s) resolves to %s, inside the OMCA shim directory — but OMCA installs shims only for %s, so this is a stale or hand-placed file shadowing the real %s binary; remove it and re-run `omca env`", host, binName, resolved, strings.Join(shimEntryNames, ", "), binName)}
 	}
 	return doctorFinding{Check: check, Status: statusOK, Detail: fmt.Sprintf("%s (%s) is at the observation tier and resolves natively to %s, which is the intended outcome — no generation is compiled and no shim shadows it (ADR 0006)", host, binName, resolved)}
+}
+
+// shimProbeTimeout hard-bounds checkShimLaunches' subprocess, matching
+// direnvStatusTimeout's reasoning: a hang must never be mistaken for a slow
+// but passing check. A var so a test can shrink it.
+var shimProbeTimeout = 10 * time.Second
+
+// checkShimLaunches actually runs the shim.
+//
+// Every other host check inspects paths and manifests. None of them execs
+// anything, and that is how codex stayed "healthy" in this report while
+// being completely unlaunchable: `codex --version` through the shim exited
+// 126 with no output at all, because an asdf-managed interpreter cannot
+// dispatch under the virtualized HOME the shim exec's into (see
+// internal/shim.ResolveShebangInterpreter). path-bypass said OK,
+// stale-generation said OK, binary-moved said OK, and the host did not run.
+//
+// A report nobody can trust is this project's worst failure mode, so one
+// check has to close the loop by invoking the thing. `--version` is the
+// same probe internal/context.DetectHost already uses and documents as
+// safe: it prints a version and exits, starting no session, calling no
+// model and touching no network.
+func checkShimLaunches(host, binName, shimDir string) doctorFinding {
+	check := "shim-launches:" + host
+	shimPath := filepath.Join(shimDir, binName)
+	if info, statErr := os.Stat(shimPath); statErr != nil || info.IsDir() || info.Mode()&0o111 == 0 {
+		return doctorFinding{Check: check, Status: statusWarn, Detail: fmt.Sprintf("no executable %s shim at %s yet — run `omca env`", binName, shimPath)}
+	}
+
+	ctx, cancel := stdcontext.WithTimeout(stdcontext.Background(), shimProbeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, shimPath, "--version")
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return doctorFinding{Check: check, Status: statusFail, Detail: fmt.Sprintf("%s shim at %s did not respond to --version within %s", binName, shimPath, shimProbeTimeout)}
+	}
+	if err != nil {
+		detail := strings.TrimSpace(string(out))
+		if detail == "" {
+			detail = "no output at all, which is what an asdf shim's own dispatch failure looks like under a virtualized HOME"
+		}
+		return doctorFinding{Check: check, Status: statusFail, Detail: fmt.Sprintf("%s shim at %s cannot launch the host: %v (%s) — every path-based check above can still pass while this fails, so trust this one", binName, shimPath, err, detail)}
+	}
+	return doctorFinding{Check: check, Status: statusOK, Detail: fmt.Sprintf("%s shim launches the host: %s", binName, strings.TrimSpace(string(out)))}
 }
 
 // checkGenerationFreshness covers issue #14's remaining two AC checks for

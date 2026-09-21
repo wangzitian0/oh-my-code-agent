@@ -666,3 +666,40 @@ func TestRunDoctor_DirenvApproval_UnknownStateIsNotGuessed(t *testing.T) {
 		t.Errorf("\"allowed 12\" was substring-matched as \"allowed 1\" and reported as not approved:\n%s", out)
 	}
 }
+
+// TestCheckShimLaunches covers the gap that let a completely unlaunchable
+// codex be reported healthy.
+//
+// Every other host check inspects paths and manifests; none execs anything.
+// So when `codex --version` through the shim exited 126 with no output --
+// an asdf-managed interpreter that cannot dispatch under the virtualized
+// HOME the shim exec's into -- path-bypass said OK, stale-generation said
+// OK, binary-moved said OK, and the host did not run.
+//
+// The silent-126 case is asserted explicitly because it is the real one: a
+// check that only noticed loud failures would have missed this exact bug.
+func TestCheckShimLaunches(t *testing.T) {
+	shimDir := t.TempDir()
+
+	if f := checkShimLaunches("codex", "codex", shimDir); f.Status != statusWarn {
+		t.Errorf("no shim installed = %s, want WARN (expected before `omca env`, not a failure); %s", f.Status, f.Detail)
+	}
+
+	writeFakeVersionBinary(t, shimDir, "codex", "codex-cli 0.154.0\n")
+	if f := checkShimLaunches("codex", "codex", shimDir); f.Status != statusOK {
+		t.Errorf("a shim that launches = %s, want OK; %s", f.Status, f.Detail)
+	}
+
+	// The real failure shape: exit 126, nothing on stdout or stderr.
+	broken := t.TempDir()
+	if err := os.WriteFile(filepath.Join(broken, "codex"), []byte("#!/bin/sh\nexit 126\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f := checkShimLaunches("codex", "codex", broken)
+	if f.Status != statusFail {
+		t.Fatalf("a shim exiting 126 with no output = %s, want FAIL — this is the exact shape that stayed invisible; %s", f.Status, f.Detail)
+	}
+	if !strings.Contains(f.Detail, "no output at all") {
+		t.Errorf("a silent failure should say so, since an empty error message is itself the diagnostic: %s", f.Detail)
+	}
+}
