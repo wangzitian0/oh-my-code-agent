@@ -531,3 +531,91 @@ func TestRunDoctor_DirenvApproval_StatusTimesOut(t *testing.T) {
 		t.Errorf("stdout fell back to the generic could-not-determine message instead of reporting the timeout:\n%s", stdout.String())
 	}
 }
+
+// TestRunDoctor_DirenvApproval_NumericStates pins the `direnv status` output
+// format this check parses.
+//
+// direnv >= 2.36 reports "Found RC allowed <n>" instead of "true"/"false".
+// Before this was handled, a correctly approved .envrc fell through to the
+// default branch and `omca doctor` printed "could not determine direnv
+// approval state" plus 25 lines of raw output -- the one check that tells a
+// user why their shims are inactive, turned into noise, on every current
+// direnv install.
+//
+// The numbers are not guessed. Measured against direnv 2.37.1 in a scratch
+// directory: 1 before `direnv allow`, 0 after it, 2 after `direnv deny`.
+func TestRunDoctor_DirenvApproval_NumericStates(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		allowed    string
+		wantStatus string
+		wantDetail string
+	}{
+		{"allowed", "0", "[OK  ]", ".envrc is approved by direnv"},
+		{"not allowed", "1", "[FAIL]", "is NOT approved"},
+		{"denied", "2", "[FAIL]", "explicitly DENIED"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := setupManagedTestEnv(t, false, false)
+			if err := os.WriteFile(filepath.Join(env.WorktreeRoot, ".envrc"), []byte(`eval "$(omca env --shell bash)"`+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			script := "#!/bin/sh\n" +
+				"echo \"Found RC path " + env.WorktreeRoot + "/.envrc\"\n" +
+				"echo \"Found RC allowed " + tc.allowed + "\"\n"
+			if err := os.WriteFile(filepath.Join(env.BinDir, "direnv"), []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			var stdout, stderr bytes.Buffer
+			_ = runDoctor(&stdout, &stderr)
+			out := stdout.String()
+			if strings.Contains(out, "could not determine direnv approval state") {
+				t.Errorf("allowed %s fell through to the generic could-not-determine branch:\n%s", tc.allowed, out)
+			}
+			if !strings.Contains(out, tc.wantDetail) {
+				t.Errorf("allowed %s: stdout does not contain %q:\n%s", tc.allowed, tc.wantDetail, out)
+			}
+			for _, line := range strings.Split(out, "\n") {
+				if strings.Contains(line, "direnv-approval") && !strings.HasPrefix(line, tc.wantStatus) {
+					t.Errorf("allowed %s: direnv-approval line has the wrong status, want prefix %q: %s", tc.allowed, tc.wantStatus, line)
+				}
+			}
+		})
+	}
+}
+
+// TestCheckObservationTierHost covers both directions of the tier-3 check.
+//
+// A tier-3 host resolving to its own native binary is the intended outcome
+// (ADR 0006 decision 1), not the "PATH bypass" FAIL checkPathBypass would
+// report -- that mismatch made `omca doctor` exit 1 on a machine where
+// everything worked, once pi was installed (#108).
+//
+// The failure it does have is the mirror image: a shim shadowing it. A shim
+// entry for a host with no compiled generation cannot serve an invocation,
+// so that host is broken at launch and nothing else reports it.
+func TestCheckObservationTierHost(t *testing.T) {
+	binDir := t.TempDir()
+	shimDir := t.TempDir()
+	writeFakeVersionBinary(t, binDir, "pi", "0.86.1\n")
+	writeFakeVersionBinary(t, shimDir, "pi", "0.86.1\n")
+
+	t.Setenv("PATH", binDir)
+	native := checkObservationTierHost("pi", "pi", shimDir)
+	if native.Status != statusOK {
+		t.Errorf("native resolution = %s, want OK: an observation-tier host is supposed to run natively; %s", native.Status, native.Detail)
+	}
+
+	t.Setenv("PATH", shimDir)
+	shadowed := checkObservationTierHost("pi", "pi", shimDir)
+	if shadowed.Status != statusFail {
+		t.Errorf("shim-shadowed resolution = %s, want FAIL: the shim has no generation for this host, so the invocation would break; %s", shadowed.Status, shadowed.Detail)
+	}
+
+	t.Setenv("PATH", t.TempDir())
+	missing := checkObservationTierHost("pi", "pi", shimDir)
+	if missing.Status != statusWarn {
+		t.Errorf("not-on-PATH = %s, want WARN (absent is not broken); %s", missing.Status, missing.Detail)
+	}
+}
