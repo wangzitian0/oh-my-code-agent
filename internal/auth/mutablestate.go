@@ -1,6 +1,10 @@
 package auth
 
-import "github.com/wangzitian0/oh-my-code-agent/internal/domain"
+import (
+	"strings"
+
+	"github.com/wangzitian0/oh-my-code-agent/internal/domain"
+)
 
 // StateItem is one classified piece of host-written mutable state
 // (docs/architecture/runtime.md §9). NativePath is relative to the host's
@@ -37,6 +41,31 @@ type StateItem struct {
 	RelativeToHomeDir bool
 	Class             domain.MutableStateClass
 	Reason            string
+}
+
+// Matches reports whether a directory entry named name is this item.
+//
+// A trailing "/" in NativePath means "this directory". A "*" means a family
+// of host files that carry a version number in the name, which is the shape
+// that made this table rot by construction: the table listed
+// "state_5.sqlite" by exact name, so when the same host also wrote
+// goals_1.sqlite, logs_2.sqlite and memories_1.sqlite -- plus their -wal and
+// -shm sidecars -- every one of them fell out of classification silently. A
+// table keyed on a version number is a table that expires on the host's next
+// release.
+//
+// Matching is deliberately anchored rather than a substring test: "*" stands
+// for the version segment only, so a pattern can never widen into matching
+// an unrelated file that merely shares a prefix.
+func (s StateItem) Matches(name string) bool {
+	pattern := strings.TrimSuffix(s.NativePath, "/")
+	if !strings.Contains(pattern, "*") {
+		return pattern == name
+	}
+	prefix, suffix, _ := strings.Cut(pattern, "*")
+	return len(name) > len(prefix)+len(suffix) &&
+		strings.HasPrefix(name, prefix) &&
+		strings.HasSuffix(name, suffix)
 }
 
 // RequiredCategories are the mutable-state classes docs/architecture/
@@ -93,8 +122,8 @@ func codexClassification() []StateItem {
 		},
 		{
 			Host: "codex", Category: "sqlite", Name: "state/memory/log SQLite databases",
-			NativePath: "state_5.sqlite", Class: domain.MutableStateGenerationLocal,
-			Reason: "opaque, host-internal SQLite state (also observed: memories_1.sqlite, logs_2.sqlite, goals_1.sqlite); no fixture proves these are safe to share without cross-generation interference, so they default conservative like sessions",
+			NativePath: "*.sqlite", Class: domain.MutableStateGenerationLocal,
+			Reason: "opaque, host-internal SQLite state; no fixture proves these are safe to share without cross-generation interference, so they default conservative like sessions. Matched as a family rather than by exact name: this row listed only state_5.sqlite, so goals_1.sqlite, logs_2.sqlite and memories_1.sqlite -- all observed in the same home -- fell out of classification entirely, and the next version bump would have dropped state_5 too",
 		},
 		{
 			Host: "codex", Category: "cache", Name: "model/plugin/app metadata cache",
@@ -110,6 +139,56 @@ func codexClassification() []StateItem {
 			Host: "codex", Category: "memory", Name: "long-term memory notes",
 			NativePath: "memories/", Class: domain.MutableStateGenerationLocal,
 			Reason: "no fixture yet proves cross-generation or cross-identity memory sharing is safe; conservative default until one exists, mirroring sessions/sqlite above",
+		},
+		{
+			Host: "codex", Category: "sqlite", Name: "SQLite write-ahead log and shared-memory sidecars",
+			NativePath: "*.sqlite-wal", Class: domain.MutableStateGenerationLocal,
+			Reason: "a database's -wal/-shm sidecars are part of that database; classifying them apart from it would let the pair be split across scopes, which corrupts SQLite rather than merely misreporting it",
+		},
+		{
+			Host: "codex", Category: "sqlite", Name: "SQLite shared-memory sidecars",
+			NativePath: "*.sqlite-shm", Class: domain.MutableStateGenerationLocal,
+			Reason: "see *.sqlite-wal: a sidecar shares its database's scope by construction",
+		},
+		{
+			Host: "codex", Category: "credentials", Name: "captured shell environment snapshots",
+			NativePath: "shell_snapshots/", Class: domain.MutableStateProhibitedImport,
+			Reason: "these files are verbatim dumps of a shell environment, so they contain whatever secrets that shell carried -- a real snapshot on the maintainer's machine was found holding a 1Password service-account token in plaintext, world-readable. Same standard as auth.json (ADR 0003 decision item 3): state that mixes credential material with anything else is never copied or symlinked into isolation",
+		},
+		{
+			Host: "codex", Category: "cache", Name: "installed plugin trees",
+			NativePath: "plugins/", Class: domain.MutableStateWorkspaceShared,
+			Reason: "a plugin install is a recreatable download, not per-checkout work: the same tree serves every worktree the same person opens. Observed at 26.6MB in one home, the second-largest single entry. Workspace rather than identity scope because a plugin set is part of how one domain of repositories is worked on, and should not follow a person into an unrelated employer's checkouts",
+		},
+		{
+			Host: "codex", Category: "cache", Name: "model catalog cache",
+			NativePath: "models_cache.json", Class: domain.MutableStateWorkspaceShared,
+			Reason: "a fetched catalog of available models, recreatable and identical across checkouts; same reasoning as the plugin tree",
+		},
+		{
+			Host: "codex", Category: "cache", Name: "host scratch directory",
+			NativePath: "tmp/", Class: domain.MutableStateGenerationLocal,
+			Reason: "scratch the host recreates on demand -- observed at 64.5MB, the single largest entry on this machine, including a full git clone under .tmp/plugins. Generation-local rather than shared precisely because nothing should have to survive here; classifying it is what makes it eligible to be pruned instead of invisible",
+		},
+		{
+			Host: "codex", Category: "cache", Name: "host scratch directory (dot-prefixed variant)",
+			NativePath: ".tmp/", Class: domain.MutableStateGenerationLocal,
+			Reason: "the same scratch directory, observed under both spellings in different host versions; see tmp/",
+		},
+		{
+			Host: "codex", Category: "sessions", Name: "command history",
+			NativePath: "history.jsonl", Class: domain.MutableStateGenerationLocal,
+			Reason: "named in the sessions row's own default list; given its own row so it is classified rather than merely mentioned",
+		},
+		{
+			Host: "codex", Category: "installation-metadata", Name: "version marker file",
+			NativePath: "version.json", Class: domain.MutableStateHostGlobalExternal,
+			Reason: "the host's own record of which version wrote this home; owned by the host, regenerated in a fresh home, never migrated",
+		},
+		{
+			Host: "codex", Category: "cache", Name: "host-managed skill tree",
+			NativePath: "skills/", Class: domain.MutableStateGenerationLocal,
+			Reason: "skills under the native home are host-managed content a generation is supposed to control, and the isolation invariant exists precisely to stop one generation's skill set leaking into another; conservative until a fixture proves a narrower share is safe",
 		},
 		{
 			Host: "codex", Category: "installation-metadata", Name: "installation id and version marker",
@@ -140,6 +219,16 @@ func claudeClassification() []StateItem {
 			Host: "claude-code", Category: "logs", Name: "daemon and debug logs",
 			NativePath: "daemon.log", Class: domain.MutableStateGenerationLocal,
 			Reason: "a generation's own run diagnostics (debug/ follows the same default); not shared",
+		},
+		{
+			Host: "claude-code", Category: "cache", Name: "installed plugin trees",
+			NativePath: "plugins/", Class: domain.MutableStateWorkspaceShared,
+			Reason: "same reasoning as codex's plugin tree: a recreatable install, identical across every checkout one person opens, and scoped to a workspace rather than an identity so a plugin set does not follow a person between unrelated domains of work",
+		},
+		{
+			Host: "claude-code", Category: "installation-metadata", Name: "settings backups and update markers",
+			NativePath: "backups/", Class: domain.MutableStateGenerationLocal,
+			Reason: "point-in-time copies of a generation's own settings; sharing them across generations would let one generation restore another's configuration, which is the drift the immutable-generation model exists to prevent",
 		},
 		{
 			Host: "claude-code", Category: "cache", Name: "stats/history/PR-status caches",

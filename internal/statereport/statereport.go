@@ -22,7 +22,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/wangzitian0/oh-my-code-agent/internal/auth"
 	"github.com/wangzitian0/oh-my-code-agent/internal/domain"
@@ -150,7 +149,7 @@ func Measure(stateRoot string) (Result, error) {
 // table's own NativePath, with a trailing slash meaning "this directory".
 func classify(items []auth.StateItem, name string) (domain.MutableStateClass, bool) {
 	for _, it := range items {
-		if strings.TrimSuffix(it.NativePath, "/") == name {
+		if it.Matches(name) {
 			return it.Class, true
 		}
 	}
