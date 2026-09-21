@@ -124,8 +124,44 @@ func TestDetectWorktree_LinkedWorktreeGitFile(t *testing.T) {
 	if wt.GitDir != wantGitDir {
 		t.Errorf("GitDir = %q, want %q", wt.GitDir, wantGitDir)
 	}
+	wantMainRoot, err := filepath.EvalSymlinks(filepath.Dir(filepath.Dir(filepath.Dir(mainGitDir))))
+	if err == nil && wt.MainRoot != wantMainRoot {
+		t.Errorf("MainRoot = %q, want %q", wt.MainRoot, wantMainRoot)
+	}
 	if wt.ID == "" {
 		t.Error("ID is empty for a linked worktree")
+	}
+}
+
+func TestDetectWorktree_LinkedWorktreeCommondir(t *testing.T) {
+	mainRepo := filepath.Join(t.TempDir(), "main-repo")
+	mainGitDir := filepath.Join(mainRepo, ".git")
+	linkedWorktreeGitDir := filepath.Join(mainGitDir, "worktrees", "linked")
+	if err := os.MkdirAll(linkedWorktreeGitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(linkedWorktreeGitDir, "commondir"), []byte("../..\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	linkedRoot := filepath.Join(t.TempDir(), "linked-worktree")
+	if err := os.MkdirAll(linkedRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(linkedRoot, ".git"), []byte("gitdir: "+linkedWorktreeGitDir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	wt, err := DetectWorktree(linkedRoot)
+	if err != nil {
+		t.Fatalf("DetectWorktree: %v", err)
+	}
+	wantMainRoot, err := filepath.EvalSymlinks(mainRepo)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	if wt.MainRoot != wantMainRoot {
+		t.Errorf("MainRoot = %q, want %q", wt.MainRoot, wantMainRoot)
 	}
 }
 

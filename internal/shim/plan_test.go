@@ -463,3 +463,61 @@ func TestBuild_InterpreterPath_Empty_WhenTargetIsNotEnvIndirectScript(t *testing
 		t.Errorf("InterpreterPath = %q, want \"\" (RealBinaryPath is not an env-indirect script)", plan.InterpreterPath)
 	}
 }
+
+func TestBuild_ClaudeCode_BridgeManagedDoesNotVirtualizeHome(t *testing.T) {
+	stateDir := t.TempDir()
+	root := t.TempDir()
+	worktreeRoot := filepath.Join(root, "project")
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	det := hostcontext.HostDetection{
+		Host:       "claude-code",
+		Surface:    "cli",
+		Version:    "2.1.272",
+		Installed:  true,
+		BinaryPath: filepath.Join(root, "bin", "claude"),
+	}
+	wt := hostcontext.Worktree{ID: "worktree:sha256:" + fixtureHex(root), Root: worktreeRoot}
+	req := runtime.BootstrapRequest{
+		Detection: det,
+		Worktree:  wt,
+		Now:       time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC),
+	}
+	gen, outputDir, err := runtime.EnsureGeneration(req, filepath.Join(stateDir, "generations"))
+	if err != nil {
+		t.Fatalf("EnsureGeneration: %v", err)
+	}
+	restoreWritable(t, outputDir)
+	if err := runtime.SetCurrentGeneration(stateDir, "claude-code", outputDir, gen, det, req.Now); err != nil {
+		t.Fatalf("SetCurrentGeneration: %v", err)
+	}
+
+	shimDir := t.TempDir()
+	writeFakeExecutable(t, shimDir, "claude")
+	realDir := t.TempDir()
+	writeFakeExecutable(t, realDir, "claude")
+
+	realHome := t.TempDir()
+	environ := []string{
+		"PATH=" + shimDir + string(os.PathListSeparator) + realDir,
+		"OMCA_SHIM_DIR=" + shimDir,
+		"OMCA_STATE_DIR=" + stateDir,
+		"HOME=" + realHome,
+	}
+
+	plan, err := Build("claude", environ)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if plan.Host != "claude-code" {
+		t.Errorf("Host = %q, want %q", plan.Host, "claude-code")
+	}
+	if plan.CanVirtualizeHome {
+		t.Errorf("CanVirtualizeHome = true, want false for Tier 2 Bridge-Managed claude-code")
+	}
+	if plan.NativeHomeEnvVar != "CLAUDE_CONFIG_DIR" {
+		t.Errorf("NativeHomeEnvVar = %q, want CLAUDE_CONFIG_DIR", plan.NativeHomeEnvVar)
+	}
+}
+

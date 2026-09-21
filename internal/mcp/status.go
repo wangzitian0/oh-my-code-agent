@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/wangzitian0/oh-my-code-agent/internal/contextcost"
+	"github.com/wangzitian0/oh-my-code-agent/internal/domain"
 	"github.com/wangzitian0/oh-my-code-agent/internal/runtime"
 )
 
@@ -204,6 +205,23 @@ func hostStatus(worktreeStateDir, host string) HostStatus {
 	gen, err := runtime.ReadGenerationManifest(genDir)
 	if err != nil {
 		return HostStatus{Host: host, Managed: false, Detail: fmt.Sprintf("current generation manifest for %s at %s is unreadable: %v", host, genDir, err)}
+	}
+
+	cap := domain.DefaultHostCapability(host)
+	if cap.Tier == domain.TierBridge {
+		cost := ContextCostEstimate{
+			EstimatedTokensExcluded: 0,
+			Confidence:              "n/a (native credentials and skills retained for Keychain/OAuth integrity)",
+		}
+		return HostStatus{
+			Host:               host,
+			Managed:            true,
+			GenerationID:       gen.Metadata.ID,
+			ExcludedMCPServers: 0,
+			ExcludedSkills:     0,
+			ContextCost:        &cost,
+			Detail:             fmt.Sprintf("managed (bridge): current generation %s; governed via MCP Hub Bridge", gen.Metadata.ID),
+		}
 	}
 
 	excludedMCP, excludedSkills := CountUserExclusions(gen)

@@ -94,11 +94,20 @@ func LoadBindings(dirs []string) ([]domain.Binding, error) {
 // Binding-match-layer precedence only if a real case surfaces where two
 // matched Bindings' selected Profiles conflict in a way the downstream
 // merge operators cannot already resolve.
+// MatchBindings delegates to MatchBindingsWithMain with an empty mainRepository.
 func MatchBindings(bindings []domain.Binding, repository, relPath string) []domain.Binding {
+	return MatchBindingsWithMain(bindings, repository, "", relPath)
+}
+
+// MatchBindingsWithMain returns every Binding in bindings whose spec.match selects
+// repository (or mainRepository when non-empty, for linked worktrees).
+func MatchBindingsWithMain(bindings []domain.Binding, repository, mainRepository, relPath string) []domain.Binding {
 	var out []domain.Binding
 	for _, b := range bindings {
 		if !matchesRepository(b.Spec.Match, repository) {
-			continue
+			if mainRepository == "" || !matchesRepository(b.Spec.Match, mainRepository) {
+				continue
+			}
 		}
 		if matchesPaths(b.Spec.Match.Paths, relPath) {
 			out = append(out, b)

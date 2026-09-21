@@ -24,8 +24,9 @@ type CompositionInput struct {
 	// Repository and RelPath identify the context Bindings are matched
 	// against (MatchBindings). RelPath uses "/" separators and "" for the
 	// repository root.
-	Repository string
-	RelPath    string
+	Repository     string
+	MainRepository string
+	RelPath        string
 
 	// ProfileDirs, BindingDirs, and ExceptionDirs are every directory to
 	// load the respective document kind from, both the user config layout
@@ -112,7 +113,7 @@ func Compose(input CompositionInput) (CompositionResult, error) {
 	if err != nil {
 		return CompositionResult{}, err
 	}
-	matched := MatchBindings(bindings, input.Repository, input.RelPath)
+	matched := MatchBindingsWithMain(bindings, input.Repository, input.MainRepository, input.RelPath)
 	matchedIDs := MatchedProfileIDs(matched)
 
 	resolution := ResolveIdentities(matchedIDs)

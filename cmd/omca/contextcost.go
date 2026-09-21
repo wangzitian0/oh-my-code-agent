@@ -17,6 +17,13 @@ import (
 // both the omca_status MCP response and wherever omca doctor/omca env/a
 // report-producing command already prints diagnostic output."
 func contextCostSummaryLine(host string, gen domain.Generation) string {
+	cap := domain.DefaultHostCapability(host)
+	if cap.Tier == domain.TierBridge {
+		return fmt.Sprintf(
+			"%s: Tier 2 (Bridge-Managed); native credentials and skills retained for Keychain/OAuth integrity; governed via MCP Hub Bridge",
+			host,
+		)
+	}
 	excludedMCP, excludedSkills := mcp.CountUserExclusions(gen)
 	cost := mcp.EstimateContextCost(excludedMCP, excludedSkills)
 	return fmt.Sprintf(

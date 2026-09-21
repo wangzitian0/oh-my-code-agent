@@ -25,6 +25,9 @@ type Worktree struct {
 	// itself for the main worktree, or the target of the `gitdir:` pointer
 	// file for a linked worktree or submodule.
 	GitDir string `json:"gitDir,omitempty"`
+	// MainRoot is the resolved absolute path to the main repository worktree root
+	// if this is a linked worktree, or identical to Root for a standard worktree.
+	MainRoot string `json:"mainRoot,omitempty"`
 }
 
 // DetectWorktree resolves the Git worktree containing startDir by walking
@@ -54,9 +57,13 @@ func DetectWorktree(startDir string) (Worktree, error) {
 		info, statErr := os.Stat(gitPath)
 		if statErr == nil {
 			gitDir := gitPath
+			mainRoot := dir
 			if !info.IsDir() {
 				if resolvedGitDir, parseErr := parseGitLinkFile(gitPath); parseErr == nil {
 					gitDir = resolvedGitDir
+					if mr, mrErr := resolveMainRootFromGitDir(resolvedGitDir); mrErr == nil && mr != "" {
+						mainRoot = mr
+					}
 				}
 			}
 			digest, digestErr := domain.CanonicalDigest(dir)
@@ -64,9 +71,10 @@ func DetectWorktree(startDir string) (Worktree, error) {
 				return Worktree{}, fmt.Errorf("context: DetectWorktree: %w", digestErr)
 			}
 			return Worktree{
-				ID:     "worktree:" + digest,
-				Root:   dir,
-				GitDir: gitDir,
+				ID:       "worktree:" + digest,
+				Root:     dir,
+				GitDir:   gitDir,
+				MainRoot: mainRoot,
 			}, nil
 		}
 		if !os.IsNotExist(statErr) {
@@ -118,4 +126,36 @@ func parseGitLinkFile(path string) (string, error) {
 		return evaluated, nil
 	}
 	return target, nil
+}
+
+// resolveMainRootFromGitDir inspects a linked worktree's gitDir to find the
+// main repository root. In git's worktree model, a linked worktree's gitdir is
+// <common-git-dir>/worktrees/<worktree-name>. A "commondir" file inside it contains
+// the relative path to <common-git-dir>. The parent of <common-git-dir> is the
+// main repository working tree. If commondir is missing, it falls back to inspecting
+// the worktrees/<name> parent path structure.
+func resolveMainRootFromGitDir(gitDir string) (string, error) {
+	commondirFile := filepath.Join(gitDir, "commondir")
+	raw, err := os.ReadFile(commondirFile)
+	if err == nil {
+		rel := strings.TrimSpace(string(raw))
+		if rel != "" {
+			commonGitDir := rel
+			if !filepath.IsAbs(commonGitDir) {
+				commonGitDir = filepath.Join(gitDir, rel)
+			}
+			commonGitDir = filepath.Clean(commonGitDir)
+			if filepath.Base(commonGitDir) == ".git" {
+				return filepath.EvalSymlinks(filepath.Dir(commonGitDir))
+			}
+		}
+	}
+	parent := filepath.Dir(gitDir)
+	if filepath.Base(parent) == "worktrees" {
+		dotGit := filepath.Dir(parent)
+		if filepath.Base(dotGit) == ".git" {
+			return filepath.EvalSymlinks(filepath.Dir(dotGit))
+		}
+	}
+	return "", fmt.Errorf("unable to resolve main root from gitdir %s", gitDir)
 }

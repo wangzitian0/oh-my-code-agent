@@ -97,9 +97,11 @@ func sortStrings(keys []string) {
 // Like ExecReplace, this never returns on success.
 func (p Plan) Exec(args []string, environ []string) error {
 	overrides := map[string]string{
-		p.NativeHomeEnvVar: p.NativeHomeDir,
-		"HOME":             p.VirtualHomeDir,
-		"OMCA_REAL_HOME":   p.RealHomeDir,
+		"OMCA_REAL_HOME": p.RealHomeDir,
+	}
+	if p.CanVirtualizeHome {
+		overrides[p.NativeHomeEnvVar] = p.NativeHomeDir
+		overrides["HOME"] = p.VirtualHomeDir
 	}
 	if p.GenerationID != "" {
 		overrides["OMCA_RUN_ID"] = p.GenerationID

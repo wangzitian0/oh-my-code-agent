@@ -171,9 +171,10 @@ func composeDesiredStateForBisect(wt hostcontext.Worktree, worktreeStateDir stri
 	if err != nil {
 		return profiles.CompositionResult{}, err
 	}
-	profileDirs, bindingDirs, exceptionDirs := compositionDirsFor(configRoot, wt.Root)
+	profileDirs, bindingDirs, exceptionDirs := compositionDirsFor(configRoot, wt.Root, wt.MainRoot)
 	composition, err := profiles.Compose(profiles.CompositionInput{
 		Repository:       wt.Root,
+		MainRepository:   wt.MainRoot,
 		ProfileDirs:      profileDirs,
 		BindingDirs:      bindingDirs,
 		ExceptionDirs:    exceptionDirs,

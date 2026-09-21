@@ -45,7 +45,7 @@ func realConfigRoot() (string, error) {
 // .../exceptions/) plus the repository's own <repository>/.omca/profiles/
 // and <repository>/.omca/exceptions/ (internal/profiles.CompositionInput's
 // own doc comment names exactly this set).
-func compositionDirsFor(configRoot, repoRoot string) (profileDirs, bindingDirs, exceptionDirs []string) {
+func compositionDirsFor(configRoot, repoRoot string, extraRoots ...string) (profileDirs, bindingDirs, exceptionDirs []string) {
 	profileDirs = []string{
 		filepath.Join(configRoot, "profiles", "personal"),
 		filepath.Join(configRoot, "profiles", "company"),
@@ -53,10 +53,20 @@ func compositionDirsFor(configRoot, repoRoot string) (profileDirs, bindingDirs, 
 		filepath.Join(configRoot, "profiles", "task"),
 		filepath.Join(repoRoot, ".omca", "profiles"),
 	}
+	for _, extra := range extraRoots {
+		if extra != "" && extra != repoRoot {
+			profileDirs = append(profileDirs, filepath.Join(extra, ".omca", "profiles"))
+		}
+	}
 	bindingDirs = []string{filepath.Join(configRoot, "bindings")}
 	exceptionDirs = []string{
 		filepath.Join(configRoot, "exceptions"),
 		filepath.Join(repoRoot, ".omca", "exceptions"),
+	}
+	for _, extra := range extraRoots {
+		if extra != "" && extra != repoRoot {
+			exceptionDirs = append(exceptionDirs, filepath.Join(extra, ".omca", "exceptions"))
+		}
 	}
 	return profileDirs, bindingDirs, exceptionDirs
 }
@@ -264,9 +274,10 @@ func composeFreshCompileRequest(wt hostcontext.Worktree, pendingGen domain.Gener
 	if err != nil {
 		return runtime.CompileRequest{}, err
 	}
-	profileDirs, bindingDirs, exceptionDirs := compositionDirsFor(configRoot, wt.Root)
+	profileDirs, bindingDirs, exceptionDirs := compositionDirsFor(configRoot, wt.Root, wt.MainRoot)
 	composition, err := profiles.Compose(profiles.CompositionInput{
 		Repository:       wt.Root,
+		MainRepository:   wt.MainRoot,
 		ProfileDirs:      profileDirs,
 		BindingDirs:      bindingDirs,
 		ExceptionDirs:    exceptionDirs,

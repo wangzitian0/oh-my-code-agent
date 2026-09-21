@@ -86,7 +86,7 @@ func (ctx ActionContext) enabled() bool {
 // unexported function of cmd/omca (package main), which internal/tui can
 // never import. See this package's doc.go for the full trade-off this
 // mirror makes.
-func compositionDirsForAction(configRoot, repoRoot string) (profileDirs, bindingDirs, exceptionDirs []string) {
+func compositionDirsForAction(configRoot, repoRoot string, extraRoots ...string) (profileDirs, bindingDirs, exceptionDirs []string) {
 	profileDirs = []string{
 		filepath.Join(configRoot, "profiles", "personal"),
 		filepath.Join(configRoot, "profiles", "company"),
@@ -94,10 +94,20 @@ func compositionDirsForAction(configRoot, repoRoot string) (profileDirs, binding
 		filepath.Join(configRoot, "profiles", "task"),
 		filepath.Join(repoRoot, ".omca", "profiles"),
 	}
+	for _, extra := range extraRoots {
+		if extra != "" && extra != repoRoot {
+			profileDirs = append(profileDirs, filepath.Join(extra, ".omca", "profiles"))
+		}
+	}
 	bindingDirs = []string{filepath.Join(configRoot, "bindings")}
 	exceptionDirs = []string{
 		filepath.Join(configRoot, "exceptions"),
 		filepath.Join(repoRoot, ".omca", "exceptions"),
+	}
+	for _, extra := range extraRoots {
+		if extra != "" && extra != repoRoot {
+			exceptionDirs = append(exceptionDirs, filepath.Join(extra, ".omca", "exceptions"))
+		}
 	}
 	return profileDirs, bindingDirs, exceptionDirs
 }
@@ -118,9 +128,10 @@ func omcaCommandPathForAction(shimDir string) string {
 // own wording, matching composeFreshCompileRequest's identical treatment of
 // this same error.
 func composeDesiredState(ctx ActionContext, now time.Time) (profiles.CompositionResult, error) {
-	profileDirs, bindingDirs, exceptionDirs := compositionDirsForAction(ctx.ConfigRoot, ctx.Worktree.Root)
+	profileDirs, bindingDirs, exceptionDirs := compositionDirsForAction(ctx.ConfigRoot, ctx.Worktree.Root, ctx.Worktree.MainRoot)
 	composed, err := profiles.Compose(profiles.CompositionInput{
 		Repository:       ctx.Worktree.Root,
+		MainRepository:   ctx.Worktree.MainRoot,
 		ProfileDirs:      profileDirs,
 		BindingDirs:      bindingDirs,
 		ExceptionDirs:    exceptionDirs,
