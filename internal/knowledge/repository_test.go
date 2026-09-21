@@ -324,4 +324,20 @@ func TestDefault_LoadsRealCommittedPacks(t *testing.T) {
 			t.Errorf("untested Codex %s must remain unqualified", version)
 		}
 	}
+
+	piInstalled := repo.Resolve("pi", "cli", "0.86.1")
+	if !piInstalled.Qualified || piInstalled.PackID != "pi:cli:0.86.1" {
+		t.Fatalf("installed exact-version qualification missing: %+v", piInstalled)
+	}
+	for _, concept := range []string{"instruction", "skill", "mcp_server", "hook",
+		"policy", "plugin"} {
+		if mode := piInstalled.CapabilityFor(concept).ReconcileMode; mode != ReconcileModeObserved {
+			t.Errorf("pi 0.86.1 %s mode = %q, want OBSERVED", concept, mode)
+		}
+	}
+	for _, version := range []string{"0.86.0", "0.86.2", "0.87.0"} {
+		if repo.Resolve("pi", "cli", version).Qualified {
+			t.Errorf("untested pi %s must remain unqualified", version)
+		}
+	}
 }

@@ -1,0 +1,41 @@
+{
+  "kind": "InteractiveTUIQualification",
+  "generatedAt": "2026-09-21T09:05:00Z",
+  "hosts": [
+    {
+      "host": "pi",
+      "version": "0.86.1",
+      "knowledgePack": "pi:cli:0.86.1",
+      "checks": [
+        {
+          "id": "knowledge-pack",
+          "status": "PASS",
+          "evidence": "E2",
+          "detail": "installed host version is covered by pi:cli:0.86.1 (>=0.86.1 <0.86.2)"
+        },
+        {
+          "id": "discovery-surface-unchanged",
+          "status": "PASS",
+          "evidence": "E2",
+          "detail": "docs/skills.md is byte-identical between the 0.85.1 and 0.86.1 npm tarballs; the 0.86.0/0.86.1 changes (extension SDK shapes, cacheWarming setting, /bug command, PI_RADIUS_GATEWAY env) touch no concept on omca's observation surface, so capability facts carry over verbatim from pi:cli:0.85"
+        },
+        {
+          "id": "native-state-clean",
+          "status": "PASS",
+          "evidence": "E3",
+          "detail": "shasum over every *.json/*.jsonl under PI_CODING_AGENT_DIR and ~/.agents/skills taken before and after running only `pi --version` and `pi --help` is unchanged; no native file was written during qualification"
+        },
+        {
+          "id": "human-interactive-tui",
+          "status": "UNKNOWN",
+          "evidence": "E0",
+          "detail": "pi interactive TUI launch and any model canary require a human session; this pack is observation-tier only, so no interactive check is attempted"
+        }
+      ],
+      "complete": false
+    }
+  ],
+  "realNativeStateClean": true,
+  "interactiveAttempted": false,
+  "complete": false
+}

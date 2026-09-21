@@ -1,0 +1,108 @@
+{
+  "apiVersion": "omca.dev/v1alpha1",
+  "kind": "HostKnowledge",
+  "metadata": {
+    "id": "pi:cli:0.86.1",
+    "host": "pi",
+    "surface": "cli",
+    "versionRange": ">=0.86.1 <0.86.2",
+    "platforms": [
+      "darwin-arm64"
+    ],
+    "observedAt": "2026-09-21",
+    "recheckAfter": "2026-10-21",
+    "status": "FRESH"
+  },
+  "evidence": [
+    {
+      "id": "pi-settings-doc",
+      "kind": "official-doc",
+      "url": "https://pi.dev/docs/latest/settings"
+    },
+    {
+      "id": "pi-usage-doc",
+      "kind": "official-doc",
+      "url": "https://pi.dev/docs/latest/usage"
+    },
+    {
+      "id": "pi-skills-doc",
+      "kind": "official-doc",
+      "url": "https://pi.dev/docs/latest/skills"
+    },
+    {
+      "id": "pi-extensions-doc",
+      "kind": "official-doc",
+      "url": "https://pi.dev/docs/latest/extensions"
+    },
+    {
+      "id": "pi-environment-variables-doc",
+      "kind": "official-doc",
+      "url": "https://pi.dev/docs/latest/environment-variables"
+    },
+    {
+      "id": "pi-0.86.1-safe-host-qualification",
+      "kind": "maintainer-observation",
+      "path": "docs/evidence/pi-0.86.1-candidate-qualification.json",
+      "digest": "sha256:270fefa71752c5b9439d991ed3e8aff29bb627c6f076aed854d472dd0c3f4746"
+    }
+  ],
+  "capabilities": {
+    "instruction": {
+      "discover": "EXACT",
+      "resolve": "UNKNOWN",
+      "reconcileMode": "OBSERVED",
+      "verificationMethods": [
+        "official-doc-review"
+      ]
+    },
+    "skill": {
+      "discover": "PARTIAL",
+      "resolve": "UNKNOWN",
+      "reconcileMode": "OBSERVED",
+      "verificationMethods": [
+        "official-doc-review"
+      ]
+    },
+    "mcp_server": {
+      "discover": "UNSUPPORTED",
+      "resolve": "UNSUPPORTED",
+      "reconcileMode": "OBSERVED",
+      "verificationMethods": [
+        "official-doc-review"
+      ]
+    },
+    "hook": {
+      "discover": "UNSUPPORTED",
+      "resolve": "UNSUPPORTED",
+      "reconcileMode": "OBSERVED",
+      "verificationMethods": [
+        "official-doc-review"
+      ]
+    },
+    "policy": {
+      "discover": "PARTIAL",
+      "resolve": "UNKNOWN",
+      "reconcileMode": "OBSERVED",
+      "verificationMethods": [
+        "official-doc-review"
+      ]
+    },
+    "plugin": {
+      "discover": "PARTIAL",
+      "resolve": "UNKNOWN",
+      "reconcileMode": "OBSERVED",
+      "verificationMethods": [
+        "official-doc-review"
+      ]
+    }
+  },
+  "knownUnknowns": [
+    "root-level .md files with valid skill frontmatter are natively discoverable skills in ~/.pi/agent/skills and .pi/skills, but the adapter's SKILL.md-marker walk only finds directory-shaped skills -- a declared discovery gap, not an invented equivalence",
+    "same-name duplicate skill resolution across the four skill roots (~/.pi/agent/skills, ~/.agents/skills, .pi/skills, project .agents/skills ancestors) is UNKNOWN until a versioned fixture proves the scan order",
+    "whether the global ~/.pi/agent home honors AGENTS.override.md the way each context-chain directory does is documented only for chain directories; the adapter does not observe a global AGENTS.override.md candidate on that assumption",
+    "whether .pi/skills and .pi/extensions resolve through ancestor directories the way .agents/skills explicitly does is ambiguous in the official docs; the adapter treats them as workspace-root-only",
+    "MCP servers and hooks are implemented through pi extensions (executable code), not a declarative registry; the adapter deliberately does not translate extension code into mcp_server or hook entities (docs/ontology/README.md section 6.7)",
+    "PI_CODING_AGENT_DIR relocation was verified against the official environment-variables reference and a real 0.85.1 installation's directory layout, but never behaviorally confirmed by launching pi with the variable set",
+    "the observation adapter does not follow symlinked skill directories under any discovery root (a cross-host scope-containment invariant of internal/observe), while pi itself loads them: on the reference machine all four ~/.agents/skills entries are symlinks into a shared checkout and load in real pi sessions but are absent from omca's inventory -- a declared adapter-level gap, not a claim about pi's own behavior"
+  ]
+}
