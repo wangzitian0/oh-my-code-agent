@@ -6,23 +6,66 @@ on:
   pull_request:
 
 jobs:
+  detect-changes:
+    name: Detect Non-Doc Changes
+    runs-on: ubuntu-latest
+    outputs:
+      has_non_doc: ${{ steps.check.outputs.has_non_doc }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check whether changed files are doc-only
+        id: check
+        run: |
+          set -e
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          else
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+          fi
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            echo "has_non_doc=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git diff --name-only "$base" "$head")
+          echo "Changed files:"
+          echo "$changed"
+
+          has_non_doc=false
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            case "$f" in
+              docs/*|*.md|*.png|*.jpg|*.svg|.github/mlc_config.json)
+                ;;
+              *)
+                has_non_doc=true
+                break
+                ;;
+            esac
+          done <<EOF
+          $changed
+          EOF
+
+          echo "has_non_doc=$has_non_doc" >> "$GITHUB_OUTPUT"
+
   build-test:
-    # Pinned to macos-14, not macos-latest: GitHub's macos-latest label
-    # rolled forward to macOS Tahoe (26) mid-session, and Go's internal
-    # linker does not emit an LC_UUID load command Tahoe's dyld now
-    # requires, so every -race test binary aborted at startup
-    # ("dyld: missing LC_UUID load command") -- a known, external Go/macOS
-    # toolchain incompatibility (golang/go#78012), not a regression in any
-    # PR's own code. Revisit this pin once Go ships a fix for Tahoe's
-    # stricter dyld (or once this project's own Go version is bumped past
-    # whatever release resolves it) rather than tracking macos-latest again
-    # blindly.
-    runs-on: macos-14
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_non_doc == 'true'
+    # Runs on ubuntu-latest: omca is pure Go without macOS dependencies.
+    # Linux runners provision instantly (2-3s vs 30s) and have 4x higher
+    # free concurrency limit (20 vs 5), eliminating Actions queue lag.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
+          cache: true
       - name: Build
         run: make build
       - name: Test
@@ -50,12 +93,15 @@ jobs:
         run: make perf
 
   lint:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has_non_doc == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
+          cache: true
       - uses: golangci/golangci-lint-action@v6
         with:
           version: latest
