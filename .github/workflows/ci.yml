@@ -56,10 +56,10 @@ jobs:
   build-test:
     needs: detect-changes
     if: needs.detect-changes.outputs.has_non_doc == 'true'
-    # Runs on ubuntu-latest: omca is pure Go without macOS dependencies.
-    # Linux runners provision instantly (2-3s vs 30s) and have 4x higher
-    # free concurrency limit (20 vs 5), eliminating Actions queue lag.
-    runs-on: ubuntu-latest
+    # Pinned to macos-14: cmd/omca tests currently rely on Darwin semantics
+    # (macOS lacks Linux ETXTBSY when replacing running shims, and handles TTY/umask differently).
+    # Doc PRs skip this job via detect-changes.
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
