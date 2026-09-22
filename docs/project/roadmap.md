@@ -314,6 +314,36 @@ software engineering contracts:
 - Clarify state planes (`native`, `observed`, `desired`, `effective`, `current`, `pending`) as standard control plane reconciliation states.
 - Eliminate pseudo-philosophical buzzwords across documentation and developer surfaces.
 
+## Stream H: Harness boundary (runtime side)
+
+Status: accepted 2026-09-23 (owner), tracked by
+[infra2#820](https://github.com/wangzitian0/infra2/issues/820); design and
+evidence in [dev_env#80](https://github.com/wangzitian0/dev_env/issues/80).
+
+The boundary: content that needs review lives in `dev_env` (rules, skills,
+MCP specs, the render function); resident processes and machine state live in
+OMCA; a checkout holds only its own `AGENTS.md` and receives rendered
+artifacts at fixed, git-excluded paths. OMCA therefore brokers, watches,
+reports and displays — it never holds content, never re-implements a dev_env
+judgement, and never writes back into dev_env or into a rendered artifact.
+Every write capability stays gated by the host's Knowledge Pack evidence level
+(instruction is `UNKNOWN` today, so observation only).
+
+Measured motivation: four `basic-memory`, three `context7`, three
+`server-github` and two `subagent-worker` processes alive on one machine while
+`omca hub status` reported 0 hosts; `~/.omca/harness.json` hand-edited with
+literal secrets and a cross-profile shared tool.
+
+| Item | Issue | Exit gate | Depends on |
+|---|---|---|---|
+| H1 hub contract: profile = workspace; `harness.json` is a rendered artifact with a digest sidecar, hand edits refused; secrets only via `env_files`; `shared_tools` empty unless allow-listed | #124 | two workspaces attached → two `basic-memory` instances, keys never cross; literal-secret fixture fails validation | M2 layout |
+| H2 hub workers: periodic `ws-render --check --all` → drift cards, restore invokes `ws-render`; session watcher invokes `ws-mem-distill` (absorbs dev_env `ws-mem-daemon`) | #125 | static guard: `internal/hub` never renders or writes a checkout except via `ws-render`; edit a rendered file → card within one interval | H1, dev_env#80 phase 1, dev_env#81 |
+| H3 TUI absorbs `ws-tui`'s three views, each backed by exactly one dev_env JSON command named in its header; unavailable never renders green | #126 | view → command table test; renamed `ws-doctor` shows unavailable | H2 |
+| H4 Knowledge Pack: instruction discovery facts for codex / claude-code / gemini / pi with fixtures; `instruction.resolve` `UNKNOWN` → `EXACT` where the fixture passes | #127 | `omca qualify` shows instruction at E2 per passing host | M0 fixtures |
+
+Stream H runs in parallel with Track G (TUI) and does not move any MVP gate.
+Repo-level merge wording is aligned separately in #128.
+
 ## Definition of MVP
 
 MVP ends when M0 through M5 pass for Codex and Claude Code on the first macOS
