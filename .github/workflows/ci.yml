@@ -42,7 +42,7 @@ jobs:
           while IFS= read -r f; do
             [ -z "$f" ] && continue
             case "$f" in
-              docs/*|*.md|*.png|*.jpg|*.svg|.github/mlc_config.json)
+              docs/*|README.md|AGENTS.md|init.md|*.png|*.jpg|*.svg|.github/mlc_config.json)
                 ;;
               *)
                 has_non_doc=true
@@ -106,7 +106,7 @@ jobs:
           cache: true
       - uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          version: v1.61.0
 
   markdown-links:
     runs-on: ubuntu-latest
