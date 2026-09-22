@@ -318,14 +318,14 @@ software engineering contracts:
 
 Status: accepted 2026-09-23 (owner), tracked by
 [infra2#820](https://github.com/wangzitian0/infra2/issues/820); design and
-evidence in [dev_env#80](https://github.com/wangzitian0/dev_env/issues/80).
+evidence in dev_env#80 (private repository, so not linked).
 
 The boundary: content that needs review lives in `dev_env` (rules, skills,
 MCP specs, the render function); resident processes and machine state live in
 OMCA; a checkout holds only its own `AGENTS.md` and receives rendered
 artifacts at fixed, git-excluded paths. OMCA therefore brokers, watches,
 reports and displays — it never holds content, never re-implements a dev_env
-judgement, and never writes back into dev_env or into a rendered artifact.
+judgment, and never writes back into dev_env or into a rendered artifact.
 Every write capability stays gated by the host's Knowledge Pack evidence level
 (instruction is `UNKNOWN` today, so observation only).
 
