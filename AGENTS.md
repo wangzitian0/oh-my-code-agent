@@ -71,9 +71,7 @@ integration automatically).
   mergeability — a stacked branch otherwise shows CONFLICTING/DIRTY against
   the new main even though its content is identical to what was already
   merged.
-- **Merging is human-only by default.** A standing "merge without asking if
-  there are no conflicts, CI is green, and Copilot comments are addressed"
-  authorization has been granted before, but only for the specific session
-  it was granted in — it does not carry forward to a new session. Ask
-  again, or wait for the repo owner to merge, unless explicitly
-  re-authorized in the current session.
+- **Merge authority is the owner's standing grant recorded at the workspace
+  layer**; once this repo's own gate holds (rebase-clean, CI green, Copilot
+  threads addressed, squash/rebase only), the agent merges. Only a change
+  whose merge reaches a production deployment waits for the owner.
