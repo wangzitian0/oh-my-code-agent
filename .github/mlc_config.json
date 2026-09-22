@@ -1,10 +1,7 @@
 {
   "ignorePatterns": [
     { "pattern": "^http://localhost" },
-    { "pattern": "^https://github\\.com/wangzitian0/dev_env" },
-    { "pattern": "^https://github\\.com/wangzitian0/anne" },
-    { "pattern": "^https://github\\.com/wangzitian0/Powerli" },
-    { "pattern": "^https://github\\.com/wangzitian0/wealth" }
+    { "pattern": "^https://github\\.com/wangzitian0/dev_env([/#?].*)?$" }
   ],
   "retryOn429": true,
   "retryCount": 3,
