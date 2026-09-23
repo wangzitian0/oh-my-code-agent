@@ -335,8 +335,21 @@ func TestVerifyGraph_RealFixtures_NeverExceedTheCommittedCeiling(t *testing.T) {
 				if e.EvidenceLevel.Rank() > ceiling.Rank() {
 					t.Errorf("entry %s/%s: EvidenceLevel %s exceeds committed ceiling %s", e.Concept, e.LogicalID, e.EvidenceLevel, ceiling)
 				}
-				if e.EvidenceLevel != domain.EvidenceLevelParsed && e.EvidenceLevel != domain.EvidenceLevelDiscovered {
-					t.Errorf("entry %s/%s: EvidenceLevel %s, want E0/E1 (both real Knowledge Packs declare resolve: UNKNOWN today)", e.Concept, e.LogicalID, e.EvidenceLevel)
+				// Below the committed ceiling is always fine (checked above);
+				// this second check additionally pins today's actual reach so
+				// a silent capability upgrade elsewhere doesn't let some
+				// unrelated entry climb without a test noticing. issue #127
+				// raised exactly one cell -- instruction, on these three
+				// hosts -- to E2 (ceiling.go's Citation: internal/qualify/
+				// instruction_discovery_test.go); every other concept/host
+				// combination still has no qualified resolution and must stay
+				// at E0/E1.
+				maxReach := domain.EvidenceLevelParsed
+				if e.Concept == "instruction" && instructionRoseToE2ByIssue127[tc.host] {
+					maxReach = domain.EvidenceLevelResolved
+				}
+				if e.EvidenceLevel.Rank() > maxReach.Rank() {
+					t.Errorf("entry %s/%s: EvidenceLevel %s exceeds this test's pinned reach %s for today's actual Knowledge Pack state", e.Concept, e.LogicalID, e.EvidenceLevel, maxReach)
 				}
 				checked++
 			}
