@@ -104,6 +104,7 @@ func runDoctor(stdout, stderr io.Writer) int {
 		findings = append(findings, f)
 	}
 	findings = append(findings, checkDirenvApproval(wt))
+	findings = append(findings, checkRulesReach(wt.Root))
 	findings = append(findings, checkSkillDelivery(wt.Root))
 
 	fmt.Fprintf(stdout, "omca doctor: worktree %s (%s)\n\n", wt.ID, wt.Root)
