@@ -65,11 +65,11 @@ type CeilingEntry struct {
 var Ceilings = []CeilingEntry{
 	{
 		Host: "codex", Concept: "instruction",
-		Ceiling:              domain.EvidenceLevelParsed,
+		Ceiling:              domain.EvidenceLevelResolved,
 		IntrospectionSurface: "none documented",
-		ResolveCapability:    domain.CapabilityUnknown,
-		Reason:               "knowledge/hosts/codex/cli/0.144/manifest.json declares capabilities.instruction.resolve: UNKNOWN, so the E2 gate never opens; fixtures/README.md's full codex --help review found no safe, non-interactive, no-network, no-model-call flag that dumps effective/merged configuration. The documented claim \"closer instructions appear later\" (docs/ontology/README.md §6.2) stays a documentedClaim at E1, never promoted to selectedSource.",
-		Citation:             "knowledge/hosts/codex/cli/0.144/manifest.json; fixtures/README.md",
+		ResolveCapability:    domain.CapabilityExact,
+		Reason:               "knowledge/hosts/codex/cli/0.154.0/manifest.json declares capabilities.instruction.resolve: EXACT, promoted from UNKNOWN by issue #127: internal/qualify/instruction_discovery_test.go's TestInstructionDiscovery_Codex_BoundedAtProjectRootHomeFirst is an executable fixture reproducing codex-rs/core/src/agents_md.rs's documented algorithm (project root = nearest ancestor with a project_root_markers hit, default .git; AGENTS.override.md then AGENTS.md then configured fallbacks, first hit per directory, collected root-to-cwd inclusive; never walks past the project root) against a real, isolated temp directory tree, not merely citing the doc. This raises resolve, not discover (still PARTIAL): the fixture proves the documented merge/precedence algorithm, not every discovery-root edge case discover covers. Older manifest.json versions (0.144, 0.146-0.147, 0.153.4) are unchanged by this issue and remain UNKNOWN.",
+		Citation:             "knowledge/hosts/codex/cli/0.154.0/manifest.json; internal/qualify/instruction_discovery_test.go",
 	},
 	{
 		Host: "codex", Concept: "skill",
@@ -92,8 +92,8 @@ var Ceilings = []CeilingEntry{
 		Ceiling:              domain.EvidenceLevelParsed,
 		IntrospectionSurface: "none documented",
 		ResolveCapability:    domain.CapabilityUnknown,
-		Reason:               "knowledge/hosts/claude-code/cli/2.1/manifest.json declares capabilities.instruction.resolve: UNKNOWN; fixtures/README.md's full claude --help review found no safe merged-configuration-dump flag. The documented claim \"enterprise > personal > project > bundled\" stays a documentedClaim at E1.",
-		Citation:             "knowledge/hosts/claude-code/cli/2.1/manifest.json; fixtures/README.md",
+		Reason:               "knowledge/hosts/claude-code/cli/2.1/manifest.json declares capabilities.instruction.resolve: UNKNOWN; fixtures/README.md's full claude --help review found no safe merged-configuration-dump flag. The documented claim \"enterprise > personal > project > bundled\" stays a documentedClaim at E1. Issue #127 deliberately did NOT promote this cell, unlike codex and pi: its fixture (internal/qualify/instruction_discovery_test.go) proves the ancestor-directory-chain axis (CLAUDE.md/CLAUDE.local.md from cwd upward, unbounded, concatenated root-to-cwd), but the committed fixture corpus's claude-code/instructions-collision case adjudicates a different axis -- user-level ~/.claude/CLAUDE.md versus project-level -- for which code.claude.com/docs/en/memory itself states \"There is no hard precedence rule between levels\". One coarse per-concept resolve flag cannot say \"proven on one axis, unproven on another\", so promoting it would have made internal/effective pick a winner for an ordering the vendor does not define.",
+		Citation:             "knowledge/hosts/claude-code/cli/2.1/manifest.json; fixtures/README.md; fixtures/claude-code/2.1.211/instructions-collision/expected-effective.json",
 	},
 	{
 		Host: "claude-code", Concept: "skill",
@@ -113,11 +113,11 @@ var Ceilings = []CeilingEntry{
 	},
 	{
 		Host: "pi", Concept: "instruction",
-		Ceiling:              domain.EvidenceLevelParsed,
+		Ceiling:              domain.EvidenceLevelResolved,
 		IntrospectionSurface: "none documented",
-		ResolveCapability:    domain.CapabilityUnknown,
-		Reason:               "knowledge/hosts/pi/cli/0.85/manifest.json declares capabilities.instruction.resolve: UNKNOWN, so the E2 gate never opens. The official docs describe context-file discovery order but no safe, non-interactive, no-network, no-model-call interface that dumps the effective/merged context; pi's non-interactive -p mode performs a model call, so it is outside the safety boundary by definition.",
-		Citation:             "knowledge/hosts/pi/cli/0.85/manifest.json; docs/ontology/README.md section 6.7",
+		ResolveCapability:    domain.CapabilityExact,
+		Reason:               "knowledge/hosts/pi/cli/0.86.1/manifest.json declares capabilities.instruction.resolve: EXACT, promoted from UNKNOWN by issue #127: internal/qualify/instruction_discovery_test.go's TestInstructionDiscovery_Pi_UnboundedAncestorChainWithSymlinkDedup and TestInstructionDiscovery_Pi_DistinctAgentsAndClaudeBothCount are executable fixtures reproducing the discovery order measured in infra2-harness's handover.context-and-gates.md (2026-09-21: reads both AGENTS.md and CLAUDE.md, unbounded upward from cwd, a symlinked pair not double-loaded, an AGENTS.md/CLAUDE.md pair in the same directory both counting when not a symlink pair) against a real, isolated temp directory tree with real symlinks. This raises resolve, not the still-model-call-gated -p introspection surface, which stays out of the safety boundary. knowledge/hosts/pi/cli/0.85/manifest.json is unchanged by this issue and remains UNKNOWN.",
+		Citation:             "knowledge/hosts/pi/cli/0.86.1/manifest.json; internal/qualify/instruction_discovery_test.go",
 	},
 	{
 		Host: "pi", Concept: "skill",

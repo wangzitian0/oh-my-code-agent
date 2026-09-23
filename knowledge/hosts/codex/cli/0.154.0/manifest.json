@@ -48,6 +48,11 @@
       "id": "codex-project-approval-config-fixture",
       "kind": "executable-fixture",
       "path": "internal/runtime/mcpregistration_test.go"
+    },
+    {
+      "id": "codex-0154-instruction-discovery-fixture",
+      "kind": "executable-fixture",
+      "path": "internal/qualify/instruction_discovery_test.go"
     }
   ],
   "capabilities": {
@@ -64,10 +69,11 @@
     },
     "instruction": {
       "discover": "PARTIAL",
-      "resolve": "UNKNOWN",
+      "resolve": "EXACT",
       "reconcileMode": "OBSERVED",
       "verificationMethods": [
-        "official-doc-review"
+        "official-doc-review",
+        "executable-fixture"
       ]
     },
     "mcp_server": {

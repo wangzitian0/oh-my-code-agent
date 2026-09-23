@@ -44,15 +44,21 @@
       "kind": "maintainer-observation",
       "path": "docs/evidence/pi-0.86.1-candidate-qualification.json",
       "digest": "sha256:270fefa71752c5b9439d991ed3e8aff29bb627c6f076aed854d472dd0c3f4746"
+    },
+    {
+      "id": "pi-0861-instruction-discovery-fixture",
+      "kind": "executable-fixture",
+      "path": "internal/qualify/instruction_discovery_test.go"
     }
   ],
   "capabilities": {
     "instruction": {
       "discover": "EXACT",
-      "resolve": "UNKNOWN",
+      "resolve": "EXACT",
       "reconcileMode": "OBSERVED",
       "verificationMethods": [
-        "official-doc-review"
+        "official-doc-review",
+        "executable-fixture"
       ]
     },
     "skill": {

@@ -94,16 +94,40 @@ func TestCeilings_RowsAreValidAndCited(t *testing.T) {
 	}
 }
 
-// TestCeilings_ConceptRowsCapAtE1_HostRowsCapAtE3 grounds this table's
-// values against what this repository can actually prove today (not what
-// this test would like to be true): every real ontology-concept row
-// (instruction/skill/mcp_server, both hosts) is capped at E1 because both
-// committed Knowledge Packs declare resolve: UNKNOWN for all three
-// concepts (knowledge/hosts/{codex,claude-code}/*/manifest.json) and
-// fixtures/README.md establishes no safe introspection surface exists;
-// only the HostConceptClaim ("host") rows reach E3, via each host's real,
-// already-safety-proven --version probe.
-func TestCeilings_ConceptRowsCapAtE1_HostRowsCapAtE3(t *testing.T) {
+// instructionRoseToE2ByIssue127 is the exact, closed set this test allows
+// to differ from the E1 default below: issue #127 promoted exactly the
+// `instruction` concept, for exactly these three hosts, to E2 (see
+// ceiling.go's three "instruction" rows and their Citation of
+// internal/qualify/instruction_discovery_test.go). Any concept/host cell
+// not in this set that nonetheless reports something other than E1 is a
+// row this test was not told about -- it fails rather than silently
+// widening what it accepts, per Root's "守卫的范围不能按当前树能过来定".
+// claude-code is deliberately absent: issue #127's fixture proves the
+// ancestor-directory-chain axis, but that host's committed fixture corpus
+// adjudicates the user-vs-project axis, which code.claude.com/docs/en/
+// memory itself leaves undefined ("There is no hard precedence rule
+// between levels"). See ceiling.go's claude-code/instruction Reason.
+var instructionRoseToE2ByIssue127 = map[string]bool{
+	"codex": true,
+	"pi":    true,
+}
+
+// TestCeilings_ConceptRowsCapAtE1ExceptInstruction_HostRowsCapAtE3 grounds
+// this table's values against what this repository can actually prove
+// today (not what this test would like to be true). Originally every real
+// ontology-concept row (instruction/skill/mcp_server, all three hosts) was
+// capped at E1, because every committed Knowledge Pack declared resolve:
+// UNKNOWN for all three concepts and fixtures/README.md established no
+// safe introspection surface exists. Issue #127 closed that gap for
+// exactly one concept: `instruction`, on `codex`/`claude-code`/`pi`, is now
+// E2, backed by an executable fixture (internal/qualify/
+// instruction_discovery_test.go) that reproduces each host's documented
+// discovery-and-merge algorithm against a real, isolated temp directory
+// tree -- not merely a citation of the doc, which is what kept it at E1.
+// `skill` and `mcp_server` have no such fixture yet and remain E1.
+// HostConceptClaim ("host") rows reach E3 via each host's real,
+// already-safety-proven --version probe, unaffected by any of this.
+func TestCeilings_ConceptRowsCapAtE1ExceptInstruction_HostRowsCapAtE3(t *testing.T) {
 	reg := testConceptRegistry(t)
 	for _, host := range hostcontext.DetectedHostIDs {
 		for _, concept := range reg.IDs() {
@@ -111,8 +135,12 @@ func TestCeilings_ConceptRowsCapAtE1_HostRowsCapAtE3(t *testing.T) {
 			if !ok {
 				t.Fatalf("no ceiling row for (%s, %s)", host, concept)
 			}
-			if ceiling != "E1" {
-				t.Errorf("CeilingFor(%s, %s) = %s, want E1 (both real Knowledge Packs declare resolve: UNKNOWN and no introspection surface is documented)", host, concept, ceiling)
+			want := "E1"
+			if concept == "instruction" && instructionRoseToE2ByIssue127[host] {
+				want = "E2"
+			}
+			if string(ceiling) != want {
+				t.Errorf("CeilingFor(%s, %s) = %s, want %s", host, concept, ceiling, want)
 			}
 		}
 		hostCeiling, ok := CeilingFor(Ceilings, host, HostConceptClaim)
