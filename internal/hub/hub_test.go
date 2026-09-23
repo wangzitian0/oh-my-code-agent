@@ -297,6 +297,44 @@ func TestConfig_ResolveServer_ProfileEqualsWorkspace(t *testing.T) {
 	})
 }
 
+// TestHub_SharedToolsRegisteredOnlyUnderCanonicalKey covers the registration
+// half of contract #2 (issue #124), which the ResolveServer tests above
+// cannot see: New() used to register every shared tool a second time under
+// its plain name, so Supervisor.ListTools reported the same process twice
+// (the plain copy mislabelled profile-scoped, since CrossProfile keys off
+// the "shared:" prefix) and handleConnection's by-name fallback could reach
+// it for a request whose explicit -profile ResolveServer had just refused.
+// Reported by Copilot on PR #136.
+func TestHub_SharedToolsRegisteredOnlyUnderCanonicalKey(t *testing.T) {
+	cfg := &Config{
+		SocketPath: filepath.Join(t.TempDir(), "hub.sock"),
+		SharedTools: map[string]ToolConfig{
+			// Map key deliberately differs from Name: ResolveServer builds
+			// "shared:"+mapKey, so registering under Name would key the
+			// process somewhere the lookup never goes.
+			"subagent-worker": {Name: "sw-binary", Command: "sw", SharedAllow: true},
+		},
+	}
+	h := New(cfg)
+
+	if _, ok := h.supervisor.GetTool("shared:subagent-worker"); !ok {
+		t.Errorf("expected the shared tool registered under its canonical key shared:subagent-worker (the map key ResolveServer uses)")
+	}
+	for _, leaked := range []string{"subagent-worker", "sw-binary", "shared:sw-binary"} {
+		if _, ok := h.supervisor.GetTool(leaked); ok {
+			t.Errorf("shared tool is also registered under %q; only the canonical shared:<mapKey> registration may exist", leaked)
+		}
+	}
+
+	tools := h.supervisor.ListTools()
+	if len(tools) != 1 {
+		t.Errorf("ListTools() reported %d entries for one shared tool, want 1 (a duplicate is what `omca hub status` was double-listing): %v", len(tools), tools)
+	}
+	if ts, ok := tools["shared:subagent-worker"]; ok && !ts.CrossProfile {
+		t.Error("the canonical shared registration must report CrossProfile=true so `omca hub status` labels it cross-profile")
+	}
+}
+
 func TestWorkerPool_ConcurrencyLimits(t *testing.T) {
 	pool := NewWorkerPool()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

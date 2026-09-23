@@ -65,8 +65,23 @@ func New(cfg *Config) *Hub {
 	sup := NewSupervisor()
 
 	// 1. Register Shared Tools
-	for _, tc := range cfg.SharedTools {
-		key := "shared:" + tc.Name
+	//
+	// Keyed on the SharedTools map key, not ToolConfig.Name: Config.
+	// ResolveServer builds "shared:"+serverName from the same map key, so
+	// a config whose map key and Name field differ would otherwise register
+	// under one key and be looked up under another.
+	//
+	// Registered under the canonical "shared:" key ONLY. Registering each
+	// shared tool a second time under its plain name (which this loop used
+	// to do) had two costs: Supervisor.ListTools and `omca hub status`
+	// listed the same process twice, with the plain-name copy shown as
+	// profile-scoped because CrossProfile keys off the "shared:" prefix;
+	// and handleConnection's fallback branch could reach that plain-name
+	// registration for a request whose explicit -profile ResolveServer had
+	// just refused, quietly re-opening the cross-profile route contract #2
+	// (issue #124) exists to close.
+	for name, tc := range cfg.SharedTools {
+		key := "shared:" + name
 		sup.RegisterTool(ToolConfig{
 			Name:        key,
 			Command:     tc.Command,
@@ -75,9 +90,6 @@ func New(cfg *Config) *Hub {
 			WorkingDir:  tc.WorkingDir,
 			SharedAllow: tc.SharedAllow,
 		})
-		if _, exists := sup.GetTool(tc.Name); !exists {
-			sup.RegisterTool(tc)
-		}
 	}
 
 	// 2. Register Profile Tools
@@ -309,8 +321,31 @@ func (h *Hub) handleConn(conn net.Conn) {
 			hydrated.Name = targetKey
 			_ = h.supervisor.GetOrCreateTool(targetKey, hydrated)
 		}
+	} else if attach.Profile != "" {
+		// An explicit -profile that ResolveServer refused is refused here
+		// too, rather than falling through to the by-plain-name lookup
+		// below. profile = workspace is the only mapping (contract #2,
+		// issue #124): a caller that named a profile which declares no
+		// workspace_roots -- or no such profile at all -- must not be
+		// quietly served some other registration that happens to carry
+		// the same server name.
+		payload, _ := json.Marshal(map[string]any{
+			"type": "attach_error",
+			"error": fmt.Sprintf(
+				"profile %q does not name a declared workspace (profiles.<name>.workspace_roots); refusing to resolve server %q against it",
+				attach.Profile, serverName,
+			),
+		})
+		payload = append(payload, '\n')
+		h.mu.Lock()
+		_, _ = writer.Write(payload)
+		_ = writer.Flush()
+		h.mu.Unlock()
+		return
 	} else if _, exists := h.supervisor.GetTool(targetKey); !exists {
-		// If neither resolved nor registered, fall back to serverName as key
+		// No profile was named and nothing is registered under this name:
+		// keep the historical by-name key so the legacy cfg.Tools path and
+		// on-demand creation downstream behave as before.
 		targetKey = serverName
 	}
 

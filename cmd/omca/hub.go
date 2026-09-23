@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
@@ -45,6 +46,23 @@ func runHub(stdin io.Reader, stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintf(stderr, "omca: unknown hub subcommand %q\nusage: omca hub <start|stop|status|bridge|serve|top|worker>\n", args[0])
 		return 2
 	}
+}
+
+// daemonLogPath is where `omca hub start -d` sends the daemon's stderr:
+// a file beside the socket, so the config-validation errors and the
+// --accept-hand-edit drift record `hub serve` writes at startup survive
+// daemonization instead of going to /dev/null. Returns an error when the
+// socket path has no usable directory, in which case the caller keeps the
+// old discard behavior rather than refusing to start.
+func daemonLogPath(sock string) (string, error) {
+	dir := filepath.Dir(sock)
+	if dir == "" || dir == "." {
+		return "", fmt.Errorf("socket path %q has no directory to log beside", sock)
+	}
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "hub.stderr.log"), nil
 }
 
 func runHubStart(stdout, stderr io.Writer, args []string) int {
@@ -89,7 +107,20 @@ func runHubStart(stdout, stderr io.Writer, args []string) int {
 		cmd := exec.Command(exe, cmdArgs...)
 		cmd.Stdin = nil
 		cmd.Stdout = nil
-		cmd.Stderr = nil
+		// The daemon's stderr carries the config-validation errors and the
+		// --accept-hand-edit drift record that `hub serve` emits at startup
+		// (issue #124 contract #1). Discarding it, as this did, made the
+		// override silent in exactly the mode operators actually run. Append
+		// to a log file next to the socket when one can be opened; only fall
+		// back to discarding if it cannot, since a logging problem must not
+		// stop the hub from starting.
+		if logPath, err := daemonLogPath(sock); err == nil {
+			if lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600); err == nil {
+				defer func() { _ = lf.Close() }()
+				cmd.Stderr = lf
+				fmt.Fprintf(stdout, "omca: daemon stderr -> %s\n", logPath)
+			}
+		}
 		if err := cmd.Start(); err != nil {
 			fmt.Fprintf(stderr, "omca: start daemon: %v\n", err)
 			return 1
