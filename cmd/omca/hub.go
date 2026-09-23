@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -52,6 +53,7 @@ func runHubStart(stdout, stderr io.Writer, args []string) int {
 	daemon := fs.Bool("d", false, "run hub as background daemon")
 	configPath := fs.String("config", "", "path to harness hub config")
 	socketPath := fs.String("socket", "", "override unix socket path")
+	acceptHandEdit := fs.Bool("accept-hand-edit", false, "start even if harness.json does not match its digest sidecar (records the mismatch as drift)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -81,6 +83,9 @@ func runHubStart(stdout, stderr io.Writer, args []string) int {
 		if *socketPath != "" {
 			cmdArgs = append(cmdArgs, "--socket="+*socketPath)
 		}
+		if *acceptHandEdit {
+			cmdArgs = append(cmdArgs, "--accept-hand-edit")
+		}
 		cmd := exec.Command(exe, cmdArgs...)
 		cmd.Stdin = nil
 		cmd.Stdout = nil
@@ -101,14 +106,18 @@ func runHubServe(stdout, stderr io.Writer, args []string) int {
 	fs.SetOutput(stderr)
 	configPath := fs.String("config", "", "path to harness hub config")
 	socketPath := fs.String("socket", "", "override unix socket path")
+	acceptHandEdit := fs.Bool("accept-hand-edit", false, "start even if harness.json does not match its digest sidecar (records the mismatch as drift)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
-	cfg, err := hub.LoadConfig(*configPath)
+	cfg, drift, err := hub.LoadConfig(*configPath, *acceptHandEdit)
 	if err != nil {
 		fmt.Fprintf(stderr, "omca: %v\n", err)
 		return 1
+	}
+	if drift != nil {
+		fmt.Fprintf(stderr, "omca: %s\n", drift)
 	}
 	if *socketPath != "" {
 		cfg.SocketPath = *socketPath
@@ -233,6 +242,26 @@ func runHubStatus(stdout, stderr io.Writer, args []string) int {
 
 	fmt.Fprintf(stdout, "🟢 omca hub is RUNNING (socket: %s, uptime: %s, %d hosts, %d active workers)\n",
 		sock, snap.Uptime.Round(time.Second), len(snap.Connected), len(snap.ActiveWorkers))
+
+	if len(snap.Tools) > 0 {
+		names := make([]string, 0, len(snap.Tools))
+		for name := range snap.Tools {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		fmt.Fprintf(stdout, "%-30s %-12s %s\n", "TOOL", "STATUS", "SCOPE")
+		for _, name := range names {
+			ts := snap.Tools[name]
+			scope := "profile"
+			if ts.CrossProfile {
+				// shared_tools entry (issue #124 contract #4): every
+				// profile can resolve this one, so it is flagged rather
+				// than shown identically to a profile-scoped tool.
+				scope = "cross-profile (shared_tools)"
+			}
+			fmt.Fprintf(stdout, "%-30s %-12s %s\n", name, ts.Status, scope)
+		}
+	}
 	return 0
 }
 

@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -144,6 +145,12 @@ func (s *Supervisor) ListTools() map[string]ToolStats {
 			IdleDuration: idle,
 			RestartCount: t.restarts,
 			Command:      t.config.Command,
+			// Registration key carries "shared:" iff the tool came from
+			// Config.SharedTools (see Hub.New, step 1) -- every profile can
+			// resolve it (Config.ResolveServer), so `omca hub status` flags
+			// it as cross-profile instead of showing it identically to a
+			// profile-scoped tool (issue #124 contract #4).
+			CrossProfile: strings.HasPrefix(name, "shared:"),
 		}
 		t.mu.Unlock()
 	}
@@ -159,6 +166,7 @@ type ToolStats struct {
 	IdleDuration time.Duration `json:"idle_duration"`
 	RestartCount int           `json:"restart_count"`
 	Command      string        `json:"command"`
+	CrossProfile bool          `json:"cross_profile,omitempty"`
 }
 
 // Name returns the tool's configured name.
