@@ -68,11 +68,12 @@ func New(cfg *Config) *Hub {
 	for _, tc := range cfg.SharedTools {
 		key := "shared:" + tc.Name
 		sup.RegisterTool(ToolConfig{
-			Name:       key,
-			Command:    tc.Command,
-			Args:       tc.Args,
-			Env:        tc.Env,
-			WorkingDir: tc.WorkingDir,
+			Name:        key,
+			Command:     tc.Command,
+			Args:        tc.Args,
+			Env:         tc.Env,
+			WorkingDir:  tc.WorkingDir,
+			SharedAllow: tc.SharedAllow,
 		})
 		if _, exists := sup.GetTool(tc.Name); !exists {
 			sup.RegisterTool(tc)

@@ -25,9 +25,12 @@ func TestConfig_DefaultsAndLoad(t *testing.T) {
 
 	// 1. Non-existent path returns default
 	nonExistent := filepath.Join(t.TempDir(), "nonexistent.json")
-	cfg, err := LoadConfig(nonExistent)
+	cfg, drift, err := LoadConfig(nonExistent, false)
 	if err != nil {
 		t.Fatalf("LoadConfig(nonexistent) error: %v", err)
+	}
+	if drift != nil {
+		t.Errorf("expected no drift for a nonexistent config, got %+v", drift)
 	}
 	if cfg.Port != 8765 {
 		t.Errorf("expected default Port 8765, got %d", cfg.Port)
@@ -35,13 +38,16 @@ func TestConfig_DefaultsAndLoad(t *testing.T) {
 	if cfg.SocketPath == "" {
 		t.Errorf("expected non-empty SocketPath")
 	}
+	if _, err := os.Stat(nonExistent + ".sha256"); !os.IsNotExist(err) {
+		t.Errorf("expected no digest sidecar written for a nonexistent config, stat err=%v", err)
+	}
 
 	// 2. Invalid JSON returns error
 	badJSONPath := filepath.Join(t.TempDir(), "bad.json")
 	if err := os.WriteFile(badJSONPath, []byte("{invalid-json"), 0600); err != nil {
 		t.Fatalf("write bad JSON: %v", err)
 	}
-	_, err = LoadConfig(badJSONPath)
+	_, _, err = LoadConfig(badJSONPath, false)
 	if err == nil {
 		t.Fatalf("expected error for invalid JSON, got nil")
 	}
@@ -60,9 +66,12 @@ func TestConfig_DefaultsAndLoad(t *testing.T) {
 	if err := os.WriteFile(validPath, []byte(validJSON), 0600); err != nil {
 		t.Fatalf("write valid JSON: %v", err)
 	}
-	cfg, err = LoadConfig(validPath)
+	cfg, drift, err = LoadConfig(validPath, false)
 	if err != nil {
 		t.Fatalf("LoadConfig(valid) error: %v", err)
+	}
+	if drift != nil {
+		t.Errorf("expected no drift on a first-ever load (trust-on-first-use), got %+v", drift)
 	}
 	if cfg.Port != 9090 {
 		t.Errorf("expected Port 9090, got %d", cfg.Port)
@@ -73,6 +82,219 @@ func TestConfig_DefaultsAndLoad(t *testing.T) {
 	if cfg.SocketPath != DefaultSocketPath() {
 		t.Errorf("expected SocketPath to fallback to DefaultSocketPath, got %s", cfg.SocketPath)
 	}
+	// A first-ever load has no sidecar to compare against, so LoadConfig
+	// establishes one (issue #124 contract #1) instead of refusing.
+	sidecarData, err := os.ReadFile(validPath + ".sha256")
+	if err != nil {
+		t.Fatalf("expected LoadConfig to write a digest sidecar on first load: %v", err)
+	}
+	if got := parseDigestSidecar(sidecarData); got != sha256Hex([]byte(validJSON)) {
+		t.Errorf("sidecar digest = %q, want sha256(%q) = %q", got, validJSON, sha256Hex([]byte(validJSON)))
+	}
+
+	// 4. Reloading the same, unchanged file matches its own new sidecar.
+	cfg, drift, err = LoadConfig(validPath, false)
+	if err != nil {
+		t.Fatalf("LoadConfig(valid) second load error: %v", err)
+	}
+	if drift != nil {
+		t.Errorf("expected no drift reloading an unchanged file, got %+v", drift)
+	}
+	if cfg.Port != 9090 {
+		t.Errorf("expected Port 9090 on reload, got %d", cfg.Port)
+	}
+}
+
+// TestConfig_SecretLiteralRejected covers issue #124 contract #3: a
+// harness.json with an env value that looks like a hand-embedded secret
+// must fail LoadConfig with the offending JSON path in the error, in every
+// location Env can appear (tools, shared_tools, profiles.*.tools). A
+// reference ($VAR or op://) or a short value must load cleanly.
+func TestConfig_SecretLiteralRejected(t *testing.T) {
+	longSecret := strings.Repeat("a", 40)
+
+	write := func(t *testing.T, body string) string {
+		t.Helper()
+		p := filepath.Join(t.TempDir(), "harness.json")
+		if err := os.WriteFile(p, []byte(body), 0600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		return p
+	}
+
+	cases := []struct {
+		name       string
+		body       string
+		wantErr    bool
+		wantInPath string // substring the error's JSON path must contain
+	}{
+		{
+			name: "literal in shared_tools",
+			body: `{"shared_tools":{"gh":{"name":"gh","command":"gh","shared_allow":true,
+				"env":{"GITHUB_TOKEN":"` + longSecret + `"}}}}`,
+			wantErr:    true,
+			wantInPath: "shared_tools.gh.env",
+		},
+		{
+			name: "literal in profiles.*.tools",
+			body: `{"profiles":{"work":{"workspace_roots":["/x"],"tools":{"gh":{"name":"gh",
+				"command":"gh","env":{"GITHUB_PAT":"` + longSecret + `"}}}}}}`,
+			wantErr:    true,
+			wantInPath: "profiles.work.tools.gh.env",
+		},
+		{
+			name: "literal in top-level tools",
+			body: `{"tools":{"gh":{"name":"gh","command":"gh",
+				"env":{"API_KEY":"` + longSecret + `"}}}}`,
+			wantErr:    true,
+			wantInPath: "tools.gh.env",
+		},
+		{
+			name: "env_files-style $VAR reference is not a literal",
+			body: `{"tools":{"gh":{"name":"gh","command":"gh",
+				"env":{"GITHUB_TOKEN":"$GITHUB_TOKEN"}}}}`,
+			wantErr: false,
+		},
+		{
+			name: "op:// reference is not a literal",
+			body: `{"tools":{"gh":{"name":"gh","command":"gh",
+				"env":{"GITHUB_TOKEN":"op://vault/item/field"}}}}`,
+			wantErr: false,
+		},
+		{
+			name: "short value under the length floor is not flagged",
+			body: `{"tools":{"gh":{"name":"gh","command":"gh",
+				"env":{"GITHUB_TOKEN":"short"}}}}`,
+			wantErr: false,
+		},
+		{
+			name: "long value whose key doesn't look credential-shaped is not flagged",
+			body: `{"tools":{"gh":{"name":"gh","command":"gh",
+				"env":{"DESCRIPTION":"` + longSecret + `"}}}}`,
+			wantErr: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := write(t, tc.body)
+			_, _, err := LoadConfig(path, false)
+			if tc.wantErr && err == nil {
+				t.Fatalf("expected LoadConfig to reject a literal secret, got nil error")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("expected LoadConfig to accept a non-literal value, got: %v", err)
+			}
+			if tc.wantErr && !strings.Contains(err.Error(), tc.wantInPath) {
+				t.Errorf("error %q does not name the offending path %q", err.Error(), tc.wantInPath)
+			}
+		})
+	}
+}
+
+// TestConfig_SharedToolsRequireAllow covers issue #124 contract #4:
+// shared_tools is the cross-profile pool every profile can resolve
+// (ResolveServer), so a listed tool must set shared_allow: true to opt in;
+// LoadConfig refuses to load a shared_tools entry that has not.
+func TestConfig_SharedToolsRequireAllow(t *testing.T) {
+	write := func(t *testing.T, body string) string {
+		t.Helper()
+		p := filepath.Join(t.TempDir(), "harness.json")
+		if err := os.WriteFile(p, []byte(body), 0600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		return p
+	}
+
+	t.Run("missing shared_allow is rejected", func(t *testing.T) {
+		path := write(t, `{"shared_tools":{"subagent-worker":{"name":"subagent-worker","command":"sw"}}}`)
+		_, _, err := LoadConfig(path, false)
+		if err == nil {
+			t.Fatalf("expected LoadConfig to reject a shared_tools entry without shared_allow, got nil error")
+		}
+		if !strings.Contains(err.Error(), "shared_tools.subagent-worker") {
+			t.Errorf("error %q does not name the offending tool", err.Error())
+		}
+	})
+
+	t.Run("explicit shared_allow true loads cleanly", func(t *testing.T) {
+		path := write(t, `{"shared_tools":{"subagent-worker":{"name":"subagent-worker","command":"sw","shared_allow":true}}}`)
+		cfg, _, err := LoadConfig(path, false)
+		if err != nil {
+			t.Fatalf("expected LoadConfig to accept an allow-listed shared_tools entry, got: %v", err)
+		}
+		if !cfg.SharedTools["subagent-worker"].SharedAllow {
+			t.Errorf("expected SharedAllow to round-trip as true")
+		}
+	})
+}
+
+// TestConfig_ResolveServer_ProfileEqualsWorkspace covers issue #124
+// contract #2: profiles.<name>.workspace_roots is a workspace's identity,
+// so an explicit -profile that does not name a declared, non-empty root is
+// refused rather than silently falling through to the shared-tools pool.
+func TestConfig_ResolveServer_ProfileEqualsWorkspace(t *testing.T) {
+	cfg := &Config{
+		Profiles: map[string]ProfileConfig{
+			"work": {
+				WorkspaceRoots: []string{"/Users/x/workspace"},
+				Tools: map[string]ToolConfig{
+					"basic-memory": {Name: "basic-memory", Command: "bm-work"},
+				},
+			},
+			"personal": {
+				WorkspaceRoots: []string{"/Users/x/zitian"},
+				Tools: map[string]ToolConfig{
+					"basic-memory": {Name: "basic-memory", Command: "bm-personal"},
+				},
+			},
+			"undeclared": {
+				// No WorkspaceRoots: a profile section with no identity is
+				// not a resolvable workspace.
+				Tools: map[string]ToolConfig{
+					"basic-memory": {Name: "basic-memory", Command: "bm-undeclared"},
+				},
+			},
+		},
+		SharedTools: map[string]ToolConfig{
+			"subagent-worker": {Name: "subagent-worker", Command: "sw", SharedAllow: true},
+		},
+	}
+
+	t.Run("declared profile resolves its own tool, never another profile's", func(t *testing.T) {
+		tool, ok := cfg.ResolveServer("work", "", "basic-memory")
+		if !ok || tool.Config.Command != "bm-work" {
+			t.Fatalf("expected work profile's own basic-memory, got %+v ok=%v", tool, ok)
+		}
+		other, ok := cfg.ResolveServer("personal", "", "basic-memory")
+		if !ok || other.Config.Command != "bm-personal" {
+			t.Fatalf("expected personal profile's own basic-memory, got %+v ok=%v", other, ok)
+		}
+		if tool.Config.Command == other.Config.Command {
+			t.Fatalf("work and personal resolved to the same tool config; cross-profile leak")
+		}
+	})
+
+	t.Run("unknown profile name is refused, not silently resolved via shared_tools", func(t *testing.T) {
+		_, ok := cfg.ResolveServer("does-not-exist", "", "subagent-worker")
+		if ok {
+			t.Fatalf("expected an unknown -profile to be refused rather than falling through to shared_tools")
+		}
+	})
+
+	t.Run("profile with no workspace_roots is refused", func(t *testing.T) {
+		_, ok := cfg.ResolveServer("undeclared", "", "basic-memory")
+		if ok {
+			t.Fatalf("expected a profile with empty workspace_roots to be refused")
+		}
+	})
+
+	t.Run("declared profile without the requested tool still falls back to shared_tools", func(t *testing.T) {
+		tool, ok := cfg.ResolveServer("work", "", "subagent-worker")
+		if !ok || tool.Config.Command != "sw" {
+			t.Fatalf("expected work profile to fall back to the allow-listed shared_tools entry, got %+v ok=%v", tool, ok)
+		}
+	})
 }
 
 func TestWorkerPool_ConcurrencyLimits(t *testing.T) {
