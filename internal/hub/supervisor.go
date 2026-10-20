@@ -395,7 +395,10 @@ func (t *ManagedTool) readLoop(cmd *exec.Cmd, stdout io.Reader) {
 func (t *ManagedTool) callRawLocked(ctx context.Context, req *JSONRPCRequest) (*JSONRPCResponse, error) {
 	seq := atomic.AddUint64(&t.reqSeq, 1)
 	reqID := fmt.Sprintf("internal-%d", seq)
-	req.ID = json.RawMessage(fmt.Sprintf("%q", reqID))
+	// Rewrite the ID on a copy. The caller keeps the client ID to echo back.
+	fwd := *req
+	fwd.ID = json.RawMessage(fmt.Sprintf("%q", reqID))
+	req = &fwd
 
 	ch := make(chan *JSONRPCResponse, 1)
 	t.pendingMu.Lock()
@@ -438,7 +441,10 @@ func (t *ManagedTool) callRawLocked(ctx context.Context, req *JSONRPCRequest) (*
 func (t *ManagedTool) callRaw(ctx context.Context, req *JSONRPCRequest) (*JSONRPCResponse, error) {
 	seq := atomic.AddUint64(&t.reqSeq, 1)
 	reqID := fmt.Sprintf("req-%d", seq)
-	req.ID = json.RawMessage(fmt.Sprintf("%q", reqID))
+	// Rewrite the ID on a copy. The caller keeps the client ID to echo back.
+	fwd := *req
+	fwd.ID = json.RawMessage(fmt.Sprintf("%q", reqID))
+	req = &fwd
 
 	ch := make(chan *JSONRPCResponse, 1)
 	t.pendingMu.Lock()
