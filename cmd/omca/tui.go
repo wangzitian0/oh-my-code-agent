@@ -46,6 +46,9 @@ func runTUI(stdin io.Reader, stdout, stderr io.Writer) int {
 	model := tui.NewModel(artifact)
 	if ctx, ok := actionContextForTUI(stderr); ok {
 		model = model.WithActionContext(ctx)
+		model = model.WithDevEnvContext(tui.DevEnvContext{
+			WorkspaceRoot: ctx.Worktree.MainRoot,
+		})
 	}
 
 	program := tea.NewProgram(

@@ -38,18 +38,20 @@ type ConnectedHost struct {
 
 // Hub represents the resident harness hub daemon.
 type Hub struct {
-	mu         sync.RWMutex
-	config     *Config
-	supervisor *Supervisor
-	reaper     *IdleReaper
-	pool       *WorkerPool
-	arbiter    *StorageArbiter
-	listener   net.Listener
-	httpServer *http.Server
-	hosts      map[string]*ConnectedHost
-	hostSeq    uint64
-	startTime  time.Time
-	stopCh     chan struct{}
+	mu             sync.RWMutex
+	config         *Config
+	supervisor     *Supervisor
+	reaper         *IdleReaper
+	renderWorker   *RenderCheckWorker
+	sessionWatcher *SessionWatcherWorker
+	pool           *WorkerPool
+	arbiter        *StorageArbiter
+	listener       net.Listener
+	httpServer     *http.Server
+	hosts          map[string]*ConnectedHost
+	hostSeq        uint64
+	startTime      time.Time
+	stopCh         chan struct{}
 	// lock is the exclusive single-instance lock held for config.SocketPath
 	// for this process's whole lifetime. See instancelock.go for why the
 	// socket cannot safely be replaced without it.
@@ -113,13 +115,15 @@ func New(cfg *Config) *Hub {
 	reaper := NewIdleReaper(sup, cfg.GetIdleTimeout())
 
 	return &Hub{
-		config:     cfg,
-		supervisor: sup,
-		reaper:     reaper,
-		pool:       NewWorkerPool(),
-		arbiter:    NewStorageArbiter(""),
-		hosts:      make(map[string]*ConnectedHost),
-		stopCh:     make(chan struct{}),
+		config:         cfg,
+		supervisor:     sup,
+		reaper:         reaper,
+		renderWorker:   NewRenderCheckWorker(cfg),
+		sessionWatcher: NewSessionWatcherWorker(cfg),
+		pool:           NewWorkerPool(),
+		arbiter:        NewStorageArbiter(""),
+		hosts:          make(map[string]*ConnectedHost),
+		stopCh:         make(chan struct{}),
 	}
 }
 
@@ -131,6 +135,16 @@ func (h *Hub) Supervisor() *Supervisor {
 // Reaper returns the internal idle reaper.
 func (h *Hub) Reaper() *IdleReaper {
 	return h.reaper
+}
+
+// RenderWorker returns the periodic ws-render check worker (issue #125).
+func (h *Hub) RenderWorker() *RenderCheckWorker {
+	return h.renderWorker
+}
+
+// SessionWatcher returns the per-profile session watcher worker (issue #125).
+func (h *Hub) SessionWatcher() *SessionWatcherWorker {
+	return h.sessionWatcher
 }
 
 // Pool returns the worker pool.
@@ -212,8 +226,14 @@ func (h *Hub) Start(ctx context.Context) error {
 	// Accept loop
 	go h.acceptLoop(l)
 
-	// Start Idle Reaper
+	// Start Idle Reaper and H2 workers (issue #125)
 	h.reaper.Start(ctx)
+	if h.renderWorker != nil {
+		h.renderWorker.Start(ctx)
+	}
+	if h.sessionWatcher != nil {
+		h.sessionWatcher.Start(ctx)
+	}
 
 	// Optional SSE/HTTP server
 	if h.config.Port > 0 {
@@ -387,6 +407,20 @@ func (h *Hub) handleAdminRequest(attach AttachMessage, writer *bufio.Writer) {
 			payload, _ = json.Marshal(map[string]any{"status": "error", "message": err.Error()})
 		} else {
 			payload, _ = json.Marshal(map[string]any{"status": "ok", "killed": attach.TargetID})
+		}
+	case "render_check":
+		var cards []RenderDriftCard
+		if h.renderWorker != nil {
+			cards = h.renderWorker.CheckOnce(context.Background())
+		}
+		payload, _ = json.Marshal(cards)
+	case "render_restore":
+		if h.renderWorker == nil {
+			payload, _ = json.Marshal(map[string]any{"status": "error", "message": "render worker not initialized"})
+		} else if err := h.renderWorker.Restore(context.Background(), attach.TargetID); err != nil {
+			payload, _ = json.Marshal(map[string]any{"status": "error", "message": err.Error()})
+		} else {
+			payload, _ = json.Marshal(map[string]any{"status": "ok", "restored": attach.TargetID})
 		}
 	default:
 		payload, _ = json.Marshal(map[string]any{"status": "error", "message": fmt.Sprintf("unknown admin action %q", attach.Action)})
@@ -645,6 +679,12 @@ func (h *Hub) Close() error {
 	close(h.stopCh)
 	if h.reaper != nil {
 		h.reaper.Stop()
+	}
+	if h.renderWorker != nil {
+		h.renderWorker.Stop()
+	}
+	if h.sessionWatcher != nil {
+		h.sessionWatcher.Stop()
 	}
 	if h.listener != nil {
 		_ = h.listener.Close()
