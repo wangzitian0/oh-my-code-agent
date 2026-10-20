@@ -22,6 +22,9 @@ const (
 	ViewDrift
 	ViewAssets
 	ViewGenerations
+	ViewWorkspace
+	ViewProject
+	ViewToolMatrix
 )
 
 // viewOrder is the fixed navigation cycle basic left/right/tab navigation
@@ -36,6 +39,9 @@ var viewTitles = map[ViewKind]string{
 	ViewDrift:       "Drift",
 	ViewAssets:      "Assets",
 	ViewGenerations: "Generations",
+	ViewWorkspace:   "Workspace",
+	ViewProject:     "Project",
+	ViewToolMatrix:  "Tool Matrix",
 }
 
 // uiMode names Model's own interaction modes: modeBrowse is PR-30's original
@@ -68,6 +74,7 @@ type Model struct {
 	active   ViewKind
 
 	actions ActionContext
+	devenv  DevEnvContext
 	clock   func() time.Time
 
 	// hostCursor selects which of Artifact.Debug's sorted host keys the
@@ -136,6 +143,13 @@ func NewModel(a report.Artifact) Model {
 // keys are simply inert (ActionContext.enabled reports false).
 func (m Model) WithActionContext(ctx ActionContext) Model {
 	m.actions = ctx
+	return m
+}
+
+// WithDevEnvContext attaches DevEnvContext to m for the absorbed ws-tui views
+// (ViewWorkspace, ViewProject, ViewToolMatrix; issue #126).
+func (m Model) WithDevEnvContext(ctx DevEnvContext) Model {
+	m.devenv = ctx
 	return m
 }
 
@@ -221,6 +235,12 @@ func (m Model) SetActive(v ViewKind) Model {
 			return m
 		}
 	}
+	for _, spec := range DevEnvViewSpecs {
+		if spec.View == v {
+			m.active = v
+			return m
+		}
+	}
 	return m
 }
 
@@ -270,6 +290,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.active = ViewAssets
 	case "4":
 		m.active = ViewGenerations
+	case "5":
+		m.active = ViewWorkspace
+	case "6":
+		m.active = ViewProject
+	case "7":
+		m.active = ViewToolMatrix
 	case "up", "k":
 		if m.active == ViewDrift {
 			m.driftCursor--
@@ -623,6 +649,12 @@ func (m Model) renderActive() string {
 		return RenderAssets(m.Artifact)
 	case ViewGenerations:
 		return RenderGenerations(m.Artifact)
+	case ViewWorkspace:
+		return RenderWorkspaceView(m.devenv)
+	case ViewProject:
+		return RenderProjectView(m.devenv)
+	case ViewToolMatrix:
+		return RenderToolMatrixView(m.devenv)
 	default:
 		return ""
 	}

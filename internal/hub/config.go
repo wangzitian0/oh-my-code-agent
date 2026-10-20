@@ -50,12 +50,13 @@ type ProfileConfig struct {
 
 // Config defines the complete harness hub configuration.
 type Config struct {
-	SocketPath  string                   `json:"socket_path"`
-	Port        int                      `json:"port,omitempty"`         // Optional HTTP/SSE port (e.g. 8765)
-	IdleTimeout string                   `json:"idle_timeout,omitempty"` // e.g. "5m", defaults to 5m
-	SharedTools map[string]ToolConfig    `json:"shared_tools,omitempty"`
-	Profiles    map[string]ProfileConfig `json:"profiles,omitempty"`
-	Tools       map[string]ToolConfig    `json:"tools,omitempty"` // Legacy backward-compatibility
+	SocketPath          string                   `json:"socket_path"`
+	Port                int                      `json:"port,omitempty"`                  // Optional HTTP/SSE port (e.g. 8765)
+	IdleTimeout         string                   `json:"idle_timeout,omitempty"`          // e.g. "5m", defaults to 5m
+	RenderCheckInterval string                   `json:"render_check_interval,omitempty"` // e.g. "30m", defaults to 30m (issue #125)
+	SharedTools         map[string]ToolConfig    `json:"shared_tools,omitempty"`
+	Profiles            map[string]ProfileConfig `json:"profiles,omitempty"`
+	Tools               map[string]ToolConfig    `json:"tools,omitempty"` // Legacy backward-compatibility
 }
 
 // GetIdleTimeout returns the parsed idle timeout duration, defaulting to 5 minutes.
