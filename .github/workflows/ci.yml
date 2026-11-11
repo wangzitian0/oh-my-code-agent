@@ -42,7 +42,7 @@ jobs:
           while IFS= read -r f; do
             [ -z "$f" ] && continue
             case "$f" in
-              docs/*|README.md|AGENTS.md|init.md|*.png|*.jpg|*.svg|.github/mlc_config.json)
+              docs/*|README.md|AGENTS.md|init.md|.ws-publish/manifest.json|*.png|*.jpg|*.svg|.github/mlc_config.json)
                 ;;
               *)
                 has_non_doc=true
@@ -58,10 +58,10 @@ jobs:
   build-test:
     needs: detect-changes
     if: needs.detect-changes.outputs.has_non_doc == 'true'
-    # Pinned to macos-14: cmd/omca tests currently rely on Darwin semantics
-    # (macOS lacks Linux ETXTBSY when replacing running shims, and handles TTY/umask differently).
+    # Pinned to macos-15 (macos-14 retired by GitHub Actions): cmd/omca tests rely on Darwin
+    # semantics (macOS lacks Linux ETXTBSY when replacing running shims, and handles TTY/umask differently).
     # Doc PRs skip this job via detect-changes.
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
