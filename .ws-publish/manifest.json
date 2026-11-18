@@ -3,18 +3,18 @@
   "dirty_inputs": [],
   "inputs": {
     "repo": "0d7ba4ffacc160abc7cdca8d486cd04526d0e270823cb4a1d71d45bcbfce2c7c",
-    "root": "a4b9eee3cd315ab6ec3ea4da16304f799f3a3317bae2ee7f02938ab7a2a4def2"
+    "root": "a3fa729938ec7fed9918f4d188920af0c020350e5de5900e00ca2df4446b7ab2"
   },
   "language": "en",
   "outputs": {
-    "AGENTS.md": "a53a1c3e8cb8a51b564e4f63b0ca27b1c4b9f9c6140af9b249a857039939cdd2"
+    "AGENTS.md": "86a39b62c63964e242f59f791d9a5570445f6c63d0d8fdb6dc9e9454f4e5d4a5"
   },
   "profiles": [
     "code",
     "delivery"
   ],
   "schema": 2,
-  "source_revision": "27fffb9f97441319b48b1dd61ef1dcc37ca57015",
+  "source_revision": "8bf2bc3d1c6e5467e01d91063455def45b21b400",
   "target": {
     "remote": "github.com/wangzitian0/oh-my-code-agent",
     "repo": "oh-my-code-agent",
