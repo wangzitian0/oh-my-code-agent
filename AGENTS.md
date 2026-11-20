@@ -1,4 +1,4 @@
-<!-- WS_STATIC_START adapter=rules-v2 inputs=b5ce3f98f797a4c4ff556215532bcc8568d3442f8eaab77d7fd90f724158a7bc -->
+<!-- WS_STATIC_START adapter=rules-v2 inputs=f5558059d87c51d48042be316ed7d45dc48f29904e938e76d351eb20c371e02e -->
 <!-- Generated file: do not edit by hand. These rules are maintained in the owner's rule source and re-rendered here. -->
 
 ## Engineering discipline
@@ -13,7 +13,7 @@
 - **Fix an owner hold by deletion:** Delete the rule or gate branch that holds non-production work. Do not add logic that reads a command to permit it. Such logic lets unsafe commands through.
 - **Define guard scope from what it must govern, not from today's passing tree.** Let the guard fail on existing violations, then repair them. A guard never seen failing is not yet evidence of protection.
 - **Worktree self-sufficiency:** Every worktree must resolve its dependencies, toolchain, skills, and configuration internally. Tools and tests must not navigate upward with `../..` to locate files in parent checkouts.
-- **Local and remote test segregation:** Inner-loop verification runs only focused tests on changed files (`pytest <file>::<test> -x`). Full-suite regression runs on remote CI, or locally at most once before merge.
+- **Local and remote test segregation:** Inner-loop verification runs single-process focused tests (`pytest -n0 --no-cov -o addopts= <file>::<test> -x`). Full-suite regression runs on remote CI, or locally once before merge.
 - **Bounded file reads:** Pass `StartLine` and `EndLine` (`<= 800` lines per call) when reading existing files with `read_file` or `view_file`.
 
 ## Delivery and merge
@@ -34,11 +34,11 @@
 
 The single definition of the production reservation. Other tiers, skills and gates point here.
 
-- **Only a production change returns to the owner.** A production change alters what production runs or stores. Examples: a deploy, promote or apply to production; a production secret write; a manual production data write or deletion. Also a production DNS, route or host change, and a release that cannot be recalled. Code that reaches production with no later owner approval, for example on a schedule, counts too. Each Repo tier names its production paths. A path can be a merge.
+- **Only a production change returns to the owner.** A production change alters what production runs or stores (deploy, promote or apply to production; production secret write; manual production data write or deletion; production DNS, route or host change; unrecallable release; or scheduled unapproved production code). Each Repo tier names its production paths. A path can be a merge or a release-checkout pull.
 - **Approval:** the owner approves the exact commit SHA or release tag of each production change, and is present when it runs. A "deploy" reply covers only the release that it names. Immediately before a production dispatch, get a live reply from the owner.
-- **Self-guard:** an edit that removes, narrows or redefines the production reservation needs the owner's approval of its head SHA. This includes an edit that makes fewer production runs wait for the owner. Examples: the owner-approval check of a deploy path, a production job classification, the settings of a production environment. It also includes an edit that removes or weakens a pin of this section or its dev_env pin test. The same holds for the required check that runs the test.
-- **Everything else is the agent's:** in a repository that the owner owns, every merge, staging and canary deploy, and release tag. Also rule text, skills, gate code, data and tests, required-check workflows and release code. Before you merge gate or release code, a read-only reviewer that did not write it checks the head. The review states whether the gate gets stricter, stays equal or gets looser. A looser edit in the self-guard list follows the self-guard.
-- **Every other hold is a defect:** a rule, skill, label or gate exit code that holds non-production work for the owner. Do the work, then fix the hold. `ws_owner_scope` fails on it.
+- **Self-guard:** an edit that removes, narrows or redefines the production reservation needs the owner's approval of its head SHA. This includes an edit that makes fewer production runs wait for the owner (deploy-path approval check, production job classification, or production environment settings). It also covers removing or weakening a pin of this section, its pin test, or the required check that runs the test.
+- **Everything else is the agent's:** in any repository the owner owns, every non-production change (including `dev_env` outside the self-guard), staging and canary deploy, release tag, rule text, skill, gate/release code, and required-check edit. Before merging gate or release code, an independent read-only reviewer inspects the head SHA and states whether the gate gets stricter, equal or looser. A looser edit in the self-guard follows the self-guard.
+- **Every other hold is a defect:** a rule, skill, label or gate holding non-production work for the owner is a defect. Do the work, then fix the hold. `ws_owner_scope` fails on it.
 
 # AGENTS.md
 
@@ -114,6 +114,8 @@ integration automatically).
   so the stacked branch does not show `CONFLICTING`/`DIRTY` against `main`.
 - **Merge authority is the owner's standing grant recorded at the workspace
   layer**; once this repo's own gate holds (`MERGEABLE` within 24 hours of
-  `main`, CI green, Copilot threads addressed, squash/rebase only), the agent
-  merges. A merge that reaches a production deployment is a production change (Root section `Production reservation`).
+  `main`, CI green, unresolved review score `< 1.0` with Copilot optional per
+  `prr` skill, squash/rebase only), the agent merges. A merge that reaches a
+  production deployment is a production change (Root section `Production
+  reservation`).
 <!-- WS_STATIC_END -->
